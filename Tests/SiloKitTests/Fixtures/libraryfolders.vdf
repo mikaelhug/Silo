@@ -1,0 +1,24 @@
+"libraryfolders"
+{
+	"0"
+	{
+		"path"		"/Users/mikael/Library/Application Support/Steam"
+		"label"		""
+		"contentid"		"123456789"
+		"totalsize"		"0"
+		"apps"
+		{
+			"220"		"6845413587"
+			"570"		"50000000000"
+		}
+	}
+	"1"
+	{
+		"path"		"/Volumes/Games/SteamLibrary"
+		"label"		"Games SSD"
+		"apps"
+		{
+			"440"		"25000000000"
+		}
+	}
+}
