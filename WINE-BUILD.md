@@ -44,6 +44,17 @@ It belongs as a **Release asset** (`gh release`), which is exactly where `Silo.w
 - **GPTK / D3DMetal is NEVER built or bundled here** — it's Apple-licensed; the user imports it from
   their own GPTK `.dmg` (login-gated) via `GPTKImporter`. This workflow produces **Wine only**.
 
+## Keeping Wine current with CrossOver (automatic)
+`.github/workflows/wine-autoupdate.yml` runs weekly (and on demand). It reads the latest CrossOver
+version from the Homebrew `crossover` cask API (`formulae.brew.sh/api/cask/crossover.json` — the same
+number CrossOver publishes its source tarball under), checks the source tarball exists, and if we
+haven't already published a `wine-cx-<version>` release, it calls `build-wine.yml` to build + publish
+it. So new CrossOver releases get picked up with no manual work.
+
+**App side:** the Wine tab lists the latest `wine-cx-*` releases from `Silo.wineRepo`; a newly
+published build shows up there with an Install button (already-installed versions show "Installed"),
+so users can update on their own schedule.
+
 ## Status / caveats
 - Building Wine for macOS is intricate and slow (~30+ min) and **the workflow needs CI iteration to
   converge — it is not yet validated end-to-end.** Until the first `wine-*` release is published, the

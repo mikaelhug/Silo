@@ -16,11 +16,19 @@ on:
   workflow_dispatch:
     inputs:
       crossover_version:
-        description: "CrossOver source version, e.g. 25.0.1 (must exist at media.codeweavers.com/pub/crossover/source/)"
+        description: "CrossOver source version, e.g. 26.2.0 (must exist at media.codeweavers.com/pub/crossover/source/)"
         required: true
       release_tag:
-        description: "Release tag to publish, e.g. wine-cx-25.0.1"
+        description: "Release tag to publish, e.g. wine-cx-26.2.0"
         required: true
+  workflow_call:   # invoked by wine-autoupdate.yml when a new CrossOver version appears
+    inputs:
+      crossover_version:
+        required: true
+        type: string
+      release_tag:
+        required: true
+        type: string
 
 permissions:
   contents: write
