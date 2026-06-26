@@ -163,6 +163,23 @@ struct ViewModelTests {
         #expect(defaulted?.name == "Wine-9.0")
     }
 
+    @Test("openSteam launches steam.exe with CEF crash-workaround flags")
+    func openSteam() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        let env = AppEnvironment(
+            paths: AppPaths(supportDir: tmp.url.appendingPathComponent("Silo")), runner: fake)
+        env.backendSettings.config.masterBottlePath = URL(fileURLWithPath: "/b")
+        env.backendSettings.config.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+
+        await env.openSteam()
+        let call = try #require(fake.invocations.last { $0.detached })
+        #expect(call.arguments.first?.hasSuffix("steam.exe") == true)
+        #expect(call.arguments.contains("-cef-disable-gpu"))
+        #expect(call.arguments.contains("-cef-force-32bit"))
+        #expect(call.environment["WINEPREFIX"] == "/b")
+    }
+
     @Test("AppEnvironment bootstraps from persisted config")
     func appEnvironment() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

@@ -1,0 +1,61 @@
+name: Build Wine (CrossOver base)
+
+# Self-reliant Wine pipeline: build the CrossOver-based Wine that Apple's GPTK / D3DMetal expects,
+# from open source, and publish it to this repo's Releases so the app never depends on a third-party
+# prebuilt that may go stale. See WINE-BUILD.md.
+#
+# NOTE: building Wine for macOS is intricate and slow (~30+ min); this recipe will need CI iteration
+# to converge and is NOT yet validated end-to-end. It is intentionally manual (workflow_dispatch).
+# D3DMetal is NOT built here — it is imported by the app from the user's Apple GPTK .dmg.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. wine-cx-24.0.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rosetta 2 (GPTK Wine is x86_64)
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Set up x86_64 Homebrew
+        run: |
+          # Apple's game-porting-toolkit formula compiles CrossOver's Wine; it needs x86_64 brew.
+          arch -x86_64 /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' || true
+          test -x /usr/local/bin/brew
+
+      - name: Build CrossOver-base Wine via Apple's GPTK formula
+        run: |
+          set -eo pipefail
+          arch -x86_64 /usr/local/bin/brew tap apple/apple https://github.com/apple/homebrew-apple
+          arch -x86_64 /usr/local/bin/brew install apple/apple/game-porting-toolkit
+          # Resolve the installed wine prefix (the CrossOver-base Wine, without D3DMetal).
+          WINE_PREFIX=$(arch -x86_64 /usr/local/bin/brew --prefix game-porting-toolkit)
+          echo "WINE_PREFIX=$WINE_PREFIX" >> "$GITHUB_ENV"
+          test -x "$WINE_PREFIX/bin/wine64"
+
+      - name: Package wine.tar.xz
+        run: |
+          set -eo pipefail
+          mkdir -p dist/wine
+          # Copy the wine tree (bin/lib/share) — resolve Cellar symlinks so the archive is standalone.
+          cp -RL "$WINE_PREFIX/bin" "$WINE_PREFIX/lib" "$WINE_PREFIX/share" dist/wine/ 2>/dev/null || cp -RL "$WINE_PREFIX/." dist/wine/
+          tar -C dist -cJf dist/wine.tar.xz wine
+          ls -la dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          files: dist/wine.tar.xz
+          body: "CrossOver-based Wine built from open source (see WINE-BUILD.md). Pair with Apple GPTK (D3DMetal) imported from the .dmg."
