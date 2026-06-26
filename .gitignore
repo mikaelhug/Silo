@@ -8,8 +8,10 @@ dist/
 *.app
 *.zip
 
-## Large binaries (GPTK DMG used for local import testing, etc.)
+## Large binaries — never commit; ship Wine/GPTK as Release assets, not in git
 *.dmg
+*.tar.xz
+.wine-build/
 
 ## macOS
 .DS_Store
