@@ -88,7 +88,9 @@ struct ViewModelTests {
 
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let vm = BackendSettingsViewModel(
-            config: BackendConfig(), resolver: BackendResolver(), configStore: ConfigStore(paths: paths))
+            config: BackendConfig(), resolver: BackendResolver(), configStore: ConfigStore(paths: paths),
+            steamInstaller: SteamBottleInstaller(runner: FakeProcessRunner(), session: FakeURLProtocol.makeSession()),
+            paths: paths)
 
         var propagated: BackendConfig?
         vm.onChange = { propagated = $0 }

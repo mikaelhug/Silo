@@ -3,8 +3,10 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M14 — One-click Master Steam bottle install (next). Building the 4 one-click
-  setup features (M13–M16) requested 2026-06-26. M0–M13 done.
+- **Milestone:** M15 — Import GPTK from Apple `.dmg` (next). M0–M14 done.
+- **Pivot (user, 2026-06-26):** GPTK acquisition is NOT a 1-click GitHub fetch. Apple ships GPTK as a
+  `.dmg`; Silo offers "Browse to .dmg" then mounts + extracts the needed content. Test DMG at repo
+  root: `Game_Porting_Toolkit_4.0_beta_1.dmg` (gitignored).
 
 ## Research findings (2026-06-26, grounds M13–M16)
 - `apple/game-porting-toolkit` is a **resources repo, no binary releases**; official GPTK = a DMG
@@ -30,8 +32,7 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M14 — One-click Master Steam bottle install · accept: `SteamBottleInstallerTests`
-- M15 — One-click GPTK fetch · accept: `RuntimeManager`/VM GPTK asset tests
+- M15 — Import GPTK from Apple `.dmg` (browse → mount → extract wine+D3DMetal) · accept: `GPTKImporterTests`
 - M16 — Install entire library after login · accept: `OwnedAppsReaderTests`, `SteamLibraryInstallerTests`
 
 ### DONE
@@ -49,6 +50,7 @@
 - M11 — `Resources/{Info.plist.template,silo.entitlements (no sandbox)}` + `Scripts/{build-app,sign,run,dev,clean}.sh`; assembles + ad-hoc signs `dist/Silo.app`, strips quarantine. Verified bundle valid + bundled binary smoke-runs.
 - M12 — `.github/workflows/{ci,release}.yml` (build+test+bundle on push/PR; tag → ad-hoc-signed Silo.zip release) + README (build, first-run setup, sandbox, legal).
 - M13 — App icon: CoreGraphics generator (`Scripts/make-icon.swift`) + `make-icon.sh` (sips/iconutil) -> `Resources/AppIcon.icns`; wired via `CFBundleIconFile`; bundled by build-app.sh.
+- M14 — `SteamBottleInstaller` (boot bottle → download SteamSetup.exe → silent `/S` install) + `BackendConfig.steamWine` (vanilla fallback) + AppPaths.masterBottleDefault; "Create Master Steam Bottle (1-click)" button + VM; 4 tests.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.

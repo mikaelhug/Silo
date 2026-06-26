@@ -8,6 +8,9 @@ dist/
 *.app
 *.zip
 
+## Large binaries (GPTK DMG used for local import testing, etc.)
+*.dmg
+
 ## macOS
 .DS_Store
 

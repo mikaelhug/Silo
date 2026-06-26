@@ -18,6 +18,16 @@ struct BackendSettingsView: View {
             Section("Master Steam bottle") {
                 PathPickerRow(title: "Bottle folder (parent of drive_c)",
                               url: $vm.config.masterBottlePath, chooseDirectories: true)
+                Button {
+                    Task { await vm.installSteamBottle() }
+                } label: {
+                    Label("Create Master Steam Bottle (1-click)", systemImage: "shippingbox")
+                }
+                .disabled(vm.isInstallingBottle)
+                if vm.isInstallingBottle { ProgressView().controlSize(.small) }
+                Text("Boots a simple Wine bottle and silently installs the Steam client. "
+                     + "Afterwards, open Steam, log in, and download games.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Wine / GPTK") {
@@ -25,6 +35,8 @@ struct BackendSettingsView: View {
                               url: $vm.config.wineBinaryPath, chooseDirectories: false)
                 PathPickerRow(title: "CrossOver wine (fallback)",
                               url: $vm.config.crossoverWinePath, chooseDirectories: false)
+                PathPickerRow(title: "Steam-bottle wine (vanilla; optional)",
+                              url: $vm.config.steamWineBinaryPath, chooseDirectories: false)
                 PathPickerRow(title: "GPTK / D3DMetal lib dir",
                               url: $vm.config.gptkLibDirPath, chooseDirectories: true)
                 PathPickerRow(title: "DXVK DLL dir",
