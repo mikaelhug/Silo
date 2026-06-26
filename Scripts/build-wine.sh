@@ -46,9 +46,10 @@ if [ -e "$WORK/install/bin/wine" ] && [ ! -e "$WORK/install/bin/wine64" ]; then
   ( cd "$WORK/install/bin" && ln -s wine wine64 )
 fi
 ( cd "$WORK/install" && tar -cJf "$ROOT/dist/wine.tar.xz" . )
-echo "Built: $ROOT/dist/wine.tar.xz"
+( cd "$ROOT/dist" && shasum -a 256 wine.tar.xz > wine.tar.xz.sha256 )   # app verifies this before extracting
+echo "Built: $ROOT/dist/wine.tar.xz (+ .sha256)"
 echo
-echo "Publish it as a Release asset (NOT committed to git):"
-echo "  gh release create $TAG \"$ROOT/dist/wine.tar.xz\" -t \"$TAG\" -n \"CrossOver Wine $VER (FOSS source build)\""
+echo "Publish BOTH as Release assets (NOT committed to git):"
+echo "  gh release create $TAG \"$ROOT/dist/wine.tar.xz\" \"$ROOT/dist/wine.tar.xz.sha256\" -t \"$TAG\" -n \"CrossOver Wine $VER (FOSS source build)\""
 echo "or if the release already exists:"
-echo "  gh release upload $TAG \"$ROOT/dist/wine.tar.xz\""
+echo "  gh release upload $TAG \"$ROOT/dist/wine.tar.xz\" \"$ROOT/dist/wine.tar.xz.sha256\""
