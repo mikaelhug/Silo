@@ -30,4 +30,8 @@ public enum Silo {
     /// Launch flags that keep the Steam client's CEF web helper from black-screening/crashing under
     /// Wine (a well-known GPTK issue). Applied when opening Steam in the Master bottle.
     public static let steamLaunchArgs = ["-allosarches", "-cef-force-32bit", "-cef-disable-gpu"]
+
+    /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
+    /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
+    public static let winePrefixInitOverrides = "mscoree,mshtml="
 }

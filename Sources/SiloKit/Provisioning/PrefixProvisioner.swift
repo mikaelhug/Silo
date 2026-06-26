@@ -61,7 +61,9 @@ public actor PrefixProvisioner {
         let result = try await runner.run(
             executable: wineBinary,
             arguments: ["wineboot", "--init"],
-            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all"],
+            // Disable mono/gecko so first-run wineboot doesn't hang on install dialogs.
+            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all",
+                          "WINEDLLOVERRIDES": Silo.winePrefixInitOverrides],
             currentDirectory: nil
         )
         guard result.succeeded else {

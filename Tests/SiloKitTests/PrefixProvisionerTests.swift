@@ -36,6 +36,7 @@ struct PrefixProvisionerTests {
         #expect(fake.lastInvocation?.executable == wine)
         #expect(fake.lastInvocation?.arguments == ["wineboot", "--init"])
         #expect(fake.lastInvocation?.environment["WINEPREFIX"] == prefix.path)
+        #expect(fake.lastInvocation?.environment["WINEDLLOVERRIDES"] == "mscoree,mshtml=")  // no mono/gecko hang
         #expect(await provisioner.isProvisioned(appID: 220))
     }
 

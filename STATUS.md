@@ -3,7 +3,15 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M26 COMPLETE.** 120 tests / 24 suites green.
+- **M0–M27 COMPLETE.** 120 tests / 24 suites green. CI is **green** (was failing every run on the
+  test.sh empty-array bug, now fixed). main pushed through M26.
+- M27 (bug: "Install Steam does nothing"): first-run `wineboot` was hanging on blocking wine-mono/
+  wine-gecko install dialogs. Now `wineboot` (SteamBottleInstaller + PrefixProvisioner) sets
+  `WINEDLLOVERRIDES=mscoree,mshtml=` (`Silo.winePrefixInitOverrides`) so it completes headlessly.
+  Verified: the user's wine-cx-26.2.0 boots a home-dir prefix cleanly with the override.
+- **KNOWN (build follow-up):** the locally-built wine logs "cannot find the FreeType font library" —
+  the self-built wine depends on Homebrew dylibs (freetype/gstreamer/…) not bundled/relocated, so it's
+  not fully self-contained. Prefix creation still works; fonts won't render until deps are bundled.
 - CI FIX: `Scripts/test.sh` crashed on the runner (bash 3.2 + `set -u` + empty `FLAGS` array →
   "unbound variable"); now guards the empty-array expansion. (This was failing every CI run.)
 - M26 = game artwork: `SteamApp.headerArtURL` (Steam CDN header.jpg); GameCardView shows the cover
@@ -29,7 +37,9 @@
 - PERF (deferred per user — say "do perf"): msync default-on (esync/msync mutually-exclusive enum);
   DXMT backend; rosettax87 fast x86; DXVK install path (the `.crossover` backend is unreachable on a clean install).
 - HUMAN-GATED: notarization in release.yml (needs your Apple Developer ID + secrets).
-- NICE-TO-HAVE: game artwork (Steam grid/hero from CDN or librarycache); pin GitHub Actions by commit SHA.
+- BUILD COMPLETENESS: bundle/relocate the wine's dependent dylibs (freetype, gstreamer, gnutls, sdl2…)
+  in build-wine so the runtime is self-contained (currently logs "cannot find FreeType"); or document brew deps.
+- NICE-TO-HAVE: pin GitHub Actions by commit SHA (clears Node-20 deprecation notice).
 - All other audit findings (correctness, robustness, UX) are DONE (M21–M24). Wine sourcing architecture settled (see
   WINE-BUILD.md): self-hosted CrossOver-based Wine built in our own CI (`build-wine.yml`,
   workflow_dispatch) → published to our Releases → app pulls from `Silo.wineRepo` (= mikaelhug/Silo);
