@@ -3,12 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M8 — BackendResolver + SteamPresenceInstaller (next)
+- **Milestone:** M9 — RuntimeManager + Updater (next)
 
 ## Build/test snapshot
-- `swift build`: ✅ clean (M7)
-- `swift test`:  ✅ 63 tests / 14 suites passing (run via `Scripts/test.sh`)
-- Last green commit: M7 LaunchOrchestrator
+- `swift build`: ✅ clean (M8)
+- `swift test`:  ✅ 73 tests / 16 suites passing (run via `Scripts/test.sh`)
+- Last green commit: M8 resolver + presence installer
 
 ## Task board
 
@@ -16,7 +16,6 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M8 — BackendResolver + SteamPresenceInstaller · accept: `BackendResolverTests`, `SteamPresenceInstallerTests`
 - M9 — RuntimeManager + Updater · accept: `RuntimeManagerTests`, `UpdaterTests` (FakeURLProtocol)
 - M10 — ViewModels + SwiftUI views · accept: `swift run silo` shows window; VM unit tests
 - M11 — Build scripts + .app bundle · accept: `Scripts/run.sh` launches `dist/Silo.app`
@@ -31,6 +30,7 @@
 - M5 — `ProcessRunning` protocol + `ProcessResult` + `SystemProcessRunner` (temp-file redirect, env merge, detached spawn) + `FakeProcessRunner` (lock-guarded); 8 tests incl real subprocesses.
 - M6 — `PrefixLayout`, `PrefixProvisioner` actor (idempotent wineboot --init), `GraphicsLinker` (symlink/copy GPTK or DXVK into system32); 9 tests. Note: Sendable structs use computed `FileManager.default` (can't store non-Sendable); actors may store it.
 - M7 — `LaunchPlan`, pure `LaunchOrchestrator.makePlan` (static; isolated WINEPREFIX, backend env, DXVK overrides), `launch` pipeline (provision→link→log→spawn), `ExecutableResolver`, `GameLogStore`; GameConfig gained `executableRelativePath`; 12 tests.
+- M8 — `BackendResolver` (Whisky/Kegworks/CrossOver detection, .none on clean machine) + `SteamPresenceInstaller` (none/appIDFile/sharedClient/emulatorStub with backup+revert), wired into launch pipeline; 10 tests.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
@@ -40,6 +40,7 @@
 
 ## Known follow-ups (non-blocking)
 - DiscoveryEngine skips Windows-style (`C:\...`) library paths in `libraryfolders.vdf`; only host-absolute (`/...`) extra libraries are scanned. In the single-downloader model games land in the primary C: library (always scanned), so this is sufficient for v1. Add Wine `dosdevices` drive-letter translation if cross-drive libraries are needed.
+- `.sharedSteamClient` presence symlinks the master Steam into the prefix but does not yet launch a background `steam.exe` inside the prefix; full live-client wiring is a launch-time follow-up (most DRM cases use `.emulatorStub`).
 
 ## BLOCKED
 - _(none)_
