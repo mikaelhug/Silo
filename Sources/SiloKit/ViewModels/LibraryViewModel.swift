@@ -11,6 +11,7 @@ public final class LibraryViewModel {
     public private(set) var games: [SteamApp] = []
     public private(set) var loadState: LoadState = .idle
     public private(set) var busyAppIDs: Set<Int> = []
+    public private(set) var isQueueingInstalls = false
     public var searchText: String = ""
     public var statusMessage: String?
 
@@ -18,6 +19,8 @@ public final class LibraryViewModel {
     private let orchestrator: LaunchOrchestrator
     private let configStore: ConfigStore
     private let provisioner: PrefixProvisioner
+    private let ownedReader: OwnedAppsReader
+    private let libraryInstaller: SteamLibraryInstaller
     private var backend: BackendConfig
 
     public init(
@@ -25,12 +28,16 @@ public final class LibraryViewModel {
         orchestrator: LaunchOrchestrator,
         configStore: ConfigStore,
         provisioner: PrefixProvisioner,
+        libraryInstaller: SteamLibraryInstaller,
+        ownedReader: OwnedAppsReader = OwnedAppsReader(),
         backend: BackendConfig
     ) {
         self.discovery = discovery
         self.orchestrator = orchestrator
         self.configStore = configStore
         self.provisioner = provisioner
+        self.libraryInstaller = libraryInstaller
+        self.ownedReader = ownedReader
         self.backend = backend
     }
 
@@ -40,8 +47,33 @@ public final class LibraryViewModel {
     }
 
     public var canLaunch: Bool { backend.isWineConfigured }
+    public var canInstallLibrary: Bool { backend.isMasterBottleConfigured && backend.steamWine != nil }
 
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
+
+    /// One-click: queue downloads in Steam for every owned game (Steam must be running + logged in).
+    public func installEntireLibrary() async {
+        guard !isQueueingInstalls else { return }
+        guard let bottle = backend.masterBottlePath, let steamRoot = backend.steamRoot else {
+            statusMessage = "Configure the Master Steam bottle first."
+            return
+        }
+        isQueueingInstalls = true
+        defer { isQueueingInstalls = false }
+
+        let owned = ownedReader.ownedAppIDs(steamRoot: steamRoot)
+        guard !owned.isEmpty else {
+            statusMessage = "No owned games found. Open Steam and log in first."
+            return
+        }
+        do {
+            let count = try await libraryInstaller.queueInstalls(
+                appIDs: owned, bottle: bottle, wine: backend.steamWine)
+            statusMessage = "Queued \(count) games for download. Confirm/monitor in the Steam client."
+        } catch {
+            statusMessage = "Install all failed: \(Self.message(for: error))"
+        }
+    }
 
     public func refresh() async {
         guard let steamRoot = backend.steamRoot else {

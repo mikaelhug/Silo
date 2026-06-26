@@ -30,6 +30,7 @@ struct ViewModelTests {
                                              linker: GraphicsLinker(), logStore: logStore),
             configStore: ConfigStore(paths: paths),
             provisioner: provisioner,
+            libraryInstaller: SteamLibraryInstaller(runner: runner),
             backend: backend)
     }
 
