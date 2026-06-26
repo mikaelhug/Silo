@@ -8,12 +8,18 @@ public final class RuntimeViewModel {
     public var repo: String
     public var statusMessage: String?
     public var isBusy = false
+    public private(set) var isImportingGPTK = false
 
     private let manager: RuntimeManager
+    private let gptkImporter: GPTKImporter
 
-    public init(manager: RuntimeManager, repo: String) {
+    /// Called after a successful GPTK import so the backend config can adopt the new lib dir.
+    public var onGPTKImported: ((GPTKImporter.Result) -> Void)?
+
+    public init(manager: RuntimeManager, repo: String, gptkImporter: GPTKImporter) {
         self.manager = manager
         self.repo = repo
+        self.gptkImporter = gptkImporter
     }
 
     public func refreshInstalled() async {
@@ -39,6 +45,22 @@ public final class RuntimeViewModel {
             statusMessage = "Installed \(asset.name)."
         } catch {
             statusMessage = "Install failed: \((error as NSError).localizedDescription)"
+        }
+    }
+
+    /// Import GPTK from a user-selected Apple `.dmg` (mount → extract `redist/lib`).
+    public func importGPTK(from dmgURL: URL) async {
+        guard !isImportingGPTK else { return }
+        isImportingGPTK = true
+        defer { isImportingGPTK = false }
+        statusMessage = "Importing GPTK from \(dmgURL.lastPathComponent)…"
+        do {
+            let result = try await gptkImporter.importGPTK(fromDMG: dmgURL)
+            await refreshInstalled()
+            onGPTKImported?(result)
+            statusMessage = "Imported GPTK. D3DMetal libraries ready and set as the GPTK lib dir."
+        } catch {
+            statusMessage = "GPTK import failed: \((error as NSError).localizedDescription)"
         }
     }
 
