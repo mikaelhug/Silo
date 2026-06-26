@@ -3,7 +3,11 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M25 COMPLETE.** 120 tests / 24 suites green.
+- **M0–M26 COMPLETE.** 120 tests / 24 suites green.
+- CI FIX: `Scripts/test.sh` crashed on the runner (bash 3.2 + `set -u` + empty `FLAGS` array →
+  "unbound variable"); now guards the empty-array expansion. (This was failing every CI run.)
+- M26 = game artwork: `SteamApp.headerArtURL` (Steam CDN header.jpg); GameCardView shows the cover
+  via AsyncImage with a gradient placeholder fallback.
 - M25 (Wine Manager fixes from user report): `locateWineBinary` now excludes directories, so GPTK
   installs (`lib/wine` dir) no longer masquerade as Wine in the Wine tab; Wine tab simplified to a
   single "Install latest Wine" (dropped the broken multi-version refresh — CI publishes the canonical

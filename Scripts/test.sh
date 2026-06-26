@@ -20,4 +20,11 @@ if [ -d "$LIB" ]; then
   FLAGS+=(-Xlinker -rpath -Xlinker "$LIB")
 fi
 
-exec swift test "${FLAGS[@]}" "$@"
+# Expand FLAGS only when non-empty: under `set -u` on bash 3.2 (the macOS/CI default shell),
+# "${FLAGS[@]}" on an empty array errors as "unbound variable". With full Xcode FLAGS is empty
+# and plain `swift test` resolves Swift Testing natively.
+if [ "${#FLAGS[@]}" -gt 0 ]; then
+  exec swift test "${FLAGS[@]}" "$@"
+else
+  exec swift test "$@"
+fi

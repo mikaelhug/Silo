@@ -10,7 +10,21 @@ struct GameCardView: View {
     var body: some View {
         let busy = env.library.busyAppIDs.contains(game.appID)
         let running = env.library.isRunning(game)
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
+            AsyncImage(url: game.headerArtURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                case .empty:
+                    artPlaceholder.overlay(ProgressView().controlSize(.small))
+                default:
+                    artPlaceholder
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92)
+            .clipped()
+
+            VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(game.name).font(.headline).lineLimit(1)
                 Spacer()
@@ -69,10 +83,18 @@ struct GameCardView: View {
                     .fixedSize()
                 }
             }
+            }
+            .padding()
         }
-        .padding()
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .help(env.library.canLaunch ? "" : "Configure a Wine backend to launch games.")
+    }
+
+    private var artPlaceholder: some View {
+        LinearGradient(colors: [Color.indigo.opacity(0.55), Color.cyan.opacity(0.45)],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(Image(systemName: "gamecontroller.fill").font(.title2).foregroundStyle(.white.opacity(0.7)))
     }
 
     static func byteString(_ bytes: Int64) -> String {

@@ -44,6 +44,11 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
     public var isFullyInstalled: Bool { stateFlags.isFullyInstalled }
     public var needsUpdate: Bool { stateFlags.needsUpdate }
 
+    /// Steam CDN header artwork (460×215) for the game card. Public, no auth.
+    public var headerArtURL: URL? {
+        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appID)/header.jpg")
+    }
+
     /// Download progress in `0...1` while a download is active, else `nil`.
     public var downloadProgress: Double? {
         guard let total = bytesToDownload, total > 0, let done = bytesDownloaded else { return nil }
