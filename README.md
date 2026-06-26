@@ -54,19 +54,19 @@ an ad-hoc-signed `Silo.zip` via `.github/workflows/release.yml`.
 ## First-run setup (the human-gated part)
 
 Silo builds and tests fully on a clean machine, but launching a real game needs a runtime + a
-downloaded game:
+downloaded game. On first run the **Library** shows a guided 3-step setup:
 
-1. **Wine Manager** — two tabs:
-   - *Wine* — install a prebuilt Wine build in one click (lists the latest releases).
-   - *GPTK* — "Import GPTK from Apple .dmg…": Silo mounts the DMG and extracts the D3DMetal layer.
-   Set a default in each tab. (GPTK is only the graphics layer — it needs a Wine binary underneath,
-   which the Wine tab provides.)
-2. **Master Steam bottle** — in *Setup*, click "Create Master Steam Bottle (1-click)" (or point at an
-   existing bottle). Then open Steam, log in, and download games — or use **Install entire library**.
-3. **Play** — Silo discovers the game; **Isolate** seeds its prefix, **Play** launches it in GPTK
-   (CrossOver fallback) in an isolated `WINEPREFIX`. Use *Settings* per game for backend, env flags,
-   executable, and Steam-presence strategy; *View Log* to see output. (Manual wine/DXVK paths live
-   under *Setup → Advanced*.)
+1. **Install Wine** — one click; downloads a prebuilt Wine build (~250 MB).
+2. **Import Game Porting Toolkit** — choose Apple's GPTK `.dmg`; Silo mounts it and extracts the
+   D3DMetal layer. (GPTK is only the graphics layer — it needs the Wine binary from step 1.)
+3. **Install Steam** — creates the Master Steam bottle and installs Steam. Then **Open Steam** (the
+   Steam card in the Library), log in, and download games — or use **Install entire library**.
+
+After setup, the Library shows a **Steam card** plus your games. **Play** launches a game in GPTK
+(CrossOver fallback) in an isolated `WINEPREFIX`; per-game **Settings** cover backend, env flags,
+executable, and Steam-presence strategy; **View Log** shows output. Manage Wine/GPTK versions in the
+**Wine Manager** (Wine + GPTK tabs); manual wine/DXVK paths live behind the Library toolbar gear
+(**Advanced Settings**).
 
 > Gatekeeper: the app is ad-hoc signed, so a downloaded build is quarantined until you right-click →
 > Open (or run `xattr -dr com.apple.quarantine Silo.app`). Signed distribution requires an Apple

@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SidebarItem: Hashable {
-    case library, backend, wine, about
+    case library, wine, about
 }
 
 struct RootView: View {
@@ -13,7 +13,6 @@ struct RootView: View {
         } detail: {
             switch selection ?? .library {
             case .library: LibraryGridView()
-            case .backend: BackendSettingsView()
             case .wine: WineManagerView()
             case .about: AboutView()
             }
@@ -27,7 +26,6 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $selection) {
             Label("Library", systemImage: "square.grid.2x2").tag(SidebarItem.library)
-            Label("Setup", systemImage: "gearshape.2").tag(SidebarItem.backend)
             Label("Wine Manager", systemImage: "wineglass").tag(SidebarItem.wine)
             Label("About", systemImage: "info.circle").tag(SidebarItem.about)
         }
