@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: ./Scripts/test.sh
+
+      - name: Assemble app bundle
+        run: ./Scripts/build-app.sh
+
+      - name: Smoke-test the bundled binary
+        run: SILO_SMOKE=1 dist/Silo.app/Contents/MacOS/Silo
