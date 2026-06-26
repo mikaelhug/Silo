@@ -63,7 +63,8 @@ public actor PrefixProvisioner {
             arguments: ["wineboot", "--init"],
             // Disable mono/gecko so first-run wineboot doesn't hang on install dialogs.
             environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all",
-                          "WINEDLLOVERRIDES": Silo.winePrefixInitOverrides],
+                          "WINEDLLOVERRIDES": Silo.winePrefixInitOverrides,
+                          "DYLD_FALLBACK_LIBRARY_PATH": wineBinary.siloDyldFallback],
             currentDirectory: nil
         )
         guard result.succeeded else {

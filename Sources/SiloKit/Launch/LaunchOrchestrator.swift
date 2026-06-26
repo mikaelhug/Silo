@@ -46,6 +46,7 @@ public struct LaunchOrchestrator: Sendable {
 
         var environment = config.envFlags.environment(for: config.backend)
         environment["WINEPREFIX"] = prefix.path
+        environment["DYLD_FALLBACK_LIBRARY_PATH"] = wine.siloDyldFallback   // bundled deps (freetype, …)
         if environment["WINEDEBUG"] == nil { environment["WINEDEBUG"] = "-all" }
         if config.backend == .crossover {
             environment["WINEDLLOVERRIDES"] = mergeOverride(
@@ -97,7 +98,8 @@ public struct LaunchOrchestrator: Sendable {
         let log = (try? await logStore.prepare(appID: appID)) ?? logStore.logURL(forAppID: appID)
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: [tool],
-            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all"],
+            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all",
+                          "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback],
             currentDirectory: nil, logURL: log)
     }
 

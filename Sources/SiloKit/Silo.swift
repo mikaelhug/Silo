@@ -35,3 +35,17 @@ public enum Silo {
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
     public static let winePrefixInitOverrides = "mscoree,mshtml="
 }
+
+extension URL {
+    /// For a wine binary at `<root>/bin/wine[64]`, the bundled-dylib dir `<root>/lib/silo-bundled`
+    /// (populated by Scripts/bundle-wine-dylibs.sh so the runtime carries its own freetype/gstreamer/…).
+    public var siloBundledDylibDir: URL {
+        deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/silo-bundled", isDirectory: true)
+    }
+
+    /// `DYLD_FALLBACK_LIBRARY_PATH` value so wine resolves its bundled deps (by leaf name) then system libs.
+    public var siloDyldFallback: String {
+        "\(siloBundledDylibDir.path):/usr/local/lib:/usr/lib"
+    }
+}

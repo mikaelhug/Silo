@@ -39,6 +39,8 @@ else
 fi
 
 if find "$DEST" \( -name wine64 -o -name wine \) -type f 2>/dev/null | grep -q .; then
+  # Bundle its dependency dylibs (freetype/gstreamer/…) so it's self-contained, matching the CI build.
+  "$(dirname "$0")/bundle-wine-dylibs.sh" "$DEST" || echo "(warning: dylib bundling failed — wine may need Homebrew deps)"
   echo "Installed Wine '$NAME' for local testing:"
   echo "  $DEST"
   echo "Open Silo → Wine Manager → Wine tab → Set default."

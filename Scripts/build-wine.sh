@@ -39,6 +39,9 @@ $ARCH "$WORK/$WINE_SRC/configure" --prefix="$WORK/install" \
 $ARCH make -j"$(sysctl -n hw.ncpu)"
 $ARCH make install
 
+echo "==> Bundle dependency dylibs (self-contained runtime)"
+"$ROOT/Scripts/bundle-wine-dylibs.sh" "$WORK/install"
+
 echo "==> Package"
 mkdir -p "$ROOT/dist"
 # New WoW64 builds install a unified `wine`; add a wine64 alias for consumers expecting it.

@@ -98,6 +98,9 @@ jobs:
           $ARCH_PREFIX make install
           test -x "$GITHUB_WORKSPACE/wine-install/bin/wine64" || test -x "$GITHUB_WORKSPACE/wine-install/bin/wine"
 
+      - name: Bundle dependency dylibs (self-contained runtime)
+        run: ./Scripts/bundle-wine-dylibs.sh "$GITHUB_WORKSPACE/wine-install"
+
       - name: Package wine.tar.xz
         run: |
           set -eo pipefail

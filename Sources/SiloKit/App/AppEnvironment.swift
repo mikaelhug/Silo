@@ -111,7 +111,8 @@ public final class AppEnvironment {
         let log = paths.logsDir.appendingPathComponent("steam.log")
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: [steamExe.path] + Silo.steamLaunchArgs,
-            environment: ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all"],
+            environment: ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all",
+                          "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback],
             currentDirectory: nil, logURL: log)
     }
 
