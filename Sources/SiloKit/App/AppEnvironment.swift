@@ -46,7 +46,8 @@ public final class AppEnvironment {
             configStore: configStore, provisioner: provisioner, backend: initialBackend)
         self.library = library
         self.backendSettings = BackendSettingsViewModel(
-            config: initialBackend, resolver: BackendResolver(), configStore: configStore)
+            config: initialBackend, resolver: BackendResolver(), configStore: configStore,
+            steamInstaller: SteamBottleInstaller(runner: runner), paths: paths)
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.defaultRuntimeRepo)
 
         backendSettings.onChange = { [weak library] config in library?.updateBackend(config) }

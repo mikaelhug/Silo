@@ -8,6 +8,9 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var wineBinaryPath: URL?
     /// Fallback wine binary (CrossOver).
     public var crossoverWinePath: URL?
+    /// Wine binary used for the Master Steam bottle. Steam can be finicky under GPTK, so this may be
+    /// a vanilla wine; falls back to the game wine when unset.
+    public var steamWineBinaryPath: URL?
     /// Directory containing GPTK / D3DMetal libraries to inject into game prefixes.
     public var gptkLibDirPath: URL?
     /// Directory containing DXVK DLLs (`dxgi.dll`, `d3d11.dll`) for the CrossOver/DXVK backend.
@@ -23,6 +26,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         masterBottlePath: URL? = nil,
         wineBinaryPath: URL? = nil,
         crossoverWinePath: URL? = nil,
+        steamWineBinaryPath: URL? = nil,
         gptkLibDirPath: URL? = nil,
         dxvkDLLDirPath: URL? = nil,
         detectedSource: DetectedSource = .none
@@ -30,6 +34,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         self.masterBottlePath = masterBottlePath
         self.wineBinaryPath = wineBinaryPath
         self.crossoverWinePath = crossoverWinePath
+        self.steamWineBinaryPath = steamWineBinaryPath
         self.gptkLibDirPath = gptkLibDirPath
         self.dxvkDLLDirPath = dxvkDLLDirPath
         self.detectedSource = detectedSource
@@ -39,6 +44,9 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var steamRoot: URL? {
         masterBottlePath.map { DiscoveryEngine.steamRoot(inBottle: $0) }
     }
+
+    /// Wine binary for the Master Steam bottle (vanilla preferred; falls back to game wine).
+    public var steamWine: URL? { steamWineBinaryPath ?? wineBinaryPath ?? crossoverWinePath }
 
     /// Whether games can be launched (a wine binary is set).
     public var isWineConfigured: Bool { wineBinaryPath != nil }
