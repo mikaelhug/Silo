@@ -43,7 +43,8 @@ public final class AppEnvironment {
         let initialBackend = BackendConfig()
         let library = LibraryViewModel(
             discovery: discovery, orchestrator: orchestrator,
-            configStore: configStore, provisioner: provisioner, backend: initialBackend)
+            configStore: configStore, provisioner: provisioner,
+            libraryInstaller: SteamLibraryInstaller(runner: runner), backend: initialBackend)
         self.library = library
         self.backendSettings = BackendSettingsViewModel(
             config: initialBackend, resolver: BackendResolver(), configStore: configStore,

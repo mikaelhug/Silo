@@ -12,6 +12,14 @@ struct LibraryGridView: View {
             .searchable(text: $library.searchText, placement: .toolbar, prompt: "Search games")
             .toolbar {
                 Button {
+                    Task { await library.installEntireLibrary() }
+                } label: {
+                    Label("Install entire library", systemImage: "square.and.arrow.down.on.square")
+                }
+                .disabled(library.isQueueingInstalls || !library.canInstallLibrary)
+                .help("Queue downloads in Steam for every owned game (Steam must be running + logged in).")
+
+                Button {
                     Task { await library.refresh() }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
