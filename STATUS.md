@@ -3,12 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M4 — AppPaths + ConfigStore + config models (next)
+- **Milestone:** M5 — ProcessRunning seam (next)
 
 ## Build/test snapshot
-- `swift build`: ✅ clean (M3)
-- `swift test`:  ✅ 30 tests / 6 suites passing (run via `Scripts/test.sh`)
-- Last green commit: M3 DiscoveryEngine
+- `swift build`: ✅ clean (M4)
+- `swift test`:  ✅ 37 tests / 7 suites passing (run via `Scripts/test.sh`)
+- Last green commit: M4 config + persistence
 
 ## Task board
 
@@ -16,7 +16,6 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M4 — AppPaths + ConfigStore + config models · accept: `ConfigStoreTests`
 - M5 — ProcessRunning seam · accept: `ProcessRunningTests` (FakeProcessRunner)
 - M6 — PrefixProvisioner + GraphicsLinker · accept: `PrefixProvisionerTests`, `GraphicsLinkerTests`
 - M7 — LaunchOrchestrator (makePlan pure + launch pipeline) · accept: `LaunchOrchestratorTests`
@@ -31,6 +30,7 @@
 - M1 — KeyValues tokenizer + parser + KVNode (`Discovery/{ACFTokenizer,KeyValuesParser,KVNode}.swift`; 14 parser/tokenizer tests).
 - M2 — Models (`SteamApp`, `StateFlags`, `LibraryFolder`) + decoders (`AppManifestDecoder`, `LibraryFoldersDecoder`) + fixtures + `FixtureLoader`; 10 decoder tests.
 - M3 — `DiscoveryEngine` (actor): scans primary + extra libraries, skips bad manifests; `TempDir` helper; 5 tests.
+- M4 — Config models (`GraphicsBackend`, `SteamPresenceStrategy`, `EnvFlags`, `WineRuntime`, `BackendConfig`, `GameConfig`) + `AppPaths` + `AppState` + `ConfigStore` actor (JSON); 8 tests.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
