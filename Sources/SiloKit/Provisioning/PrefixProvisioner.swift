@@ -1,0 +1,68 @@
+import Foundation
+
+/// Seeds and tracks per-game isolated Wine prefixes under the Prefixes dir.
+///
+/// `provision` is idempotent: it returns immediately if the prefix already looks booted (a
+/// `system.reg` and `drive_c` exist), otherwise it runs `wineboot --init` with `WINEPREFIX` pointed
+/// at the isolated prefix.
+public actor PrefixProvisioner {
+    private let runner: ProcessRunning
+    private let paths: AppPaths
+    private let fileManager: FileManager
+
+    public init(runner: ProcessRunning, paths: AppPaths, fileManager: FileManager = .default) {
+        self.runner = runner
+        self.paths = paths
+        self.fileManager = fileManager
+    }
+
+    public enum ProvisionStage: Sendable, Equatable {
+        case creatingDirectory, booting, done
+    }
+
+    public enum ProvisionError: Error, Sendable, Equatable {
+        case wineNotConfigured
+        case winebootFailed(exitCode: Int32)
+    }
+
+    public nonisolated func prefixURL(forAppID appID: Int) -> URL {
+        paths.prefix(forAppID: appID)
+    }
+
+    public func isProvisioned(appID: Int) -> Bool {
+        let layout = PrefixLayout(prefix: paths.prefix(forAppID: appID))
+        return fileManager.fileExists(atPath: layout.systemReg.path)
+            && fileManager.fileExists(atPath: layout.driveC.path)
+    }
+
+    @discardableResult
+    public func provision(
+        appID: Int,
+        wineBinary: URL?,
+        progress: (@Sendable (ProvisionStage) -> Void)? = nil
+    ) async throws -> URL {
+        let prefix = paths.prefix(forAppID: appID)
+        if isProvisioned(appID: appID) {
+            progress?(.done)
+            return prefix
+        }
+        guard let wineBinary else { throw ProvisionError.wineNotConfigured }
+
+        progress?(.creatingDirectory)
+        try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
+
+        progress?(.booting)
+        let result = try await runner.run(
+            executable: wineBinary,
+            arguments: ["wineboot", "--init"],
+            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all"],
+            currentDirectory: nil
+        )
+        guard result.succeeded else {
+            throw ProvisionError.winebootFailed(exitCode: result.exitCode)
+        }
+
+        progress?(.done)
+        return prefix
+    }
+}
