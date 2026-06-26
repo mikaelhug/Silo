@@ -1,18 +1,25 @@
-name: Build Wine (CrossOver base)
+name: Build Wine (CrossOver source)
 
-# Self-reliant Wine pipeline: build the CrossOver-based Wine that Apple's GPTK / D3DMetal expects,
-# from open source, and publish it to this repo's Releases so the app never depends on a third-party
-# prebuilt that may go stale. See WINE-BUILD.md.
+# Self-reliant Wine pipeline: build CrossOver's Wine from CrossOver's own FOSS source (LGPL, the same
+# base Apple's GPTK is built from) and publish it to this repo's Releases, so the app never depends on
+# a third-party prebuilt that may go stale. See WINE-BUILD.md.
 #
-# NOTE: building Wine for macOS is intricate and slow (~30+ min); this recipe will need CI iteration
-# to converge and is NOT yet validated end-to-end. It is intentionally manual (workflow_dispatch).
-# D3DMetal is NOT built here — it is imported by the app from the user's Apple GPTK .dmg.
+# We do NOT bundle GPTK / D3DMetal — that is Apple-licensed and the user imports it from their own
+# GPTK .dmg in the app. This workflow produces Wine only.
+#
+# CAVEAT: building Wine for macOS is intricate, slow (compiles LLVM/Clang; ~30–60 min) and the exact
+# dependencies/flags vary per CrossOver version. This recipe is a faithful starting point that will
+# need iteration against real CI logs — it is intentionally manual (workflow_dispatch) and not yet
+# validated end-to-end.
 
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag to publish, e.g. wine-cx-24.0.1"
+      crossover_version:
+        description: "CrossOver source version, e.g. 25.0.1 (must exist at media.codeweavers.com/pub/crossover/source/)"
+        required: true
+      release_tag:
+        description: "Release tag to publish, e.g. wine-cx-25.0.1"
         required: true
 
 permissions:
@@ -21,41 +28,63 @@ permissions:
 jobs:
   build:
     runs-on: macos-14
+    env:
+      # CrossOver is x86_64 (runs on Apple Silicon via Rosetta); build the x86_64 Wine.
+      ARCH_PREFIX: "arch -x86_64"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rosetta 2 (GPTK Wine is x86_64)
+      - name: Install Rosetta 2
         run: softwareupdate --install-rosetta --agree-to-license || true
 
-      - name: Set up x86_64 Homebrew
-        run: |
-          # Apple's game-porting-toolkit formula compiles CrossOver's Wine; it needs x86_64 brew.
-          arch -x86_64 /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' || true
-          test -x /usr/local/bin/brew
-
-      - name: Build CrossOver-base Wine via Apple's GPTK formula
+      - name: Build dependencies (x86_64 Homebrew)
         run: |
           set -eo pipefail
-          arch -x86_64 /usr/local/bin/brew tap apple/apple https://github.com/apple/homebrew-apple
-          arch -x86_64 /usr/local/bin/brew install apple/apple/game-porting-toolkit
-          # Resolve the installed wine prefix (the CrossOver-base Wine, without D3DMetal).
-          WINE_PREFIX=$(arch -x86_64 /usr/local/bin/brew --prefix game-porting-toolkit)
-          echo "WINE_PREFIX=$WINE_PREFIX" >> "$GITHUB_ENV"
-          test -x "$WINE_PREFIX/bin/wine64"
+          # x86_64 Homebrew under Rosetta so deps match the x86_64 Wine we build.
+          $ARCH_PREFIX /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' || true
+          BREW=/usr/local/bin/brew
+          $ARCH_PREFIX $BREW install bison mingw-w64 freetype gnutls gstreamer sdl2 molten-vk cmake || true
+          echo "BREW=$BREW" >> "$GITHUB_ENV"
+
+      - name: Fetch CrossOver source
+        run: |
+          set -eo pipefail
+          VER="${{ inputs.crossover_version }}"
+          URL="https://media.codeweavers.com/pub/crossover/source/crossover-sources-${VER}.tar.gz"
+          echo "Downloading $URL"
+          curl -fL "$URL" -o crossover-sources.tar.gz
+          mkdir -p src && tar -xzf crossover-sources.tar.gz -C src
+          # The tarball contains a wine source tree (path varies by version: sources/wine or wine).
+          WINE_SRC=$(find src -maxdepth 3 -type d -name wine | head -1)
+          test -n "$WINE_SRC"
+          echo "WINE_SRC=$WINE_SRC" >> "$GITHUB_ENV"
+
+      - name: Configure + build Wine (wow64, x86_64)
+        run: |
+          set -eo pipefail
+          export PATH="$($ARCH_PREFIX $BREW --prefix bison)/bin:$PATH"
+          mkdir -p build wine-install
+          cd build
+          # Single wow64 tree (32+64-bit PE) — adjust flags per CrossOver version as CI reveals.
+          $ARCH_PREFIX "$GITHUB_WORKSPACE/$WINE_SRC/configure" \
+            --prefix="$GITHUB_WORKSPACE/wine-install" \
+            --enable-archs=i386,x86_64 \
+            --disable-tests --without-x \
+            --with-freetype --with-gstreamer --with-gnutls
+          $ARCH_PREFIX make -j"$(sysctl -n hw.ncpu)"
+          $ARCH_PREFIX make install
+          test -x "$GITHUB_WORKSPACE/wine-install/bin/wine64" || test -x "$GITHUB_WORKSPACE/wine-install/bin/wine"
 
       - name: Package wine.tar.xz
         run: |
           set -eo pipefail
-          mkdir -p dist/wine
-          # Copy the wine tree (bin/lib/share) — resolve Cellar symlinks so the archive is standalone.
-          cp -RL "$WINE_PREFIX/bin" "$WINE_PREFIX/lib" "$WINE_PREFIX/share" dist/wine/ 2>/dev/null || cp -RL "$WINE_PREFIX/." dist/wine/
-          tar -C dist -cJf dist/wine.tar.xz wine
-          ls -la dist
+          ( cd wine-install && tar -cJf "$GITHUB_WORKSPACE/wine.tar.xz" . )
+          ls -la wine.tar.xz
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag }}
-          name: ${{ inputs.tag }}
-          files: dist/wine.tar.xz
-          body: "CrossOver-based Wine built from open source (see WINE-BUILD.md). Pair with Apple GPTK (D3DMetal) imported from the .dmg."
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_tag }}
+          files: wine.tar.xz
+          body: "CrossOver Wine ${{ inputs.crossover_version }} built from CrossOver FOSS source (LGPL). Pair with Apple GPTK/D3DMetal imported from the .dmg in-app. See WINE-BUILD.md."
