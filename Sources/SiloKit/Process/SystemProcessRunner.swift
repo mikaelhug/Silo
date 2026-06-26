@@ -78,6 +78,7 @@ public struct SystemProcessRunner: ProcessRunning {
 
         let outHandle = try FileHandle(forWritingTo: outURL)
         let errHandle = try FileHandle(forWritingTo: errURL)
+        defer { try? outHandle.close(); try? errHandle.close() }   // also closes if process.run() throws
 
         let process = Process()
         process.executableURL = executable
@@ -89,8 +90,6 @@ public struct SystemProcessRunner: ProcessRunning {
 
         try process.run()
         process.waitUntilExit()
-        try? outHandle.close()
-        try? errHandle.close()
 
         let outData = (try? Data(contentsOf: outURL)) ?? Data()
         let errData = (try? Data(contentsOf: errURL)) ?? Data()
@@ -109,6 +108,7 @@ public struct SystemProcessRunner: ProcessRunning {
             fileManager.createFile(atPath: logURL.path, contents: nil)
         }
         let logHandle = try FileHandle(forWritingTo: logURL)
+        defer { try? logHandle.close() }   // also closes if process.run() throws
         logHandle.seekToEndOfFile()
 
         let process = Process()
@@ -123,8 +123,6 @@ public struct SystemProcessRunner: ProcessRunning {
         // signalled, so the game keeps running after Silo quits. The child dup's the log fd at spawn,
         // so closing our handle afterward is safe.
         try process.run()
-        let pid = process.processIdentifier
-        try? logHandle.close()
-        return pid
+        return process.processIdentifier
     }
 }

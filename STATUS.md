@@ -3,7 +3,21 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M20 COMPLETE.** 112 tests / 24 suites green. Wine sourcing architecture settled (see
+- **M0–M21 COMPLETE.** 114 tests / 24 suites green. M21 = post-review correctness hardening (3-agent
+  adversarial review). Fixed: emulator-stub re-apply data loss; process FD leak on launch failure;
+  Wine-tab release filter (app v* vs wine-* in same repo); GitHub API User-Agent header; wine64→wine
+  symlink in build packaging; LSMinimumSystemVersion 26.0→15.0; README self-update overclaim.
+  False positive caught: "library uses stale backend" (save()→onChange does propagate).
+
+## Review backlog (verified, not yet done — prioritized)
+- PERF (deferred per user): msync default-on (esync/msync mutually-exclusive enum); DXMT backend;
+  rosettax87 fast x86; DXVK install path (the `.crossover` backend is currently unreachable on a clean install).
+- UX: running/exited state + Stop button (PID is discarded today); wire `Updater` into UI (built+tested, unused);
+  auto-refresh library after Steam exits; exe **picker** (not a text field); live log tail; `lastPlayed` write+sort;
+  prefix management (reveal/winecfg/reset); installed/updates filter; game artwork.
+- ROBUSTNESS: RuntimeManager extraction cleanup on failure + correct `kind`; checksum/signature verify on
+  downloaded Wine; ad-hoc re-sign + de-quarantine extracted runtimes; CI `concurrency:` + ccache caching;
+  notarization in release.yml; pin Actions by SHA; reconcile Package `.v15` vs runners. Wine sourcing architecture settled (see
   WINE-BUILD.md): self-hosted CrossOver-based Wine built in our own CI (`build-wine.yml`,
   workflow_dispatch) → published to our Releases → app pulls from `Silo.wineRepo` (= mikaelhug/Silo);
   no third-party prebuilt dependency. D3DMetal still imported from Apple's `.dmg`. Steam launches with

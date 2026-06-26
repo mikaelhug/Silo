@@ -25,7 +25,7 @@ public struct Updater: Sendable {
 
     public func checkForUpdate() async throws -> UpdateCheck {
         let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await session.data(for: .github(url))
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw UpdateError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)
         }

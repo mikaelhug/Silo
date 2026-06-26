@@ -86,6 +86,10 @@ jobs:
       - name: Package wine.tar.xz
         run: |
           set -eo pipefail
+          # New WoW64 builds install a unified `wine`; add a wine64 alias for consumers expecting it.
+          if [ -e wine-install/bin/wine ] && [ ! -e wine-install/bin/wine64 ]; then
+            ( cd wine-install/bin && ln -s wine wine64 )
+          fi
           ( cd wine-install && tar -cJf "$GITHUB_WORKSPACE/wine.tar.xz" . )
           ls -la wine.tar.xz
 

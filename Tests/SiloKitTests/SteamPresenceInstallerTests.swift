@@ -47,6 +47,25 @@ struct SteamPresenceInstallerTests {
         #expect(!FileManager.default.fileExists(atPath: appid.path))             // created file removed
     }
 
+    @Test(".emulatorStub re-apply preserves the real original DLL backup (no data loss)")
+    func emulatorStubReapply() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let exe = try makeGame(tmp)
+        let dir = exe.deletingLastPathComponent()
+        try tmp.write("install/steam_api64.dll", "ORIGINAL")
+        let stub = try tmp.write("stub/steam_api64.dll", "GOLDBERG")
+
+        let r1 = try installer.apply(strategy: .emulatorStub, appID: 220, gameExe: exe, stubSource: stub)
+        _ = try installer.apply(strategy: .emulatorStub, appID: 220, gameExe: exe, stubSource: stub)  // re-apply
+
+        // The backup must still hold the REAL original (the bug overwrote it with the stub).
+        let backup = dir.appendingPathComponent("steam_api64.dll.silo-backup")
+        #expect(try String(contentsOf: backup, encoding: .utf8) == "ORIGINAL")
+        // And the first receipt still restores the real original.
+        try installer.revert(r1)
+        #expect(try String(contentsOf: dir.appendingPathComponent("steam_api64.dll"), encoding: .utf8) == "ORIGINAL")
+    }
+
     @Test(".emulatorStub without a stub path throws")
     func stubNotProvided() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

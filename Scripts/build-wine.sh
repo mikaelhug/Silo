@@ -41,6 +41,10 @@ $ARCH make install
 
 echo "==> Package"
 mkdir -p "$ROOT/dist"
+# New WoW64 builds install a unified `wine`; add a wine64 alias for consumers expecting it.
+if [ -e "$WORK/install/bin/wine" ] && [ ! -e "$WORK/install/bin/wine64" ]; then
+  ( cd "$WORK/install/bin" && ln -s wine wine64 )
+fi
 ( cd "$WORK/install" && tar -cJf "$ROOT/dist/wine.tar.xz" . )
 echo "Built: $ROOT/dist/wine.tar.xz"
 echo
