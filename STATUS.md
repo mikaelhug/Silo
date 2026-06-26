@@ -3,8 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M27 COMPLETE.** 120 tests / 24 suites green. CI is **green** (was failing every run on the
-  test.sh empty-array bug, now fixed). main pushed through M26.
+- **M0–M28 COMPLETE.** 120 tests / 24 suites green; CI green.
+- M28 (self-contained wine): `Scripts/bundle-wine-dylibs.sh` copies the transitive closure of wine's
+  non-system dylib deps (arch-filtered to the wine's arch — x86_64) into `<wine>/lib/silo-bundled`;
+  the app launches wine with `DYLD_FALLBACK_LIBRARY_PATH=<…>/lib/silo-bundled` (URL.siloDyldFallback)
+  so freetype/gstreamer/etc. resolve without Homebrew. Wired into build-wine (CI + local) + install-
+  local-wine. **VERIFIED**: wineboot with the app's exact env → 0 FreeType warnings, prefix boots.
 - M27 (bug: "Install Steam does nothing"): first-run `wineboot` was hanging on blocking wine-mono/
   wine-gecko install dialogs. Now `wineboot` (SteamBottleInstaller + PrefixProvisioner) sets
   `WINEDLLOVERRIDES=mscoree,mshtml=` (`Silo.winePrefixInitOverrides`) so it completes headlessly.
@@ -37,8 +41,8 @@
 - PERF (deferred per user — say "do perf"): msync default-on (esync/msync mutually-exclusive enum);
   DXMT backend; rosettax87 fast x86; DXVK install path (the `.crossover` backend is unreachable on a clean install).
 - HUMAN-GATED: notarization in release.yml (needs your Apple Developer ID + secrets).
-- BUILD COMPLETENESS: bundle/relocate the wine's dependent dylibs (freetype, gstreamer, gnutls, sdl2…)
-  in build-wine so the runtime is self-contained (currently logs "cannot find FreeType"); or document brew deps.
+- D3DMETAL PATH: ensure the injected GPTK d3d DLLs find D3DMetal.framework + libd3dshared at runtime
+  (separate from wine-deps bundling; needed for actual game rendering).
 - NICE-TO-HAVE: pin GitHub Actions by commit SHA (clears Node-20 deprecation notice).
 - All other audit findings (correctness, robustness, UX) are DONE (M21–M24). Wine sourcing architecture settled (see
   WINE-BUILD.md): self-hosted CrossOver-based Wine built in our own CI (`build-wine.yml`,
