@@ -3,12 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M1 — KeyValues tokenizer + parser + KVNode (next)
+- **Milestone:** M2 — Models + decoders (next)
 
 ## Build/test snapshot
-- `swift build`: ✅ clean (M0)
-- `swift test`:  ✅ 1 test / 1 suite passing (run via `Scripts/test.sh`)
-- Last green commit: M0 scaffold (see git log)
+- `swift build`: ✅ clean (M1)
+- `swift test`:  ✅ 15 tests / 3 suites passing (run via `Scripts/test.sh`)
+- Last green commit: M1 KeyValues parser
 
 ## Task board
 
@@ -16,7 +16,6 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M1 — KeyValues tokenizer + parser + KVNode · accept: `KeyValuesParserTests`, `ACFTokenizerTests`
 - M2 — Models + decoders · accept: `AppManifestDecoderTests`, `LibraryFoldersDecoderTests`
 - M3 — DiscoveryEngine · accept: `DiscoveryEngineTests`
 - M4 — AppPaths + ConfigStore + config models · accept: `ConfigStoreTests`
@@ -31,6 +30,7 @@
 
 ### DONE
 - M0 — Scaffold SPM project + harness docs (Package.swift, silo/SiloKit/SiloKitTests, CLAUDE.md, STATUS.md, README, .gitignore, Scripts/test.sh).
+- M1 — KeyValues tokenizer + parser + KVNode (`Discovery/{ACFTokenizer,KeyValuesParser,KVNode}.swift`; 14 parser/tokenizer tests).
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
