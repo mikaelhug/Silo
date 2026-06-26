@@ -48,7 +48,25 @@ public struct LaunchOrchestrator: Sendable {
         environment["WINEPREFIX"] = prefix.path
         environment["DYLD_FALLBACK_LIBRARY_PATH"] = wine.siloDyldFallback   // bundled deps (freetype, …)
         if environment["WINEDEBUG"] == nil { environment["WINEDEBUG"] = "-all" }
-        if config.backend == .crossover {
+
+        switch config.backend {
+        case .gptk:
+            // Activate Apple's GPTK/D3DMetal: load GPTK's builtin d3d modules (via WINEDLLPATH) and let
+            // them resolve D3DMetal.framework + libd3dshared.dylib from GPTK's lib/external on the DYLD
+            // fallback paths (the same mechanism the bundled-deps fix uses for freetype).
+            if let external = backend.gptkExternalDirPath {
+                environment["DYLD_FALLBACK_LIBRARY_PATH"] = "\(external.path):\(wine.siloDyldFallback)"
+                environment["DYLD_FALLBACK_FRAMEWORK_PATH"] = external.path
+            }
+            if let dllDir = backend.gptkWineDLLDirPath {
+                environment["WINEDLLPATH"] = [dllDir.path, environment["WINEDLLPATH"]]
+                    .compactMap { $0 }.joined(separator: ":")
+                environment["WINEDLLOVERRIDES"] = mergeOverride(
+                    environment["WINEDLLOVERRIDES"],
+                    "d3d9,d3d10,d3d10core,d3d10_1,d3d11,d3d12,d3d12core,dxgi=b"
+                )
+            }
+        case .crossover:
             environment["WINEDLLOVERRIDES"] = mergeOverride(
                 environment["WINEDLLOVERRIDES"], "d3d9,d3d10core,d3d11,dxgi=n"
             )
