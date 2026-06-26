@@ -126,13 +126,33 @@ public actor RuntimeManager {
             arguments: ["-xf", archive.path, "-C", dest.path],
             environment: [:], currentDirectory: nil
         )
-        guard result.succeeded else { throw RuntimeError.extractionFailed(result.exitCode) }
+        guard result.succeeded else {
+            try? fileManager.removeItem(at: dest)   // don't leave a half-extracted runtime behind
+            throw RuntimeError.extractionFailed(result.exitCode)
+        }
 
-        return WineRuntime(name: name, installPath: dest, kind: .gptk)
+        // Downloaded Wine is unsigned and may be quarantined → Gatekeeper blocks it. Strip quarantine
+        // and ad-hoc re-sign so it launches on a clean Mac.
+        await harden(dest, reSign: true)
+        return WineRuntime(name: name, installPath: dest, kind: .vanilla)
     }
 
     public func remove(name: String) throws {
         let dir = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
         if fileManager.fileExists(atPath: dir.path) { try fileManager.removeItem(at: dir) }
+    }
+
+    /// De-quarantine (and optionally ad-hoc re-sign) an extracted runtime tree so macOS will run it.
+    func harden(_ dir: URL, reSign: Bool) async {
+        _ = try? await runner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/xattr"),
+            arguments: ["-dr", "com.apple.quarantine", dir.path],
+            environment: [:], currentDirectory: nil)
+        if reSign {
+            _ = try? await runner.run(
+                executable: URL(fileURLWithPath: "/usr/bin/codesign"),
+                arguments: ["--force", "--sign", "-", "--deep", dir.path],
+                environment: [:], currentDirectory: nil)
+        }
     }
 }

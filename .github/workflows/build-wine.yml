@@ -33,17 +33,31 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  # One build per CrossOver version; don't cancel an in-flight ~45-min build.
+  group: wine-build-${{ inputs.crossover_version }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-14
+    timeout-minutes: 120
     env:
       # CrossOver is x86_64 (runs on Apple Silicon via Rosetta); build the x86_64 Wine.
       ARCH_PREFIX: "arch -x86_64"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rosetta 2
         run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Cache ccache (speeds up repeat builds)
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-wine-${{ inputs.crossover_version }}
+          restore-keys: ccache-wine-
 
       - name: Build dependencies (x86_64 Homebrew)
         run: |
@@ -51,7 +65,7 @@ jobs:
           # x86_64 Homebrew under Rosetta so deps match the x86_64 Wine we build.
           $ARCH_PREFIX /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' || true
           BREW=/usr/local/bin/brew
-          $ARCH_PREFIX $BREW install bison mingw-w64 freetype gnutls gstreamer sdl2 molten-vk cmake || true
+          $ARCH_PREFIX $BREW install bison mingw-w64 freetype gnutls gstreamer sdl2 molten-vk cmake ccache || true
           echo "BREW=$BREW" >> "$GITHUB_ENV"
 
       - name: Fetch CrossOver source
@@ -70,10 +84,11 @@ jobs:
       - name: Configure + build Wine (wow64, x86_64)
         run: |
           set -eo pipefail
-          export PATH="$($ARCH_PREFIX $BREW --prefix bison)/bin:$PATH"
+          export PATH="$($ARCH_PREFIX $BREW --prefix ccache)/libexec:$($ARCH_PREFIX $BREW --prefix bison)/bin:$PATH"
           mkdir -p build wine-install
           cd build
           # Single wow64 tree (32+64-bit PE) — adjust flags per CrossOver version as CI reveals.
+          # ccache (PATH-shimmed above) caches object files across runs to speed repeat builds.
           $ARCH_PREFIX "$GITHUB_WORKSPACE/$WINE_SRC/configure" \
             --prefix="$GITHUB_WORKSPACE/wine-install" \
             --enable-archs=i386,x86_64 \

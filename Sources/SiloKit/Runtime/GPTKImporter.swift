@@ -97,6 +97,12 @@ public struct GPTKImporter: Sendable {
             if fileManager.fileExists(atPath: destLib.path) { try fileManager.removeItem(at: destLib) }
             try fileManager.copyItem(at: redistLib, to: destLib)
 
+            // Strip quarantine so the libs load; do NOT re-sign (preserve Apple's D3DMetal signature).
+            _ = try? await runner.run(
+                executable: URL(fileURLWithPath: "/usr/bin/xattr"),
+                arguments: ["-dr", "com.apple.quarantine", installDir.path],
+                environment: [:], currentDirectory: nil)
+
             await detachAll(mounted)
             progress?(.done)
             return Result(

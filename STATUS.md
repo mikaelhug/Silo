@@ -3,7 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M22 COMPLETE.** 116 tests / 24 suites green. M22 = launch feedback + UX wins: Running/exited
+- **M0–M23 COMPLETE.** 117 tests / 24 suites green. M23 = audit robustness + UX: downloaded Wine is
+  de-quarantined + ad-hoc re-signed (Gatekeeper), extraction cleans up on failure; GPTK de-quarantined
+  (no re-sign — keeps Apple's signature); live log tail; library recently-played sort + installed/updates
+  filter; prefix management (reveal / Wine config / reset); CI concurrency + ccache + timeouts + read perms.
+  **Perf levers (msync default, DXMT, rosettax87, DXVK install) still deferred — say "do perf" to start.**
+
+- M22 = launch feedback + UX wins: Running/exited
   state + Stop button (`ProcessRunning.isRunning`, `LaunchOrchestrator.stop` via `wineserver -k`,
   `LibraryViewModel` PID monitor); `lastPlayed` stamped; `Updater` wired (bootstrap check → About
   "Update available"); exe **picker** in GameSettingsSheet (`ExecutableResolver.allExecutables`);
@@ -12,11 +18,9 @@
 ## Review backlog (verified, prioritized — remaining)
 - PERF (deferred per user): msync default-on (esync/msync mutually-exclusive enum); DXMT backend;
   rosettax87 fast x86; DXVK install path (the `.crossover` backend is currently unreachable on a clean install).
-- UX: live log tail (viewer is one-shot read); `lastPlayed` sort + filter (now stamped, not yet sorted on);
-  prefix management (reveal/winecfg/reset); installed/updates filter; game artwork.
-- ROBUSTNESS: RuntimeManager extraction cleanup on failure + correct `kind`; checksum/signature verify on
-  downloaded Wine; ad-hoc re-sign + de-quarantine extracted runtimes; CI `concurrency:` + ccache caching;
-  notarization in release.yml; pin Actions by SHA. Wine sourcing architecture settled (see
+- UX: game artwork (Steam grid/hero from CDN or librarycache).
+- ROBUSTNESS: checksum/signature verify on downloaded Wine (publish wine.tar.xz.sha256 in build-wine,
+  verify in RuntimeManager); notarization in release.yml (needs Apple Developer ID secrets); pin Actions by SHA. Wine sourcing architecture settled (see
   WINE-BUILD.md): self-hosted CrossOver-based Wine built in our own CI (`build-wine.yml`,
   workflow_dispatch) → published to our Releases → app pulls from `Silo.wineRepo` (= mikaelhug/Silo);
   no third-party prebuilt dependency. D3DMetal still imported from Apple's `.dmg`. Steam launches with
@@ -78,6 +82,7 @@
 - M16 — `OwnedAppsReader` (parse userdata/*/config/localconfig.vdf owned appids) + `SteamLibraryInstaller` (queue `steam://install/<appid>` per owned app via wine); LibraryVM.installEntireLibrary + "Install entire library" toolbar button; localconfig.vdf fixture; 6 tests.
 - M17 — GPTK Manager: versioned installs (`Runtimes/GPTK-<version>` from DMG name) via `GPTKImporter.runtimeName/installed/remove`; `GPTKInstall` model; `BackendConfig.gptkRuntimeName`; `GPTKManagerViewModel` (import/remove/set-default, auto-default on first import) + `GPTKManagerView` + sidebar "GPTK Manager". Moved GPTK import out of Wine Runtimes view. 5 new tests.
 - M18 — Wine Manager (`WineManagerView` segmented GPTK|Wine tabs): GPTK tab = `GPTKManagerView`; Wine tab = `WineDownloadView` driven by rewritten `RuntimeViewModel` (latest 3 Gcenx releases, 1-click install, set-default, remove). `WineInstall` model; `RuntimeManager.availableReleases/preferredAsset/installWine/installedWines/locateWineBinary`; `BackendConfig.wineRuntimeName`; `Silo.wineRepo` (Gcenx, .tar.xz ~250MB). Backend view → "Setup" with Advanced disclosure for manual paths; deleted RuntimeManagerView; sidebar Library/Setup/Wine Manager/About. 3 new tests (109 total).
+- M23 — Audit robustness+UX: RuntimeManager `harden` (xattr de-quarantine + ad-hoc codesign) + extraction cleanup; GPTKImporter de-quarantine; LogViewer live tail+autoscroll; LibraryViewModel SortOrder/Filter + lastPlayed map; PrefixProvisioner.remove + LaunchOrchestrator.runWineTool (winecfg) + GameCard prefix menu; CI concurrency/ccache/timeouts/read-perms; 3 tests (117 total).
 - M22 — Launch feedback + UX: `ProcessRunning.isRunning(pid:)` (kill(pid,0)); `LaunchOrchestrator.stop` (wineserver -k); `LibraryViewModel` runningPIDs + monitor + Stop + `lastPlayed`; Updater wired into AppEnvironment/About; exe picker (`ExecutableResolver.allExecutables`); scenePhase auto-refresh; 3 new tests (116 total).
 - M21 — Post-review correctness hardening (see git log).
 - M20 — Wine sourcing architecture: `Silo.wineRepo` → self-hosted `mikaelhug/Silo` (removed stale Gcenx `defaultRuntimeRepo`/`gptkRepo`); `WINE-BUILD.md` decision doc; `.github/workflows/build-wine.yml` (CI builds CrossOver-base Wine from open source → our Releases; workflow_dispatch, needs CI iteration). Steam launches with `Silo.steamLaunchArgs` CEF flags (`openSteam`). 1 new test (112 total). Perf (DXMT/rosettax87/msync) deferred.

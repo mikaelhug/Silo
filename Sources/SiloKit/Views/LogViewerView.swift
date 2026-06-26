@@ -9,19 +9,22 @@ struct LogViewerView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                Text(contents.isEmpty ? "No log yet." : contents)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(contents.isEmpty ? "No log yet." : contents)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                        Color.clear.frame(height: 1).id("logBottom")
+                    }
                     .padding()
+                }
+                .onChange(of: contents) { _, _ in proxy.scrollTo("logBottom", anchor: .bottom) }
             }
             .navigationTitle("\(game.name) — Log")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-                ToolbarItem {
-                    Button("Reload") { Task { contents = await env.readLog(for: game) } }
-                }
                 ToolbarItem {
                     Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([env.logURL(for: game)])
@@ -30,6 +33,12 @@ struct LogViewerView: View {
             }
         }
         .frame(width: 640, height: 420)
-        .task { contents = await env.readLog(for: game) }
+        .task {
+            // Live tail: re-read the log every second while the viewer is open (cancels on dismiss).
+            while !Task.isCancelled {
+                contents = await env.readLog(for: game)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
     }
 }
