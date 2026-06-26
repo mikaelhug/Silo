@@ -1,6 +1,4 @@
 import SwiftUI
-import AppKit
-import UniformTypeIdentifiers
 
 struct RuntimeManagerView: View {
     @Environment(AppEnvironment.self) private var env
@@ -8,21 +6,6 @@ struct RuntimeManagerView: View {
     var body: some View {
         @Bindable var vm = env.runtime
         Form {
-            Section("Game Porting Toolkit (D3DMetal)") {
-                Button {
-                    if let dmg = pickDMG() { Task { await vm.importGPTK(from: dmg) } }
-                } label: {
-                    Label("Import GPTK from Apple .dmg…", systemImage: "externaldrive.badge.plus")
-                }
-                .disabled(vm.isImportingGPTK)
-                if vm.isImportingGPTK { ProgressView().controlSize(.small) }
-                Link("Download GPTK from Apple (requires Apple ID)", destination: Silo.appleGPTKURL)
-                    .font(.caption)
-                Text("Silo mounts the .dmg and extracts the D3DMetal libraries. A wine binary is still "
-                     + "needed (CrossOver or a downloaded wine runtime below).")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
             Section("Installed runtimes") {
                 if vm.installed.isEmpty {
                     Text("None installed").foregroundStyle(.secondary)
@@ -68,15 +51,6 @@ struct RuntimeManagerView: View {
 
     static func byteString(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-    }
-
-    private func pickDMG() -> URL? {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.diskImage]
-        return panel.runModal() == .OK ? panel.url : nil
     }
 }
 

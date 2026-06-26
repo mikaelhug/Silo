@@ -13,6 +13,8 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var steamWineBinaryPath: URL?
     /// Directory containing GPTK / D3DMetal libraries to inject into game prefixes.
     public var gptkLibDirPath: URL?
+    /// Name of the default GPTK install (managed in the GPTK Manager).
+    public var gptkRuntimeName: String?
     /// Directory containing DXVK DLLs (`dxgi.dll`, `d3d11.dll`) for the CrossOver/DXVK backend.
     public var dxvkDLLDirPath: URL?
     /// How this config was discovered.
@@ -28,6 +30,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         crossoverWinePath: URL? = nil,
         steamWineBinaryPath: URL? = nil,
         gptkLibDirPath: URL? = nil,
+        gptkRuntimeName: String? = nil,
         dxvkDLLDirPath: URL? = nil,
         detectedSource: DetectedSource = .none
     ) {
@@ -36,6 +39,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         self.crossoverWinePath = crossoverWinePath
         self.steamWineBinaryPath = steamWineBinaryPath
         self.gptkLibDirPath = gptkLibDirPath
+        self.gptkRuntimeName = gptkRuntimeName
         self.dxvkDLLDirPath = dxvkDLLDirPath
         self.detectedSource = detectedSource
     }

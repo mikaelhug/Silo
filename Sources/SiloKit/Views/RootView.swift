@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SidebarItem: Hashable {
-    case library, backend, runtimes, about
+    case library, backend, runtimes, gptk, about
 }
 
 struct RootView: View {
@@ -15,6 +15,7 @@ struct RootView: View {
             case .library: LibraryGridView()
             case .backend: BackendSettingsView()
             case .runtimes: RuntimeManagerView()
+            case .gptk: GPTKManagerView()
             case .about: AboutView()
             }
         }
@@ -28,7 +29,8 @@ struct SidebarView: View {
         List(selection: $selection) {
             Label("Library", systemImage: "square.grid.2x2").tag(SidebarItem.library)
             Label("Backend & Runtime", systemImage: "gearshape.2").tag(SidebarItem.backend)
-            Label("Runtimes", systemImage: "arrow.down.circle").tag(SidebarItem.runtimes)
+            Label("Wine Runtimes", systemImage: "arrow.down.circle").tag(SidebarItem.runtimes)
+            Label("GPTK Manager", systemImage: "cube.box").tag(SidebarItem.gptk)
             Label("About", systemImage: "info.circle").tag(SidebarItem.about)
         }
         .navigationTitle(Silo.appName)

@@ -17,6 +17,7 @@ public final class AppEnvironment {
     public let library: LibraryViewModel
     public let backendSettings: BackendSettingsViewModel
     public let runtime: RuntimeViewModel
+    public let gptkManager: GPTKManagerViewModel
     public private(set) var didBootstrap = false
 
     public init(paths: AppPaths = .standard(), runner: ProcessRunning = SystemProcessRunner()) {
@@ -49,14 +50,14 @@ public final class AppEnvironment {
         self.backendSettings = BackendSettingsViewModel(
             config: initialBackend, resolver: BackendResolver(), configStore: configStore,
             steamInstaller: SteamBottleInstaller(runner: runner), paths: paths)
-        self.runtime = RuntimeViewModel(
-            manager: runtimeManager, repo: Silo.defaultRuntimeRepo,
-            gptkImporter: GPTKImporter(runner: runner, paths: paths))
+        self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.defaultRuntimeRepo)
+        self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
         backendSettings.onChange = { [weak library] config in library?.updateBackend(config) }
-        runtime.onGPTKImported = { [weak self] result in
+        gptkManager.onDefaultChanged = { [weak self] install in
             guard let self else { return }
-            self.backendSettings.config.gptkLibDirPath = result.gptkLibDir
+            self.backendSettings.config.gptkLibDirPath = install.gptkLibDir
+            self.backendSettings.config.gptkRuntimeName = install.name
             Task { await self.backendSettings.save() }
         }
     }
@@ -68,6 +69,8 @@ public final class AppEnvironment {
         let state = await configStore.load()
         backendSettings.config = state.backend
         library.updateBackend(state.backend)
+        gptkManager.defaultName = state.backend.gptkRuntimeName
+        gptkManager.refresh()
         await library.refresh()
         await runtime.refreshInstalled()
     }

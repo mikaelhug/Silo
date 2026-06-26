@@ -33,12 +33,44 @@ public struct GPTKImporter: Sendable {
         public let d3dMetalFramework: URL
     }
 
+    /// Derive a versioned runtime name from the DMG filename
+    /// (`Game_Porting_Toolkit_4.0_beta_1.dmg` → `GPTK-4.0_beta_1`).
+    public static func runtimeName(forDMG dmg: URL) -> String {
+        let base = dmg.deletingPathExtension().lastPathComponent
+        let prefix = "Game_Porting_Toolkit_"
+        if base.hasPrefix(prefix) { return "GPTK-\(base.dropFirst(prefix.count))" }
+        return base
+    }
+
+    /// GPTK versions already extracted under the Runtimes dir (dirs with the D3DMetal lib layout).
+    public func installed() -> [GPTKInstall] {
+        let fileManager = FileManager.default
+        guard let dirs = try? fileManager.contentsOfDirectory(
+            at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return dirs.compactMap { dir in
+            let libDir = dir.appendingPathComponent("lib/wine/x86_64-windows", isDirectory: true)
+            let framework = dir.appendingPathComponent("lib/external/D3DMetal.framework", isDirectory: true)
+            guard fileManager.fileExists(atPath: libDir.path),
+                  fileManager.fileExists(atPath: framework.path) else { return nil }
+            return GPTKInstall(name: dir.lastPathComponent, installDir: dir,
+                               gptkLibDir: libDir, d3dMetalFramework: framework)
+        }.sorted { $0.name < $1.name }
+    }
+
+    public func remove(name: String) throws {
+        let dir = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
+        if FileManager.default.fileExists(atPath: dir.path) {
+            try FileManager.default.removeItem(at: dir)
+        }
+    }
+
     @discardableResult
     public func importGPTK(
         fromDMG dmg: URL,
-        name: String = "GPTK",
+        name: String? = nil,
         progress: (@Sendable (Stage) -> Void)? = nil
     ) async throws -> Result {
+        let runtimeName = name ?? Self.runtimeName(forDMG: dmg)
         let fileManager = FileManager.default
         var mounted: [URL] = []
         do {
@@ -59,7 +91,7 @@ public struct GPTKImporter: Sendable {
             guard fileManager.fileExists(atPath: redistLib.path) else { throw ImportError.redistNotFound }
 
             progress?(.copying)
-            let installDir = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
+            let installDir = paths.runtimesDir.appendingPathComponent(runtimeName, isDirectory: true)
             let destLib = installDir.appendingPathComponent("lib", isDirectory: true)
             try fileManager.createDirectory(at: installDir, withIntermediateDirectories: true)
             if fileManager.fileExists(atPath: destLib.path) { try fileManager.removeItem(at: destLib) }
@@ -68,7 +100,7 @@ public struct GPTKImporter: Sendable {
             await detachAll(mounted)
             progress?(.done)
             return Result(
-                runtimeName: name,
+                runtimeName: runtimeName,
                 installDir: installDir,
                 gptkLibDir: destLib.appendingPathComponent("wine/x86_64-windows", isDirectory: true),
                 d3dMetalFramework: destLib.appendingPathComponent("external/D3DMetal.framework", isDirectory: true))

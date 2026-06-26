@@ -113,8 +113,7 @@ struct ViewModelTests {
         let runner = FakeProcessRunner()
         let vm = RuntimeViewModel(
             manager: RuntimeManager(paths: paths, runner: runner),
-            repo: "acme/gptk",
-            gptkImporter: GPTKImporter(runner: runner, paths: paths))
+            repo: "acme/gptk")
         await vm.refreshInstalled()
         #expect(vm.installed.map(\.name) == ["GPTK-2.1"])
     }
