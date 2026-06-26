@@ -22,12 +22,15 @@ dependency that can lag or disappear (Gcenx's GPTK repo is stale; Kegworks becam
 it in our own CI removes that dependency and lets us control the cadence.
 
 ## Pipeline
-- `.github/workflows/build-wine.yml` (manual `workflow_dispatch`) builds the CrossOver-base Wine on a
-  macOS runner, packages it as `wine.tar.xz`, and publishes it to a `wine-*` Release of this repo.
+- `.github/workflows/build-wine.yml` (manual `workflow_dispatch`, inputs: CrossOver version + release
+  tag) downloads **CrossOver's FOSS source** from CodeWeavers
+  (`media.codeweavers.com/pub/crossover/source/crossover-sources-<ver>.tar.gz`; mirror:
+  `PhoenicisOrg/winecx`), builds it (`configure --enable-archs=i386,x86_64 … && make`, x86_64 via
+  Rosetta — CrossOver is Intel code), packages `wine.tar.xz`, and publishes a `wine-*` Release.
 - The app's Wine tab / onboarding pulls Wine from `Silo.wineRepo` (= this repo). `RuntimeManager`
   downloads + extracts the tarball and `locateWineBinary` finds `bin/wine64`.
-- **D3DMetal stays separate**, imported from the user's Apple GPTK `.dmg` (login-gated, can't be
-  fetched in CI) via `GPTKImporter`. CI builds Wine only.
+- **GPTK / D3DMetal is NEVER built or bundled here** — it's Apple-licensed; the user imports it from
+  their own GPTK `.dmg` (login-gated) via `GPTKImporter`. This workflow produces **Wine only**.
 
 ## Status / caveats
 - Building Wine for macOS is intricate and slow (~30+ min) and **the workflow needs CI iteration to
