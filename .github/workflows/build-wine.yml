@@ -106,12 +106,15 @@ jobs:
             ( cd wine-install/bin && ln -s wine wine64 )
           fi
           ( cd wine-install && tar -cJf "$GITHUB_WORKSPACE/wine.tar.xz" . )
-          ls -la wine.tar.xz
+          shasum -a 256 wine.tar.xz > wine.tar.xz.sha256   # the app verifies this before extracting
+          ls -la wine.tar.xz wine.tar.xz.sha256
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag }}
           name: ${{ inputs.release_tag }}
-          files: wine.tar.xz
+          files: |
+            wine.tar.xz
+            wine.tar.xz.sha256
           body: "CrossOver Wine ${{ inputs.crossover_version }} built from CrossOver FOSS source (LGPL). Pair with Apple GPTK/D3DMetal imported from the .dmg in-app. See WINE-BUILD.md."

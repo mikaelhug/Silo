@@ -15,12 +15,12 @@
   "Update available"); exe **picker** in GameSettingsSheet (`ExecutableResolver.allExecutables`);
   library auto-refresh on app re-activation (scenePhase).
 
-## Review backlog (verified, prioritized — remaining)
-- PERF (deferred per user): msync default-on (esync/msync mutually-exclusive enum); DXMT backend;
-  rosettax87 fast x86; DXVK install path (the `.crossover` backend is currently unreachable on a clean install).
-- UX: game artwork (Steam grid/hero from CDN or librarycache).
-- ROBUSTNESS: checksum/signature verify on downloaded Wine (publish wine.tar.xz.sha256 in build-wine,
-  verify in RuntimeManager); notarization in release.yml (needs Apple Developer ID secrets); pin Actions by SHA. Wine sourcing architecture settled (see
+## Review backlog (remaining)
+- PERF (deferred per user — say "do perf"): msync default-on (esync/msync mutually-exclusive enum);
+  DXMT backend; rosettax87 fast x86; DXVK install path (the `.crossover` backend is unreachable on a clean install).
+- HUMAN-GATED: notarization in release.yml (needs your Apple Developer ID + secrets).
+- NICE-TO-HAVE: game artwork (Steam grid/hero from CDN or librarycache); pin GitHub Actions by commit SHA.
+- All other audit findings (correctness, robustness, UX) are DONE (M21–M24). Wine sourcing architecture settled (see
   WINE-BUILD.md): self-hosted CrossOver-based Wine built in our own CI (`build-wine.yml`,
   workflow_dispatch) → published to our Releases → app pulls from `Silo.wineRepo` (= mikaelhug/Silo);
   no third-party prebuilt dependency. D3DMetal still imported from Apple's `.dmg`. Steam launches with

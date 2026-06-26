@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import SiloKit
 
@@ -114,6 +115,39 @@ struct RuntimeManagerTests {
         // Downloaded wine is de-quarantined + ad-hoc re-signed so Gatekeeper allows it.
         #expect(fake.invocations.contains { $0.executable.lastPathComponent == "xattr" && $0.arguments.contains("com.apple.quarantine") })
         #expect(fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
+    }
+
+    @Test("installWine verifies a published SHA-256 and rejects a mismatch")
+    func checksum() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let archiveBytes = Data("ARCHIVE-BYTES".utf8)
+        let good = SHA256.hash(data: archiveBytes).map { String(format: "%02x", $0) }.joined()
+
+        // Matching digest → install succeeds.
+        let okURL = "https://e.com/ok/wine.tar.xz"
+        FakeURLProtocol.stub(okURL, data: archiveBytes)
+        FakeURLProtocol.stub(okURL + ".sha256", data: Data("\(good)  wine.tar.xz\n".utf8))
+        let fakeOK = FakeProcessRunner()
+        fakeOK.onRun = { inv in
+            if inv.executable.lastPathComponent == "tar",
+               let i = inv.arguments.firstIndex(of: "-C"), i + 1 < inv.arguments.count {
+                let bin = URL(fileURLWithPath: inv.arguments[i + 1]).appendingPathComponent("bin")
+                try? FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+                FileManager.default.createFile(atPath: bin.appendingPathComponent("wine64").path, contents: Data("x".utf8))
+            }
+        }
+        let mgrOK = makeManager(tmp, fakeOK, session: FakeURLProtocol.makeSession())
+        _ = try await mgrOK.installWine(name: "WineOK", from: URL(string: okURL)!)
+        #expect(await mgrOK.installedWines().map(\.name) == ["WineOK"])
+
+        // Wrong digest → checksumMismatch, nothing extracted.
+        let badURL = "https://e.com/bad/wine.tar.xz"
+        FakeURLProtocol.stub(badURL, data: archiveBytes)
+        FakeURLProtocol.stub(badURL + ".sha256", data: Data("deadbeef  wine.tar.xz\n".utf8))
+        let mgrBad = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
+        await #expect(throws: RuntimeManager.RuntimeError.self) {
+            try await mgrBad.installWine(name: "WineBad", from: URL(string: badURL)!)
+        }
     }
 
     @Test("locateWineBinary prefers wine64 under a bin directory")

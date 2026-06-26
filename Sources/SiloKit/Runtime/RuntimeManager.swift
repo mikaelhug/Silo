@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Downloads and manages Wine/GPTK runtimes under the Runtimes dir (Heroic-style), with zero
 /// dependency on Homebrew. Metadata + download use `URLSession`; extraction uses `tar` via the
@@ -25,6 +26,7 @@ public actor RuntimeManager {
         case badResponse(Int)
         case downloadFailed(Int)
         case extractionFailed(Int32)
+        case checksumMismatch(expected: String, actual: String)
     }
 
     /// Runtimes already extracted under the Runtimes dir.
@@ -118,6 +120,15 @@ public actor RuntimeManager {
         try fileManager.moveItem(at: tempFile, to: archive)
         defer { try? fileManager.removeItem(at: archive) }
 
+        // Supply-chain integrity: if a sibling <url>.sha256 exists, the archive must match before we
+        // extract + run ~250 MB of unsigned native code. Best-effort (skipped if no digest published).
+        if let expected = await expectedSHA256(for: downloadURL) {
+            let actual = Self.sha256(ofFileAt: archive)
+            guard actual == expected else {
+                throw RuntimeError.checksumMismatch(expected: expected, actual: actual)
+            }
+        }
+
         let dest = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
         try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
 
@@ -140,6 +151,27 @@ public actor RuntimeManager {
     public func remove(name: String) throws {
         let dir = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
         if fileManager.fileExists(atPath: dir.path) { try fileManager.removeItem(at: dir) }
+    }
+
+    /// Fetch the expected SHA-256 from a sibling `<url>.sha256` (shasum format: "<hex>  filename").
+    /// Returns nil if none is published (best-effort verification).
+    private func expectedSHA256(for downloadURL: URL) async -> String? {
+        let shaURL = downloadURL.appendingPathExtension("sha256")
+        guard let (data, response) = try? await session.data(from: shaURL),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        return text.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map { $0.lowercased() }
+    }
+
+    /// Streaming SHA-256 of a file (memory-safe for large archives).
+    static func sha256(ofFileAt url: URL) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// De-quarantine (and optionally ad-hoc re-sign) an extracted runtime tree so macOS will run it.
