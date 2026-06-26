@@ -18,11 +18,18 @@ public final class AppEnvironment {
     public let backendSettings: BackendSettingsViewModel
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
+    private let updater: Updater
+    public private(set) var updateCheck: Updater.UpdateCheck?
     public private(set) var didBootstrap = false
 
-    public init(paths: AppPaths = .standard(), runner: ProcessRunning = SystemProcessRunner()) {
+    public init(
+        paths: AppPaths = .standard(),
+        runner: ProcessRunning = SystemProcessRunner(),
+        updater: Updater = Updater()
+    ) {
         self.paths = paths
         self.runner = runner
+        self.updater = updater
 
         let configStore = ConfigStore(paths: paths)
         let provisioner = PrefixProvisioner(runner: runner, paths: paths)
@@ -79,6 +86,13 @@ public final class AppEnvironment {
         gptkManager.refresh()
         runtime.defaultName = state.backend.wineRuntimeName
         await runtime.refresh()
+        await library.refresh()
+        updateCheck = try? await updater.checkForUpdate()   // best-effort; nil on failure/offline
+    }
+
+    /// Re-scan the library (e.g. after returning from Steam). Quiet no-op if not set up.
+    public func refreshLibraryIfReady() async {
+        guard didBootstrap, setupComplete else { return }
         await library.refresh()
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// `Foundation.Process`-backed `ProcessRunning`.
 ///
@@ -51,6 +52,13 @@ public struct SystemProcessRunner: ProcessRunning {
                 }
             }
         }
+    }
+
+    public func isRunning(pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        // kill(pid, 0): 0 → alive & signalable; EPERM → alive but not ours; ESRCH → gone.
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
     }
 
     // MARK: - Synchronous workers (run on a background queue)

@@ -11,9 +11,12 @@ public final class LibraryViewModel {
     public private(set) var games: [SteamApp] = []
     public private(set) var loadState: LoadState = .idle
     public private(set) var busyAppIDs: Set<Int> = []
+    public private(set) var runningPIDs: [Int: Int32] = [:]   // appID → launched wine PID
     public private(set) var isQueueingInstalls = false
     public var searchText: String = ""
     public var statusMessage: String?
+
+    private var monitorTask: Task<Void, Never>?
 
     private let discovery: DiscoveryEngine
     private let orchestrator: LaunchOrchestrator
@@ -48,6 +51,8 @@ public final class LibraryViewModel {
 
     public var canLaunch: Bool { backend.isWineConfigured }
     public var canInstallLibrary: Bool { backend.isMasterBottleConfigured && backend.steamWine != nil }
+
+    public func isRunning(_ app: SteamApp) -> Bool { runningPIDs[app.appID] != nil }
 
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
 
@@ -103,14 +108,48 @@ public final class LibraryViewModel {
     }
 
     public func play(_ app: SteamApp) async {
-        await withBusy(app) {
-            let cfg = await self.configStore.load().config(for: app.appID)
-            _ = try await self.orchestrator.launch(app: app, config: cfg, backend: self.backend)
-            self.statusMessage = "Launched \(app.name)."
+        guard !busyAppIDs.contains(app.appID), runningPIDs[app.appID] == nil else { return }
+        busyAppIDs.insert(app.appID)
+        defer { busyAppIDs.remove(app.appID) }
+        do {
+            var cfg = await configStore.load().config(for: app.appID)
+            let pid = try await orchestrator.launch(app: app, config: cfg, backend: backend)
+            cfg.lastPlayed = Date()
+            _ = try? await configStore.saveGame(cfg)
+            runningPIDs[app.appID] = pid
+            statusMessage = "Launched \(app.name)."
+            startMonitor()
+        } catch {
+            statusMessage = "\(app.name): \(Self.message(for: error))"
         }
     }
 
+    /// Stop a running game (kills the wine processes in its prefix).
+    public func stop(_ app: SteamApp) async {
+        guard runningPIDs[app.appID] != nil else { return }
+        await orchestrator.stop(appID: app.appID, backend: backend)
+        runningPIDs[app.appID] = nil
+    }
+
     // MARK: - Helpers
+
+    /// Poll launched games; prune ones that have exited and refresh install state when they do.
+    private func startMonitor() {
+        guard monitorTask == nil else { return }
+        monitorTask = Task { [weak self] in
+            while true {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, !self.runningPIDs.isEmpty else { break }
+                let finished = self.runningPIDs.filter { !self.orchestrator.isRunning(pid: $0.value) }
+                if !finished.isEmpty {
+                    for appID in finished.keys { self.runningPIDs[appID] = nil }
+                    await self.refresh()
+                }
+                if self.runningPIDs.isEmpty { break }
+            }
+            self?.monitorTask = nil
+        }
+    }
 
     private func withBusy(_ app: SteamApp, _ work: () async throws -> Void) async {
         guard !busyAppIDs.contains(app.appID) else { return }

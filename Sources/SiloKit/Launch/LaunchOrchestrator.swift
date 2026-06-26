@@ -88,6 +88,18 @@ public struct LaunchOrchestrator: Sendable {
         )
     }
 
+    public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
+
+    /// Stop a game by killing every wine process in its isolated prefix (`wineserver -k`).
+    public func stop(appID: Int, backend: BackendConfig) async {
+        guard let wine = backend.wineBinary(for: .gptk) else { return }
+        let wineserver = wine.deletingLastPathComponent().appendingPathComponent("wineserver")
+        let prefix = provisioner.prefixURL(forAppID: appID)
+        _ = try? await runner.run(
+            executable: wineserver, arguments: ["-k"],
+            environment: ["WINEPREFIX": prefix.path], currentDirectory: nil)
+    }
+
     // MARK: - Helpers
 
     private func resolveExecutable(app: SteamApp, config: GameConfig) throws -> URL {

@@ -129,11 +129,12 @@ struct ViewModelTests {
             {"name":"wine.tar.xz","browser_download_url":"https://e.com/w.tar.xz","size":1}]}
         ]
         """
-        FakeURLProtocol.stub("https://api.github.com/repos/acme/wine/releases?per_page=15", data: Data(json.utf8))
+        // Distinct repo from other network tests (FakeURLProtocol's registry is shared across parallel tests).
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/winefilter/releases?per_page=15", data: Data(json.utf8))
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let vm = RuntimeViewModel(
             manager: RuntimeManager(paths: paths, runner: FakeProcessRunner(), session: FakeURLProtocol.makeSession()),
-            repo: "acme/wine")
+            repo: "acme/winefilter")
         await vm.fetchLatest()
         #expect(vm.latest.map(\.tagName) == ["wine-cx-26.2.0"])
     }
@@ -209,10 +210,54 @@ struct ViewModelTests {
         backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
         try await ConfigStore(paths: paths).saveBackend(backend)
 
-        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        // Inject a non-networking Updater so bootstrap's update check stays hermetic (no stub → nil).
+        let env = AppEnvironment(
+            paths: paths, runner: FakeProcessRunner(),
+            updater: Updater(repo: "x/y", session: FakeURLProtocol.makeSession()))
         await env.bootstrap()
         #expect(env.didBootstrap)
         #expect(env.backendSettings.config.detectedSource == .manual)
         #expect(env.library.canLaunch)
+        #expect(env.updateCheck == nil)
+    }
+
+    @Test("play() marks a game running; stop() clears it; lastPlayed is stamped")
+    func runningState() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let lib = try tmp.makeDir("lib")
+        try tmp.write("lib/steamapps/common/HL2/hl2.exe", "MZ")
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+
+        let fake = FakeProcessRunner()
+        let vm = makeLibrary(tmp, backend: backend, runner: fake)
+        let prefix = paths.prefix(forAppID: 220)
+        fake.onRun = { _ in   // simulate wineboot creating the prefix so provisioning succeeds
+            let layout = PrefixLayout(prefix: prefix)
+            try? FileManager.default.createDirectory(at: layout.driveC, withIntermediateDirectories: true)
+            try? "reg".write(to: layout.systemReg, atomically: true, encoding: .utf8)
+        }
+        let app = SteamApp(appID: 220, name: "HL2", installDir: "HL2",
+                           stateFlags: .fullyInstalled, sizeOnDisk: 1, libraryPath: lib)
+
+        await vm.play(app)
+        #expect(vm.isRunning(app))
+        #expect(vm.runningPIDs[220] == 4242)
+        #expect(await ConfigStore(paths: paths).load().config(for: 220).lastPlayed != nil)
+
+        await vm.stop(app)
+        #expect(!vm.isRunning(app))
+    }
+
+    @Test("ExecutableResolver.allExecutables lists exes shallowest-first")
+    func allExecutables() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let game = try tmp.makeDir("G")
+        try tmp.write("G/Game.exe", "x")
+        try tmp.write("G/redist/vcredist.exe", "x")
+        let list = ExecutableResolver.allExecutables(in: game)
+        #expect(list.first == "Game.exe")
+        #expect(list.contains("redist/vcredist.exe"))
     }
 }

@@ -35,11 +35,20 @@ struct SidebarView: View {
 }
 
 struct AboutView: View {
+    @Environment(AppEnvironment.self) private var env
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "shippingbox.fill").font(.system(size: 48)).foregroundStyle(.tint)
             Text(Silo.appName).font(.largeTitle.bold())
             Text("Version \(Silo.version)").foregroundStyle(.secondary)
+            if let update = env.updateCheck, update.isNewer {
+                if let url = update.downloadURL {
+                    Link("Update available: \(update.latestVersion)", destination: url)
+                        .font(.callout)
+                } else {
+                    Text("Update available: \(update.latestVersion)").font(.callout).foregroundStyle(.tint)
+                }
+            }
             Text("Isolated Wine/GPTK launcher for Windows Steam games.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             Text("Silo never bundles or downloads Wine, GPTK, or any Steam-API emulator.")
