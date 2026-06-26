@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Assemble dist/Silo.app from the SwiftPM release build (no Xcode required).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+APP_NAME="Silo"
+BIN_NAME="silo"
+CONFIG="release"
+APP="dist/$APP_NAME.app"
+
+VERSION=$(grep -m1 'static let version' Sources/SiloKit/Silo.swift | sed -E 's/.*"([^"]+)".*/\1/')
+VERSION=${VERSION:-0.1.0}
+BUILD=$(date +%Y%m%d%H%M)
+
+echo "==> swift build -c $CONFIG"
+swift build -c "$CONFIG"
+BIN_PATH=".build/$CONFIG/$BIN_NAME"
+
+echo "==> assembling $APP (v$VERSION build $BUILD)"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+cp "$BIN_PATH" "$APP/Contents/MacOS/$APP_NAME"
+
+sed -e "s/\${VERSION}/$VERSION/g" -e "s/\${BUILD}/$BUILD/g" \
+    Resources/Info.plist.template > "$APP/Contents/Info.plist"
+
+printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+# SwiftPM resource bundles (SiloKit has none today; copy any that appear later).
+shopt -s nullglob
+for bundle in ".build/$CONFIG"/*.bundle; do
+    cp -R "$bundle" "$APP/Contents/Resources/"
+done
+shopt -u nullglob
+
+[ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
+
+./Scripts/sign.sh "$APP"
+echo "==> Built $APP"

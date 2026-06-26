@@ -3,13 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M11 — Build scripts + .app bundle (next)
+- **Milestone:** M12 — CI + release workflows + README (next, final)
 
 ## Build/test snapshot
-- `swift build`: ✅ clean (M10, no warnings)
+- `swift build`: ✅ clean (no warnings)
 - `swift test`:  ✅ 88 tests / 19 suites passing (run via `Scripts/test.sh`)
-- `swift run silo --smoke`: ✅ links SwiftUI + runs headlessly
-- Last green commit: M10 SwiftUI UI
+- `Scripts/build-app.sh`: ✅ produces ad-hoc-signed `dist/Silo.app` (com.mikael.silo, min OS 26.0); bundled binary smoke-runs
+- Last green commit: M11 app-bundle scripts
 
 ## Task board
 
@@ -17,7 +17,6 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M11 — Build scripts + .app bundle · accept: `Scripts/run.sh` launches `dist/Silo.app`
 - M12 — CI + release workflows + README · accept: `ci.yml` defined; README handoff checklist
 
 ### DONE
@@ -32,6 +31,7 @@
 - M8 — `BackendResolver` (Whisky/Kegworks/CrossOver detection, .none on clean machine) + `SteamPresenceInstaller` (none/appIDFile/sharedClient/emulatorStub with backup+revert), wired into launch pipeline; 10 tests.
 - M9 — `GitHubRelease` model, `Updater` (GH Releases version check, numeric compare), `RuntimeManager` actor (list/fetch/download+tar-extract/remove); `FakeURLProtocol` test support; 9 tests. Note: Swift Testing runs in parallel — network tests use unique stub URLs (no shared-state reset).
 - M10 — `AppEnvironment` composition root + `SiloApp` (SwiftUI App); view models (`LibraryViewModel`, `BackendSettingsViewModel`, `GameSettingsViewModel`, `RuntimeViewModel`); views (Root/Sidebar/LibraryGrid/GameCard/Badge/BackendSettings/RuntimeManager/GameSettingsSheet/LogViewer/About/PathPickerRow); `silo --smoke` headless path; 7 VM tests.
+- M11 — `Resources/{Info.plist.template,silo.entitlements (no sandbox)}` + `Scripts/{build-app,sign,run,dev,clean}.sh`; assembles + ad-hoc signs `dist/Silo.app`, strips quarantine. Verified bundle valid + bundled binary smoke-runs.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
