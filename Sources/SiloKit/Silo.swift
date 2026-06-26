@@ -10,4 +10,11 @@ public enum Silo {
 
     /// User-facing product name.
     public static let appName = "Silo"
+
+    /// GitHub repo (`owner/name`) the in-app updater checks for new app releases.
+    public static let updateRepo = "mikaelhug/Silo"
+
+    /// Default third-party repo (`owner/name`) for downloadable Wine/GPTK runtimes.
+    /// Overridable in Settings. NOTE: confirm the exact repo/release to pin (see STATUS "BLOCKED").
+    public static let defaultRuntimeRepo = "Kegworks-App/Kegworks"
 }
