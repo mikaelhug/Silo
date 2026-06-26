@@ -37,6 +37,31 @@ struct GPTKImporterTests {
         #expect(GPTKImporter.mountPoint(fromPlist: Data("not a plist".utf8)) == nil)
     }
 
+    @Test("Derives a versioned runtime name from the DMG filename")
+    func nameDerivation() {
+        #expect(GPTKImporter.runtimeName(
+            forDMG: URL(fileURLWithPath: "/x/Game_Porting_Toolkit_4.0_beta_1.dmg")) == "GPTK-4.0_beta_1")
+        #expect(GPTKImporter.runtimeName(forDMG: URL(fileURLWithPath: "/x/custom.dmg")) == "custom")
+    }
+
+    @Test("Lists installed GPTK versions and removes them")
+    func installedAndRemove() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        // Two GPTK installs + one non-GPTK dir (should be ignored).
+        for name in ["GPTK-4.0", "GPTK-3.1"] {
+            try tmp.write("Silo/Runtimes/\(name)/lib/wine/x86_64-windows/d3d11.dll", "x")
+            try tmp.makeDir("Silo/Runtimes/\(name)/lib/external/D3DMetal.framework")
+        }
+        try tmp.write("Silo/Runtimes/wine-only/bin/wine64", "x")   // not a GPTK install
+
+        let importer = GPTKImporter(runner: FakeProcessRunner(), paths: paths)
+        #expect(importer.installed().map(\.name) == ["GPTK-3.1", "GPTK-4.0"])   // sorted, GPTK-only
+
+        try importer.remove(name: "GPTK-3.1")
+        #expect(importer.installed().map(\.name) == ["GPTK-4.0"])
+    }
+
     @Test("Imports from a nested-DMG layout (GPTK 4.x) and extracts redist/lib")
     func nestedImport() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
