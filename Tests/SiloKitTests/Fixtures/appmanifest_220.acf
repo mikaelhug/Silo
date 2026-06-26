@@ -1,0 +1,28 @@
+"AppState"
+{
+	"appid"		"220"
+	"Universe"		"1"
+	"name"		"Half-Life 2"
+	"StateFlags"		"4"
+	"installdir"		"Half-Life 2"
+	"LastUpdated"		"1659899091"
+	"SizeOnDisk"		"6845413587"
+	"StagingSize"		"0"
+	"buildid"		"6906421"
+	"LastOwner"		"76561197960287930"
+	"BytesToDownload"		"0"
+	"BytesDownloaded"		"0"
+	"AutoUpdateBehavior"		"0"
+	"UserConfig"
+	{
+		"language"		"english"
+	}
+	"InstalledDepots"
+	{
+		"221"
+		{
+			"manifest"		"5542120319706892650"
+			"size"		"4233258285"
+		}
+	}
+}

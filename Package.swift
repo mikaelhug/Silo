@@ -19,6 +19,7 @@ let package = Package(
         .testTarget(
             name: "SiloKitTests",
             dependencies: ["SiloKit"],
+            resources: [.copy("Fixtures")],   // sample .acf/.vdf + fake prefix trees
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

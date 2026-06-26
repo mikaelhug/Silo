@@ -3,12 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M2 — Models + decoders (next)
+- **Milestone:** M3 — DiscoveryEngine (next)
 
 ## Build/test snapshot
-- `swift build`: ✅ clean (M1)
-- `swift test`:  ✅ 15 tests / 3 suites passing (run via `Scripts/test.sh`)
-- Last green commit: M1 KeyValues parser
+- `swift build`: ✅ clean (M2)
+- `swift test`:  ✅ 25 tests / 5 suites passing (run via `Scripts/test.sh`)
+- Last green commit: M2 models + decoders
 
 ## Task board
 
@@ -16,7 +16,6 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M2 — Models + decoders · accept: `AppManifestDecoderTests`, `LibraryFoldersDecoderTests`
 - M3 — DiscoveryEngine · accept: `DiscoveryEngineTests`
 - M4 — AppPaths + ConfigStore + config models · accept: `ConfigStoreTests`
 - M5 — ProcessRunning seam · accept: `ProcessRunningTests` (FakeProcessRunner)
@@ -31,6 +30,7 @@
 ### DONE
 - M0 — Scaffold SPM project + harness docs (Package.swift, silo/SiloKit/SiloKitTests, CLAUDE.md, STATUS.md, README, .gitignore, Scripts/test.sh).
 - M1 — KeyValues tokenizer + parser + KVNode (`Discovery/{ACFTokenizer,KeyValuesParser,KVNode}.swift`; 14 parser/tokenizer tests).
+- M2 — Models (`SteamApp`, `StateFlags`, `LibraryFolder`) + decoders (`AppManifestDecoder`, `LibraryFoldersDecoder`) + fixtures + `FixtureLoader`; 10 decoder tests.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
