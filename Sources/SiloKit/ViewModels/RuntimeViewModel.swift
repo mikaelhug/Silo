@@ -1,15 +1,14 @@
 import Foundation
 
-/// Drives the Wine tab of the Wine Manager: lists the latest prebuilt Wine releases (Heroic-style),
-/// installs them one-click, and tracks the default Wine used to launch games.
+/// Drives the Wine tab of the Wine Manager: installs the latest prebuilt Wine from Silo's CI releases
+/// and tracks the default Wine used to launch games.
 @MainActor
 @Observable
 public final class RuntimeViewModel {
-    public private(set) var latest: [GitHubRelease] = []
     public private(set) var installed: [WineInstall] = []
     public var defaultName: String?
     public var statusMessage: String?
-    public private(set) var busyTag: String?     // tag currently installing
+    public private(set) var isInstalling = false
 
     private let manager: RuntimeManager
     private let repo: String
@@ -23,8 +22,6 @@ public final class RuntimeViewModel {
         self.defaultName = defaultName
     }
 
-    public var isInstalling: Bool { busyTag != nil }
-
     public func refresh() async {
         installed = await manager.installedWines()
         if let name = defaultName, !installed.contains(where: { $0.name == name }) {
@@ -32,35 +29,24 @@ public final class RuntimeViewModel {
         }
     }
 
-    /// Fetch the latest few Wine releases to offer for install. The Wine repo may also host the app's
-    /// own `v*` releases, so keep only `wine-*` tags (and take the newest 3).
-    public func fetchLatest() async {
-        do {
-            let all = try await manager.availableReleases(repo: repo, limit: 15)
-            latest = Array(all.filter { $0.tagName.lowercased().hasPrefix("wine") }.prefix(3))
-            if latest.isEmpty { statusMessage = "No Wine releases found yet." }
-        } catch {
-            statusMessage = "Couldn't fetch Wine versions: \((error as NSError).localizedDescription)"
-        }
-    }
-
-    /// Onboarding helper: fetch (if needed) and install the newest Wine release.
+    /// Download + install the latest Wine build published to Silo's releases (built by CI from
+    /// CrossOver source). Self-contained — also used by the Library onboarding.
     public func installLatest() async {
-        if latest.isEmpty { await fetchLatest() }
-        guard let newest = latest.first else { return }
-        await install(newest)
-    }
-
-    public func install(_ release: GitHubRelease) async {
-        guard busyTag == nil else { return }
-        guard let asset = RuntimeManager.preferredAsset(release) else {
-            statusMessage = "No installable archive in \(release.tagName)."
-            return
-        }
-        busyTag = release.tagName
-        defer { busyTag = nil }
-        statusMessage = "Downloading \(release.version)… (this is a large file)"
+        guard !isInstalling else { return }
+        isInstalling = true
+        defer { isInstalling = false }
         do {
+            // The Wine repo also hosts the app's own `v*` releases, so pick the newest `wine-*` one.
+            let releases = try await manager.availableReleases(repo: repo, limit: 15)
+            guard let release = releases.first(where: { $0.tagName.lowercased().hasPrefix("wine") }) else {
+                statusMessage = "No Wine build published yet (the CI build-wine workflow must run first)."
+                return
+            }
+            guard let asset = RuntimeManager.preferredAsset(release) else {
+                statusMessage = "Latest Wine release has no installable archive."
+                return
+            }
+            statusMessage = "Downloading \(release.version)… (large file, ~250 MB)"
             _ = try await manager.installWine(name: release.tagName, from: asset.browserDownloadUrl)
             await refresh()
             if defaultName == nil, let new = installed.first(where: { $0.name == release.tagName }) {
@@ -91,7 +77,4 @@ public final class RuntimeViewModel {
     }
 
     public func isDefault(_ wine: WineInstall) -> Bool { defaultName == wine.name }
-    public func isInstalled(_ release: GitHubRelease) -> Bool {
-        installed.contains { $0.name == release.tagName }
-    }
 }

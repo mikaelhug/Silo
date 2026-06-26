@@ -118,7 +118,7 @@ struct ViewModelTests {
         #expect(vm.installed.first?.wineBinary?.lastPathComponent == "wine64")
     }
 
-    @Test("Wine tab lists only wine-* releases (ignores app v* releases in the same repo)")
+    @Test("installLatest installs the newest wine-* release, ignoring app v* releases in the same repo")
     func wineReleaseFilter() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let json = """
@@ -126,17 +126,27 @@ struct ViewModelTests {
           {"tag_name":"v0.1.0","name":"Silo 0.1.0","assets":[
             {"name":"Silo.zip","browser_download_url":"https://e.com/Silo.zip","size":1}]},
           {"tag_name":"wine-cx-26.2.0","name":"Wine CX 26.2.0","assets":[
-            {"name":"wine.tar.xz","browser_download_url":"https://e.com/w.tar.xz","size":1}]}
+            {"name":"wine.tar.xz","browser_download_url":"https://e.com/wf.tar.xz","size":1}]}
         ]
         """
         // Distinct repo from other network tests (FakeURLProtocol's registry is shared across parallel tests).
         FakeURLProtocol.stub("https://api.github.com/repos/acme/winefilter/releases?per_page=15", data: Data(json.utf8))
+        FakeURLProtocol.stub("https://e.com/wf.tar.xz", data: Data("WINE".utf8))
+        let fake = FakeProcessRunner()
+        fake.onRun = { inv in
+            if inv.executable.lastPathComponent == "tar",
+               let i = inv.arguments.firstIndex(of: "-C"), i + 1 < inv.arguments.count {
+                let bin = URL(fileURLWithPath: inv.arguments[i + 1]).appendingPathComponent("bin")
+                try? FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+                FileManager.default.createFile(atPath: bin.appendingPathComponent("wine64").path, contents: Data("x".utf8))
+            }
+        }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let vm = RuntimeViewModel(
-            manager: RuntimeManager(paths: paths, runner: FakeProcessRunner(), session: FakeURLProtocol.makeSession()),
+            manager: RuntimeManager(paths: paths, runner: fake, session: FakeURLProtocol.makeSession()),
             repo: "acme/winefilter")
-        await vm.fetchLatest()
-        #expect(vm.latest.map(\.tagName) == ["wine-cx-26.2.0"])
+        await vm.installLatest()
+        #expect(vm.installed.map(\.name) == ["wine-cx-26.2.0"])   // NOT the v0.1.0 app release
     }
 
     @Test("AppEnvironment.setupComplete reflects configured runtimes")

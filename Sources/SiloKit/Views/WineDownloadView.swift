@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The "Wine" tab: lists the latest prebuilt Wine versions for one-click install (Heroic-style),
-/// plus installed Wine builds with set-default / remove.
+/// The "Wine" tab: install the latest prebuilt Wine (from Silo's CI releases) and manage installs.
 struct WineDownloadView: View {
     @Environment(AppEnvironment.self) private var env
 
@@ -10,36 +9,18 @@ struct WineDownloadView: View {
         Form {
             Section {
                 Button {
-                    Task { await vm.fetchLatest() }
+                    Task { await vm.installLatest() }
                 } label: {
-                    Label("Refresh list", systemImage: "arrow.clockwise")
+                    Label("Install latest Wine", systemImage: "arrow.down.circle")
                 }
-                if vm.latest.isEmpty {
-                    Text("Tap Refresh to list the latest Wine versions.").foregroundStyle(.secondary)
-                }
-                ForEach(vm.latest, id: \.tagName) { release in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(release.version)
-                            if let asset = RuntimeManager.preferredAsset(release) {
-                                Text(Self.byteString(asset.size)).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        if vm.isInstalled(release) {
-                            Text("Installed").font(.caption).foregroundStyle(.green)
-                        } else if vm.busyTag == release.tagName {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Button("Install") { Task { await vm.install(release) } }
-                                .disabled(vm.isInstalling)
-                        }
-                    }
-                }
+                .disabled(vm.isInstalling)
+                if vm.isInstalling { ProgressView().controlSize(.small) }
             } header: {
-                Text("Latest Wine versions")
+                Text("Wine")
             } footer: {
-                Text("Prebuilt GPTK-patched Wine. Downloads are large (~250 MB).").font(.caption)
+                Text("Downloads the latest Wine build from Silo's releases (CrossOver-based, ~250 MB) "
+                     + "and verifies its checksum.")
+                    .font(.caption)
             }
 
             Section("Installed Wine") {
@@ -78,13 +59,6 @@ struct WineDownloadView: View {
             }
         }
         .formStyle(.grouped)
-        .task {
-            await vm.refresh()
-            if vm.latest.isEmpty { await vm.fetchLatest() }
-        }
-    }
-
-    static func byteString(_ bytes: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        .task { await vm.refresh() }
     }
 }
