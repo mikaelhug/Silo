@@ -1,0 +1,53 @@
+name: Wine auto-update (watch CrossOver)
+
+# Keeps Silo's Wine current with CrossOver automatically: weekly, detect the latest CrossOver release
+# (via the Homebrew cask version — same number CrossOver publishes its source under), and if we
+# haven't built it yet, build + publish a wine-cx-<version> release. See WINE-BUILD.md.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eo pipefail
+          VER=$(curl -fsSL https://formulae.brew.sh/api/cask/crossover.json \
+                | python3 -c "import json,sys; print(json.load(sys.stdin)['version'].split(',')[0])")
+          echo "Latest CrossOver: $VER"
+          SRC="https://media.codeweavers.com/pub/crossover/source/crossover-sources-${VER}.tar.gz"
+          if ! curl -sfI "$SRC" >/dev/null; then
+            echo "CrossOver source $VER not published yet — skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if gh release view "wine-cx-$VER" >/dev/null 2>&1; then
+            echo "wine-cx-$VER already built — nothing to do."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New CrossOver $VER — will build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.should_build == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-wine.yml
+    with:
+      crossover_version: ${{ needs.detect.outputs.version }}
+      release_tag: wine-cx-${{ needs.detect.outputs.version }}
