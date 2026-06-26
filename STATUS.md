@@ -3,12 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M5 — ProcessRunning seam (next)
+- **Milestone:** M6 — PrefixProvisioner + GraphicsLinker (next)
 
 ## Build/test snapshot
-- `swift build`: ✅ clean (M4)
-- `swift test`:  ✅ 37 tests / 7 suites passing (run via `Scripts/test.sh`)
-- Last green commit: M4 config + persistence
+- `swift build`: ✅ clean (M5)
+- `swift test`:  ✅ 45 tests / 9 suites passing (run via `Scripts/test.sh`)
+- Last green commit: M5 ProcessRunning seam
 
 ## Task board
 
@@ -16,7 +16,6 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M5 — ProcessRunning seam · accept: `ProcessRunningTests` (FakeProcessRunner)
 - M6 — PrefixProvisioner + GraphicsLinker · accept: `PrefixProvisionerTests`, `GraphicsLinkerTests`
 - M7 — LaunchOrchestrator (makePlan pure + launch pipeline) · accept: `LaunchOrchestratorTests`
 - M8 — BackendResolver + SteamPresenceInstaller · accept: `BackendResolverTests`, `SteamPresenceInstallerTests`
@@ -31,6 +30,7 @@
 - M2 — Models (`SteamApp`, `StateFlags`, `LibraryFolder`) + decoders (`AppManifestDecoder`, `LibraryFoldersDecoder`) + fixtures + `FixtureLoader`; 10 decoder tests.
 - M3 — `DiscoveryEngine` (actor): scans primary + extra libraries, skips bad manifests; `TempDir` helper; 5 tests.
 - M4 — Config models (`GraphicsBackend`, `SteamPresenceStrategy`, `EnvFlags`, `WineRuntime`, `BackendConfig`, `GameConfig`) + `AppPaths` + `AppState` + `ConfigStore` actor (JSON); 8 tests.
+- M5 — `ProcessRunning` protocol + `ProcessResult` + `SystemProcessRunner` (temp-file redirect, env merge, detached spawn) + `FakeProcessRunner` (lock-guarded); 8 tests incl real subprocesses.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
