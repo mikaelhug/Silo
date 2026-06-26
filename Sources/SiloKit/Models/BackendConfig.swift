@@ -6,6 +6,8 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var masterBottlePath: URL?
     /// Primary wine binary used to launch games (GPTK build).
     public var wineBinaryPath: URL?
+    /// Name of the default Wine install (managed in the Wine Manager).
+    public var wineRuntimeName: String?
     /// Fallback wine binary (CrossOver).
     public var crossoverWinePath: URL?
     /// Wine binary used for the Master Steam bottle. Steam can be finicky under GPTK, so this may be
@@ -27,6 +29,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public init(
         masterBottlePath: URL? = nil,
         wineBinaryPath: URL? = nil,
+        wineRuntimeName: String? = nil,
         crossoverWinePath: URL? = nil,
         steamWineBinaryPath: URL? = nil,
         gptkLibDirPath: URL? = nil,
@@ -36,6 +39,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     ) {
         self.masterBottlePath = masterBottlePath
         self.wineBinaryPath = wineBinaryPath
+        self.wineRuntimeName = wineRuntimeName
         self.crossoverWinePath = crossoverWinePath
         self.steamWineBinaryPath = steamWineBinaryPath
         self.gptkLibDirPath = gptkLibDirPath

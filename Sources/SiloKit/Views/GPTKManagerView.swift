@@ -62,7 +62,6 @@ struct GPTKManagerView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("GPTK Manager")
         .task { vm.refresh() }
     }
 

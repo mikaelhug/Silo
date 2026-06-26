@@ -23,6 +23,9 @@ public enum Silo {
     /// releases (DMG is behind Apple-ID login); Gcenx republishes prebuilt binaries.
     public static let gptkRepo = "Gcenx/game-porting-toolkit"
 
+    /// Repo whose releases are prebuilt GPTK-patched Wine builds (the Wine binary GPTK runs on top of).
+    public static let wineRepo = "Gcenx/game-porting-toolkit"
+
     /// Apple's official GPTK page (manual DMG download, requires Apple ID).
     public static let appleGPTKURL = URL(string: "https://developer.apple.com/games/game-porting-toolkit/")!
 

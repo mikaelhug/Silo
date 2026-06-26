@@ -38,6 +38,59 @@ public actor RuntimeManager {
             .sorted { $0.name < $1.name }
     }
 
+    /// The latest `limit` releases of `repo` (newest first) — for the Heroic-style Wine list.
+    public func availableReleases(repo: String, limit: Int = 3) async throws -> [GitHubRelease] {
+        let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=\(limit)")!
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw RuntimeError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode([GitHubRelease].self, from: data)
+    }
+
+    /// The installable archive asset of a release (prefers tar/zip archives).
+    public static func preferredAsset(_ release: GitHubRelease) -> GitHubRelease.Asset? {
+        let extensions = [".tar.xz", ".tar.gz", ".tgz", ".tar", ".zip"]
+        return release.assets.first { asset in
+            extensions.contains { asset.name.lowercased().hasSuffix($0) }
+        }
+    }
+
+    /// Wine builds installed under the Runtimes dir (dirs containing a locatable wine binary).
+    public func installedWines() -> [WineInstall] {
+        guard let dirs = try? fileManager.contentsOfDirectory(
+            at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return dirs.compactMap { dir -> WineInstall? in
+            guard let binary = Self.locateWineBinary(in: dir) else { return nil }
+            return WineInstall(name: dir.lastPathComponent, installDir: dir, wineBinary: binary)
+        }.sorted { $0.name > $1.name }   // newest tag first
+    }
+
+    /// Download + extract a Wine build and locate its binary.
+    @discardableResult
+    public func installWine(name: String, from downloadURL: URL) async throws -> WineInstall {
+        _ = try await install(name: name, from: downloadURL)   // reuse download + tar extraction
+        let dir = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
+        return WineInstall(name: name, installDir: dir, wineBinary: Self.locateWineBinary(in: dir))
+    }
+
+    /// Recursively find a `wine64`/`wine` loader, preferring one under a `bin` directory.
+    public static func locateWineBinary(in dir: URL, fileManager: FileManager = .default) -> URL? {
+        guard let enumerator = fileManager.enumerator(at: dir, includingPropertiesForKeys: nil) else { return nil }
+        var candidates: [URL] = []
+        for case let url as URL in enumerator
+        where url.lastPathComponent == "wine64" || url.lastPathComponent == "wine" {
+            candidates.append(url)
+        }
+        func inBin(_ url: URL) -> Bool { url.deletingLastPathComponent().lastPathComponent == "bin" }
+        return candidates.first { $0.lastPathComponent == "wine64" && inBin($0) }
+            ?? candidates.first { $0.lastPathComponent == "wine64" }
+            ?? candidates.first(where: inBin)
+            ?? candidates.first
+    }
+
     /// Downloadable assets from the latest release of `repo`.
     public func availableAssets(repo: String) async throws -> [GitHubRelease.Asset] {
         let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!
