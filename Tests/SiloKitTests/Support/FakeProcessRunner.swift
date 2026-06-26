@@ -27,8 +27,16 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     /// Invoked (outside the lock) for every call, before returning — use to mutate a fake FS.
     var onRun: (@Sendable (Invocation) -> Void)?
 
+    private var _alivePIDs: Set<Int32> = []
+
     var invocations: [Invocation] { lock.withLock { _invocations } }
     var lastInvocation: Invocation? { lock.withLock { _invocations.last } }
+
+    /// Simulate a process exiting (or coming alive) for `isRunning` checks.
+    func setAlive(_ pid: Int32, _ alive: Bool) {
+        lock.withLock { if alive { _alivePIDs.insert(pid) } else { _alivePIDs.remove(pid) } }
+    }
+    func isRunning(pid: Int32) -> Bool { lock.withLock { _alivePIDs.contains(pid) } }
 
     /// Queue a result to be returned by the next `run` call (FIFO).
     func queueResult(_ result: ProcessResult) {
@@ -63,6 +71,7 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
         )
         let (hook, pid): (((Invocation) -> Void)?, Int32) = lock.withLock {
             _invocations.append(invocation)
+            _alivePIDs.insert(spawnPID)   // a spawned game is "running" until a test marks it exited
             return (onRun, spawnPID)
         }
         hook?(invocation)

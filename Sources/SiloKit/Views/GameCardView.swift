@@ -8,6 +8,7 @@ struct GameCardView: View {
 
     var body: some View {
         let busy = env.library.busyAppIDs.contains(game.appID)
+        let running = env.library.isRunning(game)
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(game.name).font(.headline).lineLimit(1)
@@ -20,20 +21,32 @@ struct GameCardView: View {
                 ProgressView(value: progress)
             }
             HStack {
-                Button {
-                    Task { await env.library.play(game) }
-                } label: {
-                    Label("Play", systemImage: "play.fill")
+                if running {
+                    Button(role: .destructive) {
+                        Task { await env.library.stop(game) }
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(.borderedProminent).tint(.red)
+                } else {
+                    Button {
+                        Task { await env.library.play(game) }
+                    } label: {
+                        Label("Play", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || !env.library.canLaunch)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(busy || !env.library.canLaunch)
 
                 Button("Isolate") { Task { await env.library.isolate(game) } }
-                    .disabled(busy || !env.library.canLaunch)
+                    .disabled(busy || running || !env.library.canLaunch)
 
                 Spacer()
 
-                if busy {
+                if running {
+                    Label("Running", systemImage: "circle.fill")
+                        .labelStyle(.titleAndIcon).font(.caption).foregroundStyle(.green)
+                } else if busy {
                     ProgressView().controlSize(.small)
                 } else {
                     Menu {

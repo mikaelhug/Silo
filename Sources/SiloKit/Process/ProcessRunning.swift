@@ -23,4 +23,7 @@ public protocol ProcessRunning: Sendable {
         currentDirectory: URL?,
         logURL: URL
     ) async throws -> Int32
+
+    /// Whether a process with this PID is currently alive (for tracking a launched game).
+    func isRunning(pid: Int32) -> Bool
 }

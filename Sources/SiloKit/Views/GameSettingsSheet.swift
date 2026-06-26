@@ -5,6 +5,7 @@ struct GameSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let game: SteamApp
     @State private var vm: GameSettingsViewModel?
+    @State private var executables: [String] = []
 
     var body: some View {
         NavigationStack {
@@ -28,7 +29,10 @@ struct GameSettingsSheet: View {
             }
         }
         .frame(width: 480, height: 540)
-        .task { vm = await env.makeGameSettings(for: game) }
+        .task {
+            vm = await env.makeGameSettings(for: game)
+            executables = ExecutableResolver.allExecutables(in: game.installURL)
+        }
     }
 
     @ViewBuilder
@@ -48,9 +52,18 @@ struct GameSettingsSheet: View {
             }
 
             Section("Executable") {
-                TextField("Relative path (blank = auto-detect)", text: Binding(
-                    get: { vm.config.executableRelativePath ?? "" },
-                    set: { vm.config.executableRelativePath = $0.isEmpty ? nil : $0 }))
+                if executables.isEmpty {
+                    TextField("Relative path (blank = auto-detect)", text: Binding(
+                        get: { vm.config.executableRelativePath ?? "" },
+                        set: { vm.config.executableRelativePath = $0.isEmpty ? nil : $0 }))
+                } else {
+                    Picker("Executable", selection: Binding(
+                        get: { vm.config.executableRelativePath ?? "" },
+                        set: { vm.config.executableRelativePath = $0.isEmpty ? nil : $0 })) {
+                        Text("Auto-detect").tag("")
+                        ForEach(executables, id: \.self) { Text($0).tag($0) }
+                    }
+                }
             }
 
             Section("Steam presence") {

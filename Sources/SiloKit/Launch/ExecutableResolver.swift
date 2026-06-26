@@ -28,4 +28,22 @@ public enum ExecutableResolver {
     private static func size(of url: URL, _ fileManager: FileManager) -> Int {
         (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
     }
+
+    /// All `.exe` paths under `installURL`, relative to it, shallowest first (the main exe is usually
+    /// top-level; deep ones tend to be redistributables). For the per-game executable picker.
+    public static func allExecutables(in installURL: URL, fileManager: FileManager = .default) -> [String] {
+        guard let enumerator = fileManager.enumerator(
+            at: installURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return [] }
+        let base = installURL.standardizedFileURL.path
+        var relatives: [String] = []
+        for case let url as URL in enumerator where url.pathExtension.lowercased() == "exe" {
+            let path = url.standardizedFileURL.path
+            if path.hasPrefix(base + "/") { relatives.append(String(path.dropFirst(base.count + 1))) }
+        }
+        return relatives.sorted {
+            let da = $0.filter { $0 == "/" }.count, db = $1.filter { $0 == "/" }.count
+            return da == db ? $0.localizedCaseInsensitiveCompare($1) == .orderedAscending : da < db
+        }
+    }
 }
