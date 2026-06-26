@@ -28,6 +28,8 @@ public struct SteamBottleInstaller: Sendable {
         bottle: URL,
         wine: URL?,
         installerURL: URL = Silo.steamInstallerURL,
+        pollTimeout: Duration = .seconds(180),
+        pollInterval: Duration = .seconds(1),
         progress: (@Sendable (Stage) -> Void)? = nil
     ) async throws -> URL {
         guard let wine else { throw InstallError.wineNotConfigured }
@@ -53,11 +55,42 @@ public struct SteamBottleInstaller: Sendable {
         try fileManager.moveItem(at: tempFile, to: setup)
 
         progress?(.installing)
-        let install = try await runner.run(
-            executable: wine, arguments: [setup.path, "/S"], environment: env, currentDirectory: nil)
-        guard install.succeeded else { throw InstallError.installerFailed(exitCode: install.exitCode) }
+        // Steam's silent bootstrapper drops Steam.exe and then auto-launches it. That first launch
+        // crash-loops under wine (the Steam CEF issue), so `SteamSetup.exe /S` NEVER returns and the
+        // crash handler spawns hundreds of `winedbg` processes. So: spawn the installer detached, wait
+        // for Steam.exe to appear, then kill the whole bottle so the crash-loop can't accumulate. The
+        // full client downloads on the first real run via "Open Steam" (which passes CEF-safe flags).
+        let setupLog = bottle.appendingPathComponent("SteamSetup.log")
+        _ = try await runner.spawnDetached(
+            executable: wine, arguments: [setup.path, "/S"], environment: env,
+            currentDirectory: nil, logURL: setupLog)
+
+        let steamExe = DiscoveryEngine.steamRoot(inBottle: bottle).appendingPathComponent("steam.exe")
+        let installed = await waitForFile(steamExe, timeout: pollTimeout, interval: pollInterval)
+        await killBottle(wine: wine, bottle: bottle)
+        guard installed else { throw InstallError.installerFailed(exitCode: -1) }
 
         progress?(.done)
         return bottle
+    }
+
+    /// Poll for a file to appear, up to `timeout`. Returns whether it exists at the end.
+    private func waitForFile(_ url: URL, timeout: Duration, interval: Duration) async -> Bool {
+        let fileManager = FileManager.default
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
+            if fileManager.fileExists(atPath: url.path) { return true }
+            try? await Task.sleep(for: interval)
+        }
+        return fileManager.fileExists(atPath: url.path)
+    }
+
+    /// Terminate every wine process in the bottle (`wineserver -k`) — stops the Steam CEF crash-loop.
+    private func killBottle(wine: URL, bottle: URL) async {
+        let wineserver = wine.deletingLastPathComponent().appendingPathComponent("wineserver")
+        _ = try? await runner.run(
+            executable: wineserver, arguments: ["-k"],
+            environment: ["WINEPREFIX": bottle.path], currentDirectory: nil)
     }
 }
