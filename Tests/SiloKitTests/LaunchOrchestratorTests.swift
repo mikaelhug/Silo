@@ -38,6 +38,25 @@ struct MakePlanTests {
         #expect(plan.logURL == log)
     }
 
+    @Test("GPTK plan with GPTK configured: D3DMetal on DYLD fallbacks + builtin d3d via WINEDLLPATH")
+    func gptkPlanD3DMetalWiring() throws {
+        var cfg = GameConfig(appID: 220)
+        cfg.backend = .gptk
+        var b = backend()
+        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")  // <root>/lib/wine/x86_64-windows
+        let plan = try LaunchOrchestrator.makePlan(
+            app: app, config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
+
+        // libd3dshared.dylib + D3DMetal.framework live in <root>/lib/external — must lead the DYLD paths.
+        #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/g/lib/external:") == true)
+        #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.contains("/silo-bundled") == true)
+        #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == "/g/lib/external")
+        // GPTK's builtin d3d modules come from <root>/lib/wine, selected as builtin.
+        #expect(plan.environment["WINEDLLPATH"] == "/g/lib/wine")
+        #expect(plan.environment["WINEDLLOVERRIDES"]?.contains("d3d11") == true)
+        #expect(plan.environment["WINEDLLOVERRIDES"]?.contains("=b") == true)
+    }
+
     @Test("CrossOver plan: selects crossover wine and sets DXVK DLL overrides")
     func crossoverPlan() throws {
         var cfg = GameConfig(appID: 220)

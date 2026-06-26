@@ -3,7 +3,15 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M28 COMPLETE.** 120 tests / 24 suites green; CI green.
+- **M0–M29 COMPLETE.** 121 tests / 24 suites green; CI green.
+- M29 (D3DMetal path wiring): GPTK game launches now (a) put GPTK's `lib/external` on
+  `DYLD_FALLBACK_LIBRARY_PATH` + `DYLD_FALLBACK_FRAMEWORK_PATH` so `d3d11.so` resolves
+  `@rpath/libd3dshared.dylib` and `D3DMetal.framework`; (b) add GPTK's `lib/wine` to `WINEDLLPATH`
+  and force d3d/dxgi `=b` (builtin) so wine loads GPTK's d3d instead of the base wine's. New
+  `BackendConfig.gptkExternalDirPath` / `gptkWineDLLDirPath` derive these from `gptkLibDirPath`.
+  STATICALLY VERIFIED on the real GPTK-4.0_beta_1: D3DMetal.framework loads under x86_64; converter
+  libs (libmetalirconverter/libdxccontainer) resolve via the framework's own rpath; wine honors
+  DYLD_FALLBACK (proven by the freetype fix). **E2E activation is human-gated** (see BLOCKED).
 - M28 (self-contained wine): `Scripts/bundle-wine-dylibs.sh` copies the transitive closure of wine's
   non-system dylib deps (arch-filtered to the wine's arch — x86_64) into `<wine>/lib/silo-bundled`;
   the app launches wine with `DYLD_FALLBACK_LIBRARY_PATH=<…>/lib/silo-bundled` (URL.siloDyldFallback)
@@ -41,8 +49,7 @@
 - PERF (deferred per user — say "do perf"): msync default-on (esync/msync mutually-exclusive enum);
   DXMT backend; rosettax87 fast x86; DXVK install path (the `.crossover` backend is unreachable on a clean install).
 - HUMAN-GATED: notarization in release.yml (needs your Apple Developer ID + secrets).
-- D3DMETAL PATH: ensure the injected GPTK d3d DLLs find D3DMetal.framework + libd3dshared at runtime
-  (separate from wine-deps bundling; needed for actual game rendering).
+- D3DMETAL PATH: DONE (M29). Runtime env wired + statically verified. Real activation needs a game launch (BLOCKED).
 - NICE-TO-HAVE: pin GitHub Actions by commit SHA (clears Node-20 deprecation notice).
 - All other audit findings (correctness, robustness, UX) are DONE (M21–M24). Wine sourcing architecture settled (see
   WINE-BUILD.md): self-hosted CrossOver-based Wine built in our own CI (`build-wine.yml`,
@@ -124,6 +131,12 @@
 
 ## BLOCKED
 - _(none — building continues; the items below are human-input for real E2E, not for the build)_
+- **GPTK E2E activation (M29):** the D3DMetal env wiring is in place + statically verified, but whether
+  CrossOver wine-cx-26.2.0 actually loads GPTK-4.0_beta_1's d3d modules via `WINEDLLPATH` (vs needing an
+  overlay copy into the wine's own `lib/wine`), and whether that GPTK↔CrossOver version pair is ABI-
+  compatible, can ONLY be confirmed by launching a real D3D game and reading its log. If wine ignores
+  WINEDLLPATH for the new PE builtin format, the fallback is to overlay GPTK's `lib/wine/*` into the
+  wine runtime's `lib/wine/*` (Whisky's method) — a small, well-scoped follow-up once a launch log exists.
 - Confirm the exact third-party Wine/GPTK runtime repo/release to pin as default (currently placeholder `Kegworks-App/Kegworks` in `Silo.defaultRuntimeRepo`; overridable in Settings). Non-blocking for build/test.
 
 ## Handoff checklist (for human, post-loop E2E)
