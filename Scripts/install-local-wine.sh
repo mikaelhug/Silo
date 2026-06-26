@@ -14,16 +14,28 @@ SRC="${1:?usage: install-local-wine.sh <wine-dir-or-tarball> [name]}"
 NAME="${2:-wine-local}"
 DEST="$HOME/Library/Application Support/Silo/Runtimes/$NAME"
 
+# Validate the SOURCE before touching the destination (so a bad arg never leaves an empty runtime).
+if [ ! -e "$SRC" ]; then
+  echo "ERROR: '$SRC' does not exist."
+  echo "Build Wine first:  Scripts/build-wine.sh <crossover_version>   (then pass .wine-build/install)"
+  echo "or pass an existing wine directory (containing bin/wine64) or a .tar.* archive."
+  exit 1
+fi
+if [ -d "$SRC" ]; then
+  KIND=dir
+elif [[ "$SRC" == *.tar.* ]]; then
+  KIND=tar
+else
+  echo "ERROR: '$SRC' is neither a directory nor a .tar.* archive."; exit 1
+fi
+
 mkdir -p "$(dirname "$DEST")"
 rm -rf "$DEST"
 mkdir -p "$DEST"
-
-if [ -d "$SRC" ]; then
+if [ "$KIND" = dir ]; then
   cp -R "$SRC"/. "$DEST"/
-elif [[ "$SRC" == *.tar.* ]]; then
-  tar -xf "$SRC" -C "$DEST"
 else
-  echo "ERROR: '$SRC' is neither a directory nor a .tar.* archive"; exit 1
+  tar -xf "$SRC" -C "$DEST"
 fi
 
 if find "$DEST" \( -name wine64 -o -name wine \) -type f 2>/dev/null | grep -q .; then
@@ -31,6 +43,7 @@ if find "$DEST" \( -name wine64 -o -name wine \) -type f 2>/dev/null | grep -q .
   echo "  $DEST"
   echo "Open Silo → Wine Manager → Wine tab → Set default."
 else
-  echo "WARNING: no wine64/wine binary found under $DEST — the app won't list it. Check the source."
+  rm -rf "$DEST"   # don't leave an empty/garbage runtime behind
+  echo "ERROR: no wine64/wine binary found under the source — nothing installed. Check '$SRC'."
   exit 1
 fi
