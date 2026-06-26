@@ -23,6 +23,7 @@ struct SteamBottleInstallerTests {
         #expect(calls.count == 2)
         #expect(calls[0].arguments == ["wineboot", "--init"])
         #expect(calls[0].environment["WINEPREFIX"] == bottle.path)
+        #expect(calls[0].environment["WINEDLLOVERRIDES"] == "mscoree,mshtml=")   // no mono/gecko hang
         #expect(calls[1].arguments.first?.hasSuffix("SteamSetup.exe") == true)
         #expect(calls[1].arguments.last == "/S")                       // silent install
         #expect(calls[1].environment["WINEPREFIX"] == bottle.path)
