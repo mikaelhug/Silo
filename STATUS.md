@@ -3,12 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M7 — LaunchOrchestrator (next)
+- **Milestone:** M8 — BackendResolver + SteamPresenceInstaller (next)
 
 ## Build/test snapshot
-- `swift build`: ✅ clean (M6)
-- `swift test`:  ✅ 54 tests / 11 suites passing (run via `Scripts/test.sh`)
-- Last green commit: M6 provisioner + graphics linker
+- `swift build`: ✅ clean (M7)
+- `swift test`:  ✅ 63 tests / 14 suites passing (run via `Scripts/test.sh`)
+- Last green commit: M7 LaunchOrchestrator
 
 ## Task board
 
@@ -16,7 +16,6 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M7 — LaunchOrchestrator (makePlan pure + launch pipeline) · accept: `LaunchOrchestratorTests`
 - M8 — BackendResolver + SteamPresenceInstaller · accept: `BackendResolverTests`, `SteamPresenceInstallerTests`
 - M9 — RuntimeManager + Updater · accept: `RuntimeManagerTests`, `UpdaterTests` (FakeURLProtocol)
 - M10 — ViewModels + SwiftUI views · accept: `swift run silo` shows window; VM unit tests
@@ -31,6 +30,7 @@
 - M4 — Config models (`GraphicsBackend`, `SteamPresenceStrategy`, `EnvFlags`, `WineRuntime`, `BackendConfig`, `GameConfig`) + `AppPaths` + `AppState` + `ConfigStore` actor (JSON); 8 tests.
 - M5 — `ProcessRunning` protocol + `ProcessResult` + `SystemProcessRunner` (temp-file redirect, env merge, detached spawn) + `FakeProcessRunner` (lock-guarded); 8 tests incl real subprocesses.
 - M6 — `PrefixLayout`, `PrefixProvisioner` actor (idempotent wineboot --init), `GraphicsLinker` (symlink/copy GPTK or DXVK into system32); 9 tests. Note: Sendable structs use computed `FileManager.default` (can't store non-Sendable); actors may store it.
+- M7 — `LaunchPlan`, pure `LaunchOrchestrator.makePlan` (static; isolated WINEPREFIX, backend env, DXVK overrides), `launch` pipeline (provision→link→log→spawn), `ExecutableResolver`, `GameLogStore`; GameConfig gained `executableRelativePath`; 12 tests.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
