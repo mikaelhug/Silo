@@ -1,6 +1,4 @@
 import SwiftUI
-import AppKit
-import UniformTypeIdentifiers
 
 struct GPTKManagerView: View {
     @Environment(AppEnvironment.self) private var env
@@ -10,7 +8,7 @@ struct GPTKManagerView: View {
         Form {
             Section {
                 Button {
-                    if let dmg = pickDMG() { Task { await vm.importGPTK(from: dmg) } }
+                    if let dmg = chooseDiskImage() { Task { await vm.importGPTK(from: dmg) } }
                 } label: {
                     Label("Import GPTK from Apple .dmg…", systemImage: "externaldrive.badge.plus")
                 }
@@ -63,14 +61,5 @@ struct GPTKManagerView: View {
         }
         .formStyle(.grouped)
         .task { vm.refresh() }
-    }
-
-    private func pickDMG() -> URL? {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.diskImage]
-        return panel.runModal() == .OK ? panel.url : nil
     }
 }

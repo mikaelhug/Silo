@@ -1,5 +1,17 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
+
+/// Present an open panel for choosing a `.dmg` (GPTK). Returns nil if cancelled.
+@MainActor
+func chooseDiskImage() -> URL? {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = false
+    panel.allowedContentTypes = [.diskImage]
+    return panel.runModal() == .OK ? panel.url : nil
+}
 
 /// A row that displays a path and lets the user pick a file or directory via NSOpenPanel
 /// (powerbox grant — avoids TCC denials for non-sandboxed access).

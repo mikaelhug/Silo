@@ -82,6 +82,25 @@ public final class AppEnvironment {
         await library.refresh()
     }
 
+    // MARK: - Setup readiness (drives the Library onboarding)
+
+    public var wineReady: Bool { backendSettings.config.wineBinaryPath != nil }
+    public var gptkReady: Bool { backendSettings.config.gptkLibDirPath != nil }
+    public var steamReady: Bool { backendSettings.config.masterBottlePath != nil }
+    public var setupComplete: Bool { wineReady && gptkReady && steamReady }
+
+    /// Launch the Steam client in the Master bottle (detached) so the user can browse/download games.
+    public func openSteam() async {
+        let config = backendSettings.config
+        guard let bottle = config.masterBottlePath, let wine = config.steamWine else { return }
+        let steamExe = DiscoveryEngine.steamRoot(inBottle: bottle).appendingPathComponent("steam.exe")
+        let log = paths.logsDir.appendingPathComponent("steam.log")
+        _ = try? await runner.spawnDetached(
+            executable: wine, arguments: [steamExe.path],
+            environment: ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all"],
+            currentDirectory: nil, logURL: log)
+    }
+
     /// Build a per-game settings view model with the game's persisted config.
     public func makeGameSettings(for app: SteamApp) async -> GameSettingsViewModel {
         let state = await configStore.load()

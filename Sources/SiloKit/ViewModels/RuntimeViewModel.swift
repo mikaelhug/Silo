@@ -42,6 +42,13 @@ public final class RuntimeViewModel {
         }
     }
 
+    /// Onboarding helper: fetch (if needed) and install the newest Wine release.
+    public func installLatest() async {
+        if latest.isEmpty { await fetchLatest() }
+        guard let newest = latest.first else { return }
+        await install(newest)
+    }
+
     public func install(_ release: GitHubRelease) async {
         guard busyTag == nil else { return }
         guard let asset = RuntimeManager.preferredAsset(release) else {

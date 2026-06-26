@@ -118,6 +118,51 @@ struct ViewModelTests {
         #expect(vm.installed.first?.wineBinary?.lastPathComponent == "wine64")
     }
 
+    @Test("AppEnvironment.setupComplete reflects configured runtimes")
+    func setupComplete() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let env = AppEnvironment(
+            paths: AppPaths(supportDir: tmp.url.appendingPathComponent("Silo")),
+            runner: FakeProcessRunner())
+        #expect(!env.setupComplete)
+        env.backendSettings.config.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        env.backendSettings.config.gptkLibDirPath = URL(fileURLWithPath: "/g/lib")
+        #expect(!env.setupComplete)               // Steam bottle still missing
+        env.backendSettings.config.masterBottlePath = URL(fileURLWithPath: "/b")
+        #expect(env.setupComplete)
+        #expect(env.wineReady && env.gptkReady && env.steamReady)
+    }
+
+    @Test("RuntimeViewModel.installLatest installs the newest release and sets it default")
+    func installLatest() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let json = """
+        [{"tag_name":"Wine-9.0","name":"Wine 9.0","assets":[
+          {"name":"wine-9.0.tar.xz","browser_download_url":"https://e.com/w.tar.xz","size":1}]}]
+        """
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/wine/releases?per_page=3", data: Data(json.utf8))
+        FakeURLProtocol.stub("https://e.com/w.tar.xz", data: Data("A".utf8))
+        let fake = FakeProcessRunner()
+        fake.onRun = { inv in
+            if inv.executable.lastPathComponent == "tar",
+               let i = inv.arguments.firstIndex(of: "-C"), i + 1 < inv.arguments.count {
+                let bin = URL(fileURLWithPath: inv.arguments[i + 1]).appendingPathComponent("bin")
+                try? FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+                FileManager.default.createFile(atPath: bin.appendingPathComponent("wine64").path, contents: Data("x".utf8))
+            }
+        }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let vm = RuntimeViewModel(
+            manager: RuntimeManager(paths: paths, runner: fake, session: FakeURLProtocol.makeSession()),
+            repo: "acme/wine")
+        var defaulted: WineInstall?
+        vm.onDefaultChanged = { defaulted = $0 }
+
+        await vm.installLatest()
+        #expect(vm.installed.map(\.name) == ["Wine-9.0"])
+        #expect(defaulted?.name == "Wine-9.0")
+    }
+
     @Test("AppEnvironment bootstraps from persisted config")
     func appEnvironment() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

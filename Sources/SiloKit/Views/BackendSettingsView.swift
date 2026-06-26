@@ -57,6 +57,6 @@ struct BackendSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Setup")
+        .navigationTitle("Advanced Settings")
     }
 }
