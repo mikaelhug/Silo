@@ -21,6 +21,18 @@ Those projects are just "someone compiled CrossOver's source for you" — conven
 dependency that can lag or disappear (Gcenx's GPTK repo is stale; Kegworks became Sikarugir). Building
 it in our own CI removes that dependency and lets us control the cadence.
 
+## How the build runs — two equivalent options
+The app doesn't care whether the Wine asset was built in CI or on your Mac; it only downloads the
+`wine.tar.xz` attached to a `wine-*` **Release**. Pick whichever is easier:
+
+- **Local (easiest for the first working build):** `Scripts/build-wine.sh <crossover_version> [tag]`
+  builds on your Mac and prints the `gh release create …` command to upload the asset. You can
+  iterate deps/flags interactively instead of the slow push→CI→logs loop.
+- **CI (reproducible / hands-off later):** `.github/workflows/build-wine.yml` (workflow_dispatch).
+
+**Never commit the binary into git.** A ~250 MB blob bloats history and GitHub rejects files >100 MB.
+It belongs as a **Release asset** (`gh release`), which is exactly where `Silo.wineRepo` looks.
+
 ## Pipeline
 - `.github/workflows/build-wine.yml` (manual `workflow_dispatch`, inputs: CrossOver version + release
   tag) downloads **CrossOver's FOSS source** from CodeWeavers
