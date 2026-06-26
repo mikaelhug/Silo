@@ -29,6 +29,12 @@ public actor PrefixProvisioner {
         paths.prefix(forAppID: appID)
     }
 
+    /// Delete a game's prefix (re-seeded on next launch).
+    public func remove(appID: Int) throws {
+        let prefix = paths.prefix(forAppID: appID)
+        if fileManager.fileExists(atPath: prefix.path) { try fileManager.removeItem(at: prefix) }
+    }
+
     public func isProvisioned(appID: Int) -> Bool {
         let layout = PrefixLayout(prefix: paths.prefix(forAppID: appID))
         return fileManager.fileExists(atPath: layout.systemReg.path)

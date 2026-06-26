@@ -90,6 +90,17 @@ public struct LaunchOrchestrator: Sendable {
 
     public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
 
+    /// Run a built-in wine tool (e.g. `winecfg`, `regedit`) against a game's prefix, detached.
+    public func runWineTool(_ tool: String, appID: Int, backend: BackendConfig) async {
+        guard let wine = backend.wineBinary(for: .gptk) else { return }
+        let prefix = provisioner.prefixURL(forAppID: appID)
+        let log = (try? await logStore.prepare(appID: appID)) ?? logStore.logURL(forAppID: appID)
+        _ = try? await runner.spawnDetached(
+            executable: wine, arguments: [tool],
+            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all"],
+            currentDirectory: nil, logURL: log)
+    }
+
     /// Stop a game by killing every wine process in its isolated prefix (`wineserver -k`).
     public func stop(appID: Int, backend: BackendConfig) async {
         guard let wine = backend.wineBinary(for: .gptk) else { return }

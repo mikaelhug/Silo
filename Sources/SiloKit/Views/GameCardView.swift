@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct GameCardView: View {
     @Environment(AppEnvironment.self) private var env
@@ -52,6 +53,15 @@ struct GameCardView: View {
                     Menu {
                         Button("Settings…", action: onSettings)
                         Button("View Log…", action: onLog)
+                        Divider()
+                        Button("Reveal Prefix in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([env.library.prefixURL(for: game)])
+                        }
+                        Button("Wine Config…") { Task { await env.library.openWinecfg(game) } }
+                            .disabled(!env.library.canLaunch)
+                        Button("Reset Prefix", role: .destructive) {
+                            Task { await env.library.resetPrefix(game) }
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }

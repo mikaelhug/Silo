@@ -52,6 +52,17 @@ struct PrefixProvisionerTests {
         #expect(fake.invocations.count == 1)   // second call short-circuits
     }
 
+    @Test("remove deletes the prefix")
+    func remove() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let provisioner = makeProvisioner(FakeProcessRunner(), tmp)
+        let prefix = provisioner.prefixURL(forAppID: 7)
+        try FileManager.default.createDirectory(
+            at: prefix.appendingPathComponent("drive_c"), withIntermediateDirectories: true)
+        try await provisioner.remove(appID: 7)
+        #expect(!FileManager.default.fileExists(atPath: prefix.path))
+    }
+
     @Test("Throws wineNotConfigured when no wine binary is set")
     func wineNotConfigured() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

@@ -111,6 +111,9 @@ struct RuntimeManagerTests {
         #expect(wine.wineBinary?.lastPathComponent == "wine64")
         #expect(wine.isUsable)
         #expect(await manager.installedWines().map(\.name) == ["Wine-Test"])
+        // Downloaded wine is de-quarantined + ad-hoc re-signed so Gatekeeper allows it.
+        #expect(fake.invocations.contains { $0.executable.lastPathComponent == "xattr" && $0.arguments.contains("com.apple.quarantine") })
+        #expect(fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
     }
 
     @Test("locateWineBinary prefers wine64 under a bin directory")
@@ -133,5 +136,8 @@ struct RuntimeManagerTests {
         await #expect(throws: RuntimeManager.RuntimeError.extractionFailed(2)) {
             try await manager.install(name: "Bad", from: URL(string: "https://example.com/bad.tar.gz")!)
         }
+        // No half-extracted runtime left behind.
+        let dest = tmp.url.appendingPathComponent("Silo/Runtimes/Bad")
+        #expect(!FileManager.default.fileExists(atPath: dest.path))
     }
 }

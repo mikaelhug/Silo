@@ -18,6 +18,17 @@ struct LibraryGridView: View {
         .navigationTitle("Library")
         .toolbar {
             if env.setupComplete {
+                Menu {
+                    Picker("Sort", selection: $library.sortOrder) {
+                        ForEach(LibraryViewModel.SortOrder.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Show", selection: $library.filter) {
+                        ForEach(LibraryViewModel.Filter.allCases) { Text($0.label).tag($0) }
+                    }
+                } label: {
+                    Label("Sort & Filter", systemImage: "line.3.horizontal.decrease.circle")
+                }
+
                 Button {
                     Task { await library.installEntireLibrary() }
                 } label: {
