@@ -3,9 +3,19 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **ALL 12 MILESTONES COMPLETE.** The app builds, tests, bundles, and runs headlessly with zero
-  runtimes installed. Remaining work is human-gated E2E (Wine/GPTK runtime + a downloaded game) —
-  see "Handoff checklist" below. The autonomous loop has reached its planned stop point.
+- **Milestone:** M14 — One-click Master Steam bottle install (next). Building the 4 one-click
+  setup features (M13–M16) requested 2026-06-26. M0–M13 done.
+
+## Research findings (2026-06-26, grounds M13–M16)
+- `apple/game-porting-toolkit` is a **resources repo, no binary releases**; official GPTK = a DMG
+  behind Apple-ID login (not automatable). **`Gcenx/game-porting-toolkit/releases`** has prebuilt
+  GPTK binaries (no login) → use as the 1-click default; link Apple's repo for the manual route.
+- Steam Windows installer: `https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe`
+  (akamai mirror: `https://steamcdn-a.akamaihd.net/client/installer/SteamSetup.exe`), silent flag `/S`.
+- No single "install whole library" command. Mechanism = `steam://install/<appid>` per owned app via
+  the running Steam client; owned appids parsed from `userdata/*/config/localconfig.vdf`.
+- "wine-mirror/wine" is source-only (no mac binaries) → it means "use a vanilla Wine runtime" as the
+  Steam-bottle fallback when GPTK can't run the Steam client.
 
 ## Build/test snapshot
 - `swift build`: ✅ clean (no warnings)
@@ -20,7 +30,9 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- _(none — all milestones complete)_
+- M14 — One-click Master Steam bottle install · accept: `SteamBottleInstallerTests`
+- M15 — One-click GPTK fetch · accept: `RuntimeManager`/VM GPTK asset tests
+- M16 — Install entire library after login · accept: `OwnedAppsReaderTests`, `SteamLibraryInstallerTests`
 
 ### DONE
 - M0 — Scaffold SPM project + harness docs (Package.swift, silo/SiloKit/SiloKitTests, CLAUDE.md, STATUS.md, README, .gitignore, Scripts/test.sh).
@@ -36,6 +48,7 @@
 - M10 — `AppEnvironment` composition root + `SiloApp` (SwiftUI App); view models (`LibraryViewModel`, `BackendSettingsViewModel`, `GameSettingsViewModel`, `RuntimeViewModel`); views (Root/Sidebar/LibraryGrid/GameCard/Badge/BackendSettings/RuntimeManager/GameSettingsSheet/LogViewer/About/PathPickerRow); `silo --smoke` headless path; 7 VM tests.
 - M11 — `Resources/{Info.plist.template,silo.entitlements (no sandbox)}` + `Scripts/{build-app,sign,run,dev,clean}.sh`; assembles + ad-hoc signs `dist/Silo.app`, strips quarantine. Verified bundle valid + bundled binary smoke-runs.
 - M12 — `.github/workflows/{ci,release}.yml` (build+test+bundle on push/PR; tag → ad-hoc-signed Silo.zip release) + README (build, first-run setup, sandbox, legal).
+- M13 — App icon: CoreGraphics generator (`Scripts/make-icon.swift`) + `make-icon.sh` (sips/iconutil) -> `Resources/AppIcon.icns`; wired via `CFBundleIconFile`; bundled by build-app.sh.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
