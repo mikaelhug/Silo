@@ -79,12 +79,16 @@ public actor RuntimeManager {
     }
 
     /// Recursively find a `wine64`/`wine` loader, preferring one under a `bin` directory.
+    /// Only matches files/symlinks — NOT directories (e.g. a GPTK runtime's `lib/wine` dir, which
+    /// would otherwise make GPTK installs masquerade as Wine).
     public static func locateWineBinary(in dir: URL, fileManager: FileManager = .default) -> URL? {
-        guard let enumerator = fileManager.enumerator(at: dir, includingPropertiesForKeys: nil) else { return nil }
+        guard let enumerator = fileManager.enumerator(
+            at: dir, includingPropertiesForKeys: [.isDirectoryKey]) else { return nil }
         var candidates: [URL] = []
         for case let url as URL in enumerator
         where url.lastPathComponent == "wine64" || url.lastPathComponent == "wine" {
-            candidates.append(url)
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if !isDir { candidates.append(url) }
         }
         func inBin(_ url: URL) -> Bool { url.deletingLastPathComponent().lastPathComponent == "bin" }
         return candidates.first { $0.lastPathComponent == "wine64" && inBin($0) }

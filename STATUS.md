@@ -3,7 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M23 COMPLETE.** 117 tests / 24 suites green. M23 = audit robustness + UX: downloaded Wine is
+- **M0–M25 COMPLETE.** 120 tests / 24 suites green.
+- M25 (Wine Manager fixes from user report): `locateWineBinary` now excludes directories, so GPTK
+  installs (`lib/wine` dir) no longer masquerade as Wine in the Wine tab; Wine tab simplified to a
+  single "Install latest Wine" (dropped the broken multi-version refresh — CI publishes the canonical
+  latest); removed a stray `Runtimes/GPTK` left by the M15 verification import.
+- M24 = downloaded-Wine SHA-256 verification (build-wine publishes `.sha256`; RuntimeManager verifies).
+- M23 = audit robustness + UX: downloaded Wine is
   de-quarantined + ad-hoc re-signed (Gatekeeper), extraction cleans up on failure; GPTK de-quarantined
   (no re-sign — keeps Apple's signature); live log tail; library recently-played sort + installed/updates
   filter; prefix management (reveal / Wine config / reset); CI concurrency + ccache + timeouts + read perms.

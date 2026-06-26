@@ -160,6 +160,28 @@ struct RuntimeManagerTests {
         #expect(found?.deletingLastPathComponent().lastPathComponent == "bin")
     }
 
+    @Test("locateWineBinary ignores a directory named wine (GPTK lib/wine)")
+    func locateIgnoresDirectory() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // GPTK-like: only a lib/wine DIRECTORY, no wine binary → must not be treated as Wine.
+        try tmp.makeDir("gptk/lib/wine/x86_64-windows")
+        #expect(RuntimeManager.locateWineBinary(in: tmp.url.appendingPathComponent("gptk")) == nil)
+        // Real wine has a bin/wine FILE alongside its lib/wine dir.
+        try tmp.write("wine/bin/wine", "x")
+        try tmp.makeDir("wine/lib/wine")
+        #expect(RuntimeManager.locateWineBinary(in: tmp.url.appendingPathComponent("wine"))?.lastPathComponent == "wine")
+    }
+
+    @Test("installedWines excludes GPTK installs (no wine binary, just lib/wine dir)")
+    func installedWinesExcludesGPTK() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        try tmp.makeDir("Silo/Runtimes/GPTK-4.0/lib/wine/x86_64-windows")
+        try tmp.makeDir("Silo/Runtimes/GPTK-4.0/lib/external/D3DMetal.framework")
+        try tmp.write("Silo/Runtimes/Wine-1/bin/wine64", "x")
+        let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
+        #expect(await manager.installedWines().map(\.name) == ["Wine-1"])
+    }
+
     @Test("Throws extractionFailed when tar fails")
     func extractionFails() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
