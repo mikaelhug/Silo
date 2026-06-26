@@ -3,7 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M29 COMPLETE.** 121 tests / 24 suites green; CI green.
+- **M0–M30 COMPLETE.** 122 tests / 24 suites green; CI green.
+- M30 (bug: Install Steam hung + crash storm): the silent `SteamSetup.exe /S` auto-launches Steam.exe,
+  which crash-loops under wine (Steam CEF) and spawns *hundreds* of `winedbg --auto` processes, so the
+  installer NEVER returns → app stuck "Installing…", `masterBottlePath` never set. Fix: `SteamBottleInstaller`
+  now SPAWNS the installer detached, polls for `Steam.exe` to appear (≤180s), then `wineserver -k`s the
+  bottle so the crash-loop can't accumulate; full client downloads on first real run via "Open Steam"
+  (which passes CEF-safe flags). Verified on the user's machine: bottle + Steam.exe present; storm killed.
 - M29 (D3DMetal path wiring): GPTK game launches now (a) put GPTK's `lib/external` on
   `DYLD_FALLBACK_LIBRARY_PATH` + `DYLD_FALLBACK_FRAMEWORK_PATH` so `d3d11.so` resolves
   `@rpath/libd3dshared.dylib` and `D3DMetal.framework`; (b) add GPTK's `lib/wine` to `WINEDLLPATH`
