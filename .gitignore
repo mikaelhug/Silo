@@ -1,0 +1,17 @@
+## Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+## Build output
+dist/
+*.app
+*.zip
+
+## macOS
+.DS_Store
+
+## Editor
+*.xcodeproj
+*.xcworkspace
+.vscode/
