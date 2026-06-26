@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app bundle (ad-hoc signed)
+        run: ./Scripts/build-app.sh
+
+      # Optional notarization (gated on secrets). Provide DEVELOPER_ID, AC_API_KEY_* secrets and
+      # replace the ad-hoc signing in sign.sh with a Developer ID identity to enable this.
+      # - name: Notarize
+      #   if: ${{ secrets.AC_API_KEY_ID != '' }}
+      #   run: ...
+
+      - name: Zip app
+        run: ditto -c -k --keepParent dist/Silo.app dist/Silo.zip
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Silo.zip
+          generate_release_notes: true

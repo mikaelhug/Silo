@@ -3,13 +3,16 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M12 — CI + release workflows + README (next, final)
+- **ALL 12 MILESTONES COMPLETE.** The app builds, tests, bundles, and runs headlessly with zero
+  runtimes installed. Remaining work is human-gated E2E (Wine/GPTK runtime + a downloaded game) —
+  see "Handoff checklist" below. The autonomous loop has reached its planned stop point.
 
 ## Build/test snapshot
 - `swift build`: ✅ clean (no warnings)
 - `swift test`:  ✅ 88 tests / 19 suites passing (run via `Scripts/test.sh`)
 - `Scripts/build-app.sh`: ✅ produces ad-hoc-signed `dist/Silo.app` (com.mikael.silo, min OS 26.0); bundled binary smoke-runs
-- Last green commit: M11 app-bundle scripts
+- CI/Release: ✅ `.github/workflows/{ci,release}.yml` valid YAML
+- Last green commit: M12 CI + release + README
 
 ## Task board
 
@@ -17,7 +20,7 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M12 — CI + release workflows + README · accept: `ci.yml` defined; README handoff checklist
+- _(none — all milestones complete)_
 
 ### DONE
 - M0 — Scaffold SPM project + harness docs (Package.swift, silo/SiloKit/SiloKitTests, CLAUDE.md, STATUS.md, README, .gitignore, Scripts/test.sh).
@@ -32,6 +35,7 @@
 - M9 — `GitHubRelease` model, `Updater` (GH Releases version check, numeric compare), `RuntimeManager` actor (list/fetch/download+tar-extract/remove); `FakeURLProtocol` test support; 9 tests. Note: Swift Testing runs in parallel — network tests use unique stub URLs (no shared-state reset).
 - M10 — `AppEnvironment` composition root + `SiloApp` (SwiftUI App); view models (`LibraryViewModel`, `BackendSettingsViewModel`, `GameSettingsViewModel`, `RuntimeViewModel`); views (Root/Sidebar/LibraryGrid/GameCard/Badge/BackendSettings/RuntimeManager/GameSettingsSheet/LogViewer/About/PathPickerRow); `silo --smoke` headless path; 7 VM tests.
 - M11 — `Resources/{Info.plist.template,silo.entitlements (no sandbox)}` + `Scripts/{build-app,sign,run,dev,clean}.sh`; assembles + ad-hoc signs `dist/Silo.app`, strips quarantine. Verified bundle valid + bundled binary smoke-runs.
+- M12 — `.github/workflows/{ci,release}.yml` (build+test+bundle on push/PR; tag → ad-hoc-signed Silo.zip release) + README (build, first-run setup, sandbox, legal).
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.
