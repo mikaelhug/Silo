@@ -96,7 +96,7 @@ public final class AppEnvironment {
         let steamExe = DiscoveryEngine.steamRoot(inBottle: bottle).appendingPathComponent("steam.exe")
         let log = paths.logsDir.appendingPathComponent("steam.log")
         _ = try? await runner.spawnDetached(
-            executable: wine, arguments: [steamExe.path],
+            executable: wine, arguments: [steamExe.path] + Silo.steamLaunchArgs,
             environment: ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all"],
             currentDirectory: nil, logURL: log)
     }

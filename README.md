@@ -78,9 +78,15 @@ Silo is **not** App-Sandboxed (see `Resources/silo.entitlements`): it executes `
 bundle and reads/writes `~/Library/Application Support` and the Steam bottle, which the sandbox
 forbids. User-chosen paths go through the system file picker (powerbox) to avoid TCC denials.
 
+## Wine sourcing
+
+Silo's game Wine is a **CrossOver-based build compiled from open (LGPL) source in Silo's own CI and
+hosted on Silo's Releases** — no third-party prebuilt dependency. Apple's **D3DMetal** is imported
+separately from the user's GPTK `.dmg` (login-gated, so it can't be auto-downloaded). See
+[WINE-BUILD.md](WINE-BUILD.md). CrossOver, if installed, is auto-detected and preferred.
+
 ## License / legal
 
-Silo does not bundle or download Wine, GPTK, or any Steam-API emulator. Runtimes are fetched from a
-user-visible, configurable third-party release. The optional emulator stub is **user-provided** and
+Silo does not bundle a Steam-API emulator. The optional emulator stub is **user-provided** and
 intended only for games you own; you are responsible for compliance with Steam's Subscriber
 Agreement and applicable law.

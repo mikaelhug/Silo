@@ -14,17 +14,11 @@ public enum Silo {
     /// GitHub repo (`owner/name`) the in-app updater checks for new app releases.
     public static let updateRepo = "mikaelhug/Silo"
 
-    /// Default third-party repo (`owner/name`) for downloadable Wine/GPTK runtimes.
-    /// `Gcenx/game-porting-toolkit` publishes prebuilt GPTK binaries (no Apple-ID login needed).
-    /// Overridable in Settings.
-    public static let defaultRuntimeRepo = "Gcenx/game-porting-toolkit"
-
-    /// Repo for one-click GPTK fetches. Apple's official `apple/game-porting-toolkit` has no binary
-    /// releases (DMG is behind Apple-ID login); Gcenx republishes prebuilt binaries.
-    public static let gptkRepo = "Gcenx/game-porting-toolkit"
-
-    /// Repo whose releases are prebuilt GPTK-patched Wine builds (the Wine binary GPTK runs on top of).
-    public static let wineRepo = "Gcenx/game-porting-toolkit"
+    /// Repo whose releases host Silo's own CrossOver-based Wine builds (the base D3DMetal runs on).
+    /// Self-reliant by design: built from CrossOver's open (LGPL) sources in our own CI and published
+    /// to our Releases, so we never depend on a third-party prebuilt that may go stale. See WINE-BUILD.md.
+    /// (Until the first build is published, the Wine tab is empty — install CrossOver, or override here.)
+    public static let wineRepo = "mikaelhug/Silo"
 
     /// Apple's official GPTK page (manual DMG download, requires Apple ID).
     public static let appleGPTKURL = URL(string: "https://developer.apple.com/games/game-porting-toolkit/")!
@@ -32,4 +26,8 @@ public enum Silo {
     /// Official Steam Windows installer (silent flag `/S`).
     public static let steamInstallerURL =
         URL(string: "https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe")!
+
+    /// Launch flags that keep the Steam client's CEF web helper from black-screening/crashing under
+    /// Wine (a well-known GPTK issue). Applied when opening Steam in the Master bottle.
+    public static let steamLaunchArgs = ["-allosarches", "-cef-force-32bit", "-cef-disable-gpu"]
 }
