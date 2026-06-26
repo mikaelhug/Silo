@@ -48,6 +48,25 @@ swift build              # compile
 `Scripts/test.sh` wraps `swift test` with the Swift Testing framework search path that Command Line
 Tools needs (plain `swift test` fails with "no such module 'Testing'" without Xcode).
 
+### Test locally with real Wine — no push / no GitHub needed
+
+Pushing only powers the *CI* Wine build + weekly auto-update. To exercise the whole app (incl. real
+`wineboot`, the Steam bottle, and GPTK) locally:
+
+```sh
+./Scripts/run.sh                              # build + launch the app
+
+# Provide Wine without a GitHub release — any one of:
+#  a) you have CrossOver/Whisky/Kegworks → Library toolbar gear (Advanced) → Auto-detect
+#  b) build ours, then side-load it:
+./Scripts/build-wine.sh 26.2.0                # ~30–60 min, produces .wine-build/install
+./Scripts/install-local-wine.sh .wine-build/install wine-cx-26.2.0
+#  c) point Advanced → "Wine binary" at any existing wine64
+```
+
+Then in the app: **Wine Manager → Wine tab → Set default**, **GPTK tab → import your .dmg**, and the
+Library onboarding's **Install Steam** runs `wineboot` + the Steam installer locally.
+
 CI (`.github/workflows/ci.yml`) runs build + test + bundle on every push/PR; tagging `v*` publishes
 an ad-hoc-signed `Silo.zip` via `.github/workflows/release.yml`.
 
