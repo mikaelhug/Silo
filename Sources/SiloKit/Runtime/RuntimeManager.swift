@@ -41,7 +41,7 @@ public actor RuntimeManager {
     /// The latest `limit` releases of `repo` (newest first) — for the Heroic-style Wine list.
     public func availableReleases(repo: String, limit: Int = 3) async throws -> [GitHubRelease] {
         let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=\(limit)")!
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await session.data(for: .github(url))
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw RuntimeError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
@@ -94,7 +94,7 @@ public actor RuntimeManager {
     /// Downloadable assets from the latest release of `repo`.
     public func availableAssets(repo: String) async throws -> [GitHubRelease.Asset] {
         let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await session.data(for: .github(url))
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw RuntimeError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)
         }

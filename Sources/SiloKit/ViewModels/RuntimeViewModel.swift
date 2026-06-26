@@ -32,11 +32,13 @@ public final class RuntimeViewModel {
         }
     }
 
-    /// Fetch the latest few Wine releases to offer for install.
+    /// Fetch the latest few Wine releases to offer for install. The Wine repo may also host the app's
+    /// own `v*` releases, so keep only `wine-*` tags (and take the newest 3).
     public func fetchLatest() async {
         do {
-            latest = try await manager.availableReleases(repo: repo, limit: 3)
-            if latest.isEmpty { statusMessage = "No Wine releases found." }
+            let all = try await manager.availableReleases(repo: repo, limit: 15)
+            latest = Array(all.filter { $0.tagName.lowercased().hasPrefix("wine") }.prefix(3))
+            if latest.isEmpty { statusMessage = "No Wine releases found yet." }
         } catch {
             statusMessage = "Couldn't fetch Wine versions: \((error as NSError).localizedDescription)"
         }

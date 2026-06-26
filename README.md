@@ -9,7 +9,7 @@ Wine prefix** — separate `WINEPREFIX`, graphics backend, and environment — w
 
 - Native SwiftUI, async/await, no main-thread blocking.
 - **Self-contained:** no Homebrew dependency. Downloads its own Wine/GPTK runtime from a
-  configurable GitHub release (Heroic-style) and self-updates from GitHub Releases.
+  configurable GitHub release (Heroic-style); app updates are distributed via GitHub Releases.
 - **Per-game isolation:** GPTK / D3DMetal primary, CrossOver wine fallback; per-game env flags
   (ESYNC / MSYNC / Metal HUD) and Steam-presence strategy.
 

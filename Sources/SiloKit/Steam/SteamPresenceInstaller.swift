@@ -53,16 +53,25 @@ public struct SteamPresenceInstaller: Sendable {
             }
             var receipt = Receipt()
             let dest = dir.appendingPathComponent(stubSource.lastPathComponent)
-            if fileManager.fileExists(atPath: dest.path) {
+            let destExists = fileManager.fileExists(atPath: dest.path)
+            // Idempotent re-apply: if our stub is already in place, don't "back it up" as if it were
+            // the game's original DLL (that previously overwrote the real backup → permanent data loss).
+            let alreadyOurStub = destExists && fileManager.contentsEqual(atPath: dest.path, andPath: stubSource.path)
+
+            if destExists && !alreadyOurStub {
                 let backup = dir.appendingPathComponent(stubSource.lastPathComponent + ".silo-backup")
-                if fileManager.fileExists(atPath: backup.path) { try fileManager.removeItem(at: backup) }
-                try fileManager.copyItem(at: dest, to: backup)
+                // Preserve the real original ONCE; never overwrite an existing backup on re-apply.
+                if !fileManager.fileExists(atPath: backup.path) {
+                    try fileManager.copyItem(at: dest, to: backup)
+                }
                 try fileManager.removeItem(at: dest)
                 receipt.backups.append(Backup(original: dest, backup: backup))
-            } else {
+            } else if !destExists {
                 receipt.createdFiles.append(dest)
             }
-            try fileManager.copyItem(at: stubSource, to: dest)
+            if !alreadyOurStub {
+                try fileManager.copyItem(at: stubSource, to: dest)
+            }
             receipt.createdFiles.append(try writeAppID(appID, in: dir))
             return receipt
 
