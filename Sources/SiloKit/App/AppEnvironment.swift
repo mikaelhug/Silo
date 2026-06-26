@@ -48,9 +48,16 @@ public final class AppEnvironment {
         self.backendSettings = BackendSettingsViewModel(
             config: initialBackend, resolver: BackendResolver(), configStore: configStore,
             steamInstaller: SteamBottleInstaller(runner: runner), paths: paths)
-        self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.defaultRuntimeRepo)
+        self.runtime = RuntimeViewModel(
+            manager: runtimeManager, repo: Silo.defaultRuntimeRepo,
+            gptkImporter: GPTKImporter(runner: runner, paths: paths))
 
         backendSettings.onChange = { [weak library] config in library?.updateBackend(config) }
+        runtime.onGPTKImported = { [weak self] result in
+            guard let self else { return }
+            self.backendSettings.config.gptkLibDirPath = result.gptkLibDir
+            Task { await self.backendSettings.save() }
+        }
     }
 
     /// Load persisted config and populate the UI. Idempotent.

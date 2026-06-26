@@ -3,10 +3,10 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **Milestone:** M15 — Import GPTK from Apple `.dmg` (next). M0–M14 done.
-- **Pivot (user, 2026-06-26):** GPTK acquisition is NOT a 1-click GitHub fetch. Apple ships GPTK as a
-  `.dmg`; Silo offers "Browse to .dmg" then mounts + extracts the needed content. Test DMG at repo
-  root: `Game_Porting_Toolkit_4.0_beta_1.dmg` (gitignored).
+- **Milestone:** M16 — Install entire library after login (next). M0–M15 done.
+- **Pivot (user, 2026-06-26):** GPTK acquisition is "Browse to Apple `.dmg`" → Silo mounts + extracts
+  `redist/lib`. VERIFIED against the real `Game_Porting_Toolkit_4.0_beta_1.dmg` (gitignored) via
+  `silo --import-gptk <dmg>`: extracts D3DMetal.framework + 6 DLLs to Runtimes/GPTK (68M), clean detach.
 
 ## Research findings (2026-06-26, grounds M13–M16)
 - `apple/game-porting-toolkit` is a **resources repo, no binary releases**; official GPTK = a DMG
@@ -32,7 +32,6 @@
 - _(none)_
 
 ### TODO (in order; each ends in a green commit)
-- M15 — Import GPTK from Apple `.dmg` (browse → mount → extract wine+D3DMetal) · accept: `GPTKImporterTests`
 - M16 — Install entire library after login · accept: `OwnedAppsReaderTests`, `SteamLibraryInstallerTests`
 
 ### DONE
@@ -51,6 +50,7 @@
 - M12 — `.github/workflows/{ci,release}.yml` (build+test+bundle on push/PR; tag → ad-hoc-signed Silo.zip release) + README (build, first-run setup, sandbox, legal).
 - M13 — App icon: CoreGraphics generator (`Scripts/make-icon.swift`) + `make-icon.sh` (sips/iconutil) -> `Resources/AppIcon.icns`; wired via `CFBundleIconFile`; bundled by build-app.sh.
 - M14 — `SteamBottleInstaller` (boot bottle → download SteamSetup.exe → silent `/S` install) + `BackendConfig.steamWine` (vanilla fallback) + AppPaths.masterBottleDefault; "Create Master Steam Bottle (1-click)" button + VM; 4 tests.
+- M15 — `GPTKImporter` (browse Apple .dmg → `hdiutil attach` outer+nested via plist → copy `redist/lib` → Runtimes/GPTK, set `gptkLibDirPath`); RuntimeVM.importGPTK + "Import GPTK from .dmg…" UI + Apple link; `silo --import-gptk` CLI; **verified on real GPTK 4.0 DMG**; 4 tests. Decision log: GPTK has no wine binary (overlay only); base wine still from CrossOver/download.
 
 ## Decision log
 - 2026-06-26 — Use Swift Testing (`import Testing`) not XCTest: bundled in toolchain, keeps zero deps. XCTest is NOT available under Command Line Tools (no Xcode), Testing is.

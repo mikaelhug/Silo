@@ -109,9 +109,11 @@ struct ViewModelTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         try tmp.makeDir("Silo/Runtimes/GPTK-2.1/bin")
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let runner = FakeProcessRunner()
         let vm = RuntimeViewModel(
-            manager: RuntimeManager(paths: paths, runner: FakeProcessRunner()),
-            repo: "acme/gptk")
+            manager: RuntimeManager(paths: paths, runner: runner),
+            repo: "acme/gptk",
+            gptkImporter: GPTKImporter(runner: runner, paths: paths))
         await vm.refreshInstalled()
         #expect(vm.installed.map(\.name) == ["GPTK-2.1"])
     }
