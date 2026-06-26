@@ -50,7 +50,7 @@ public final class AppEnvironment {
         self.backendSettings = BackendSettingsViewModel(
             config: initialBackend, resolver: BackendResolver(), configStore: configStore,
             steamInstaller: SteamBottleInstaller(runner: runner), paths: paths)
-        self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.defaultRuntimeRepo)
+        self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
         backendSettings.onChange = { [weak library] config in library?.updateBackend(config) }
@@ -58,6 +58,12 @@ public final class AppEnvironment {
             guard let self else { return }
             self.backendSettings.config.gptkLibDirPath = install.gptkLibDir
             self.backendSettings.config.gptkRuntimeName = install.name
+            Task { await self.backendSettings.save() }
+        }
+        runtime.onDefaultChanged = { [weak self] wine in
+            guard let self else { return }
+            self.backendSettings.config.wineBinaryPath = wine.wineBinary
+            self.backendSettings.config.wineRuntimeName = wine.name
             Task { await self.backendSettings.save() }
         }
     }
@@ -71,8 +77,9 @@ public final class AppEnvironment {
         library.updateBackend(state.backend)
         gptkManager.defaultName = state.backend.gptkRuntimeName
         gptkManager.refresh()
+        runtime.defaultName = state.backend.wineRuntimeName
+        await runtime.refresh()
         await library.refresh()
-        await runtime.refreshInstalled()
     }
 
     /// Build a per-game settings view model with the game's persisted config.

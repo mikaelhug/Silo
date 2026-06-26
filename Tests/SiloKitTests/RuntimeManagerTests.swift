@@ -72,6 +72,57 @@ struct RuntimeManagerTests {
         #expect(await manager.installedRuntimes().isEmpty)
     }
 
+    @Test("Lists the latest N releases and picks the archive asset")
+    func releases() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let json = """
+        [
+          {"tag_name":"Game-Porting-Toolkit-3.0-3","name":"GPTK 3.0-3","assets":[
+            {"name":"game-porting-toolkit-3.0-3.tar.xz","browser_download_url":"https://e.com/3.tar.xz","size":239200808}]},
+          {"tag_name":"Game-Porting-Toolkit-3.0-2","name":"GPTK 3.0-2","assets":[
+            {"name":"game-porting-toolkit-3.0-2.tar.xz","browser_download_url":"https://e.com/2.tar.xz","size":260757848}]}
+        ]
+        """
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/wine/releases?per_page=3", data: Data(json.utf8))
+        let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
+        let releases = try await manager.availableReleases(repo: "acme/wine", limit: 3)
+        #expect(releases.map(\.tagName) == ["Game-Porting-Toolkit-3.0-3", "Game-Porting-Toolkit-3.0-2"])
+        #expect(RuntimeManager.preferredAsset(releases[0])?.name == "game-porting-toolkit-3.0-3.tar.xz")
+    }
+
+    @Test("installWine downloads, extracts, and locates the wine binary")
+    func installWine() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let url = "https://e.com/wine.tar.xz"
+        FakeURLProtocol.stub(url, data: Data("ARCHIVE".utf8))
+        let fake = FakeProcessRunner()
+        // Simulate tar extracting a nested wine tree with a top-level dir.
+        fake.onRun = { inv in
+            if inv.executable.lastPathComponent == "tar",
+               let i = inv.arguments.firstIndex(of: "-C"), i + 1 < inv.arguments.count {
+                let dest = URL(fileURLWithPath: inv.arguments[i + 1])
+                let bin = dest.appendingPathComponent("wine-build/bin")
+                try? FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+                FileManager.default.createFile(atPath: bin.appendingPathComponent("wine64").path, contents: Data("x".utf8))
+            }
+        }
+        let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())
+        let wine = try await manager.installWine(name: "Wine-Test", from: URL(string: url)!)
+        #expect(wine.wineBinary?.lastPathComponent == "wine64")
+        #expect(wine.isUsable)
+        #expect(await manager.installedWines().map(\.name) == ["Wine-Test"])
+    }
+
+    @Test("locateWineBinary prefers wine64 under a bin directory")
+    func locate() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        try tmp.write("r/wine-build/bin/wine64", "x")
+        try tmp.write("r/other/wine", "x")
+        let found = RuntimeManager.locateWineBinary(in: tmp.url.appendingPathComponent("r"))
+        #expect(found?.lastPathComponent == "wine64")
+        #expect(found?.deletingLastPathComponent().lastPathComponent == "bin")
+    }
+
     @Test("Throws extractionFailed when tar fails")
     func extractionFails() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

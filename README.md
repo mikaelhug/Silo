@@ -56,13 +56,17 @@ an ad-hoc-signed `Silo.zip` via `.github/workflows/release.yml`.
 Silo builds and tests fully on a clean machine, but launching a real game needs a runtime + a
 downloaded game:
 
-1. **Runtime** — in *Runtimes*, set the GitHub repo and install a Wine/GPTK build (or point
-   *Backend & Runtime* at an existing Whisky/Kegworks/CrossOver install via Auto-detect).
-2. **Master Steam bottle** — create a simple Wine bottle, install Windows Steam into it, log in, and
-   download at least one game. Point Silo at the bottle folder in *Backend & Runtime*.
+1. **Wine Manager** — two tabs:
+   - *Wine* — install a prebuilt Wine build in one click (lists the latest releases).
+   - *GPTK* — "Import GPTK from Apple .dmg…": Silo mounts the DMG and extracts the D3DMetal layer.
+   Set a default in each tab. (GPTK is only the graphics layer — it needs a Wine binary underneath,
+   which the Wine tab provides.)
+2. **Master Steam bottle** — in *Setup*, click "Create Master Steam Bottle (1-click)" (or point at an
+   existing bottle). Then open Steam, log in, and download games — or use **Install entire library**.
 3. **Play** — Silo discovers the game; **Isolate** seeds its prefix, **Play** launches it in GPTK
    (CrossOver fallback) in an isolated `WINEPREFIX`. Use *Settings* per game for backend, env flags,
-   executable, and Steam-presence strategy; *View Log* to see output.
+   executable, and Steam-presence strategy; *View Log* to see output. (Manual wine/DXVK paths live
+   under *Setup → Advanced*.)
 
 > Gatekeeper: the app is ad-hoc signed, so a downloaded build is quarantined until you right-click →
 > Open (or run `xattr -dr com.apple.quarantine Silo.app`). Signed distribution requires an Apple

@@ -105,17 +105,17 @@ struct ViewModelTests {
         #expect(await ConfigStore(paths: paths).load().backend.detectedSource == .whisky)
     }
 
-    @Test("RuntimeViewModel lists installed runtimes")
+    @Test("RuntimeViewModel lists installed Wine builds")
     func runtimeVM() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        try tmp.makeDir("Silo/Runtimes/GPTK-2.1/bin")
+        try tmp.write("Silo/Runtimes/Wine-9.0/bin/wine64", "x")
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let runner = FakeProcessRunner()
         let vm = RuntimeViewModel(
-            manager: RuntimeManager(paths: paths, runner: runner),
-            repo: "acme/gptk")
-        await vm.refreshInstalled()
-        #expect(vm.installed.map(\.name) == ["GPTK-2.1"])
+            manager: RuntimeManager(paths: paths, runner: FakeProcessRunner()),
+            repo: "acme/wine")
+        await vm.refresh()
+        #expect(vm.installed.map(\.name) == ["Wine-9.0"])
+        #expect(vm.installed.first?.wineBinary?.lastPathComponent == "wine64")
     }
 
     @Test("AppEnvironment bootstraps from persisted config")
