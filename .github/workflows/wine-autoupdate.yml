@@ -1,8 +1,16 @@
 name: Wine auto-update (watch CrossOver)
 
-# Keeps Silo's Wine current with CrossOver automatically: weekly, detect the latest CrossOver release
-# (via the Homebrew cask version — same number CrossOver publishes its source under), and if we
-# haven't built it yet, build + publish a wine-cx-<version> release. See WINE-BUILD.md.
+# Keeps Silo's Wine current with CrossOver automatically: weekly, detect the latest CrossOver release,
+# and if we haven't built it yet, build + publish a wine-cx-<version> release. See WINE-BUILD.md.
+#
+# Why the Homebrew cask (not a GitHub repo) is the version pointer:
+#   - CodeWeavers has NO public GitHub repo for CrossOver source (CodeWeavers/wine is 404). The
+#     authoritative source is media.codeweavers.com, whose directory has no listing (HTTP 403).
+#   - The only GitHub mirror, PhoenicisOrg/winecx, is a COMMUNITY mirror that lags (e.g. it sat at
+#     winecx-25.1.0 while CrossOver was already 26.2.0) — using it would keep us a version behind.
+#   - The Homebrew `crossover` cask is autobumped promptly and machine-readable, and the version it
+#     reports is exactly the number CodeWeavers publishes the source tarball under. So it's a thin,
+#     fresh POINTER; the actual source we build is still CodeWeavers' own tarball (verified below).
 
 on:
   schedule:

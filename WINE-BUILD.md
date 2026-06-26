@@ -55,6 +55,16 @@ it. So new CrossOver releases get picked up with no manual work.
 published build shows up there with an Install button (already-installed versions show "Installed"),
 so users can update on their own schedule.
 
+### Why the Homebrew cask is the version pointer (not a GitHub repo)
+- CodeWeavers has **no public GitHub source repo** (`CodeWeavers/wine` → 404). The authoritative
+  source is `media.codeweavers.com`, which has **no browseable index** (HTTP 403).
+- The only GitHub mirror, `PhoenicisOrg/winecx`, is a **community mirror that lags** (it was at
+  `winecx-25.1.0` while CrossOver was already `26.2.0`) — using it as the source of truth would keep
+  us a version behind.
+- So we use the Homebrew `crossover` cask only as a **fresh, machine-readable version pointer** (it's
+  autobumped to the real CrossOver version); the source we actually build is still CodeWeavers' own
+  tarball, verified to exist before building. The cask is the oracle, not the source.
+
 ## Status / caveats
 - Building Wine for macOS is intricate and slow (~30+ min) and **the workflow needs CI iteration to
   converge — it is not yet validated end-to-end.** Until the first `wine-*` release is published, the
