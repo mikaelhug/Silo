@@ -84,20 +84,25 @@ public struct SteamBottle: Sendable {
     }
 
     /// Replace the bottle's `steamwebhelper.exe` with Silo's CEF wrapper so the UI paints. Idempotent and
-    /// safe to call before every launch: Steam updates can restore the stock binary, in which case the
-    /// current real one is re-preserved as `…_orig.exe`. No-op if the wine runtime doesn't ship the wrapper
-    /// (older build) or Steam isn't installed yet.
+    /// safe to call before every launch: handles a fresh install, a Steam update that restored the stock
+    /// binary, AND a wrapper-VERSION change (e.g. new CEF flags) without corrupting the preserved original.
+    /// No-op if the wine runtime doesn't ship the wrapper (older build) or Steam isn't installed yet.
     public func installWebHelperWrapper(wine: URL) throws {
         let wrapper = wine.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe")
         let helper = paths.steamBottleWebHelper
         guard fileManager.fileExists(atPath: wrapper.path),
               fileManager.fileExists(atPath: helper.path) else { return }
-        if fileManager.contentsEqual(atPath: helper.path, andPath: wrapper.path) { return }   // already wrapped
-        // `helper` is the real webhelper (fresh install or a Steam update): preserve it, then drop the wrapper.
+        if fileManager.contentsEqual(atPath: helper.path, andPath: wrapper.path) { return }   // already current
         let real = helper.deletingLastPathComponent().appendingPathComponent("steamwebhelper_orig.exe")
-        if fileManager.fileExists(atPath: real.path) { try fileManager.removeItem(at: real) }
-        try fileManager.moveItem(at: helper, to: real)
+        if fileManager.fileExists(atPath: real.path) {
+            // The real webhelper is already preserved; `helper` is a STALE wrapper (e.g. older flags) —
+            // replace just it, so we never move a wrapper over the genuine `…_orig.exe`.
+            try fileManager.removeItem(at: helper)
+        } else {
+            // `helper` is the real webhelper (fresh install or a Steam update): preserve it once.
+            try fileManager.moveItem(at: helper, to: real)
+        }
         try fileManager.copyItem(at: wrapper, to: helper)
     }
 
