@@ -16,8 +16,9 @@ public final class GameLibraryViewModel {
     public private(set) var downloadingIDs: Set<Int> = []
     public private(set) var runningPIDs: [Int: Int32] = [:]   // appID → launched wine PID
     public var searchText: String = ""
-    /// Hide games that also have a native macOS build (run those in the Steam app instead).
-    public var showWindowsOnly: Bool = false
+    /// Hide games that also have a native macOS build (run those in the Steam app instead). On by
+    /// default — Silo is for the games that *need* Wine/GPTK.
+    public var showWindowsOnly: Bool = true
     public var statusMessage: String?
 
     private let steamCMD: SteamCMDClient
@@ -101,12 +102,10 @@ public final class GameLibraryViewModel {
     public func load() async {
         await refreshInstalled()
         guard let username, !username.isEmpty else { loadState = .needsLogin; return }
-        if let cached = await cache.load(), cached.username == username, !cached.games.isEmpty {
-            owned = cached.games
-            loadState = .loaded
-        } else if owned.isEmpty {
-            loadState = .loading
+        if let cached = await cache.load(), cached.username == username {
+            owned = cached.games.filter(\.windowsPlayable)   // self-heal: drop anything stale that isn't a Windows game
         }
+        if owned.isEmpty { loadState = .loading } else { loadState = .loaded }
         startRefresh(username: username)
     }
 
@@ -143,7 +142,9 @@ public final class GameLibraryViewModel {
     private func merge(_ fresh: [SteamAppInfo]) -> [SteamAppInfo] {
         var byID = Dictionary(owned.map { ($0.appID, $0) }, uniquingKeysWith: { _, new in new })
         for game in fresh { byID[game.appID] = game }
-        owned = byID.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        owned = byID.values
+            .filter(\.windowsPlayable)   // drop stale non-games (e.g. cached Proton/un-typed apps)
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         loadState = owned.isEmpty ? .empty : .loaded
         return owned
     }

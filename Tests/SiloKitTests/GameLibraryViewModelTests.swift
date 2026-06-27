@@ -69,7 +69,7 @@ struct GameLibraryViewModelTests {
         let (vm, fake, paths) = make(tmp)
         await LibraryCacheStore(paths: paths).save(
             username: "alice",
-            games: [SteamAppInfo(appID: 730, name: "CS", oslist: ["windows"])], at: Date())
+            games: [SteamAppInfo(appID: 730, name: "CS", oslist: ["windows"], type: "game")], at: Date())
         vm.setAccount(username: "alice")
         await vm.load()
         #expect(vm.owned.map(\.appID) == [730])           // shown from cache, no enumeration needed

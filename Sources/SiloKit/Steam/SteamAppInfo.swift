@@ -25,13 +25,13 @@ public struct SteamAppInfo: Sendable, Equatable, Identifiable, Codable {
     }
     /// A game that runs on Windows but has **no** native macOS build.
     public var isWindowsOnly: Bool { supportsWindows && !supportsMac }
-    public var isGame: Bool { (type ?? "game").caseInsensitiveCompare("game") == .orderedSame }
+    /// Strictly a game (type == "game"). Missing/other types (Tool like Proton, Application, Demo, DLC,
+    /// Config, Music, …) are NOT games — keeps runtimes and un-typed apps out of the library.
+    public var isGame: Bool { type?.caseInsensitiveCompare("game") == .orderedSame }
 
-    /// Whether to list in Silo: an owned **game** (not DLC/tool/soundtrack) that can run on Windows.
-    /// Resilient to missing metadata — if platforms are unknown (e.g. a cold app_info cache), keep it
-    /// rather than silently hiding an owned game. Mac-capable games are still listed (you may prefer the
-    /// Windows build via GPTK); the UI can filter those out separately.
-    public var windowsPlayable: Bool { isGame && (supportsWindows || oslist.isEmpty) }
+    /// Whether to list in Silo: an owned **game** (strictly typed) that runs on Windows. Mac-capable
+    /// games are still returned by the enumerator; the UI hides them by default via the Windows-only toggle.
+    public var windowsPlayable: Bool { isGame && supportsWindows }
 
     // MARK: - Parsing
 

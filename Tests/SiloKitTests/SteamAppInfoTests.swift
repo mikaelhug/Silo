@@ -67,4 +67,18 @@ struct SteamAppInfoTests {
     func missing() {
         #expect(SteamAppInfo.parse(appInfoOutput: dump, appID: 999) == nil)
     }
+
+    @Test("Strict game typing: Tools (Proton) and un-typed apps are not games / not Windows-playable")
+    func strictGameType() {
+        let d = """
+        "1493710" { "common" { "name" "Proton" "type" "Tool" "oslist" "windows" } }
+        "205" { "common" { "oslist" "windows" } }
+        "220" { "common" { "name" "HL2" "type" "Game" "oslist" "windows" } }
+        """
+        #expect(SteamAppInfo.parse(appInfoOutput: d, appID: 1493710)?.isGame == false)   // Tool
+        #expect(SteamAppInfo.parse(appInfoOutput: d, appID: 205)?.isGame == false)       // no type
+        #expect(SteamAppInfo.parse(appInfoOutput: d, appID: 220)?.isGame == true)
+        #expect(SteamAppInfo.parse(appInfoOutput: d, appID: 1493710)?.windowsPlayable == false)
+        #expect(SteamAppInfo.parse(appInfoOutput: d, appID: 220)?.windowsPlayable == true)
+    }
 }
