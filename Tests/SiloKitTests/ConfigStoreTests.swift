@@ -72,13 +72,13 @@ struct ConfigStoreTests {
         #expect(g.envFlags.syncMode == .msync)   // Apple-Silicon default
     }
 
-    @Test("AppPaths derives prefix / log / config locations")
+    @Test("AppPaths derives log / config / bottle locations")
     func appPaths() {
         let paths = AppPaths(supportDir: URL(fileURLWithPath: "/sup/Silo"))
-        #expect(paths.prefix(forAppID: 220).path == "/sup/Silo/Prefixes/220")
         #expect(paths.log(forAppID: 220).path == "/sup/Silo/Logs/220.log")
         #expect(paths.configFile.lastPathComponent == "config.json")
         #expect(paths.runtimesDir.lastPathComponent == "Runtimes")
+        #expect(paths.steamBottleExe.path.hasSuffix("/SteamBottle/drive_c/Program Files (x86)/Steam/steam.exe"))
     }
 
     @Test("EnvFlags produces backend-appropriate environment")

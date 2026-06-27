@@ -33,12 +33,13 @@ WINE_SRC="$(find src -maxdepth 3 -type d -name wine | head -1)"
 echo "==> Configure + build (x86_64, wow64) — this takes ~30–60 min"
 export PATH="$($ARCH "$BREW" --prefix bison)/bin:$PATH"
 rm -rf build install && mkdir build install && cd build
-# CFLAGS=-fvisibility=default: build Wine's UNIX side with all symbols visible so winemac.drv ('macdrv')
-# exposes its Metal/window-surface helpers via dlsym. Without this the macOS surface-presentation path is
-# broken for layered windows and Steam's CEF UI (and D3D→Metal games) paint BLACK/transparent even in
-# software compositing — the verified fix for running Windows Steam on Apple-Silicon macOS. -O2 restores
-# the optimization an explicit CFLAGS would otherwise drop.
-$ARCH env CFLAGS="-fvisibility=default -O2" \
+# -fvisibility=default: build Wine with all symbols visible so winemac.drv ('macdrv') exposes its
+# Metal/window-surface helpers via dlsym. Without it the macOS surface-presentation path is broken for
+# layered windows and Steam's CEF UI (and D3D→Metal games) paint BLACK/transparent even in software
+# compositing — the verified fix for Windows Steam on Apple-Silicon macOS. Set on BOTH CFLAGS (Wine's
+# Unix-side .so thunks, incl. winemac.so) AND CROSSCFLAGS (the PE-side built-in DLLs) so it can't miss the
+# load-bearing translation unit. -O2 keeps the optimization an explicit *FLAGS would otherwise drop.
+$ARCH env CFLAGS="-fvisibility=default -O2" CROSSCFLAGS="-fvisibility=default -O2" \
   "$WORK/$WINE_SRC/configure" --prefix="$WORK/install" \
   --enable-archs=i386,x86_64 --disable-tests --without-x \
   --with-freetype --with-gstreamer --with-gnutls

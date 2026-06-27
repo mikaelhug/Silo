@@ -7,9 +7,7 @@ public final class AppEnvironment {
     public let paths: AppPaths
     let configStore: ConfigStore
     let runner: ProcessRunning
-    let provisioner: PrefixProvisioner
     let linker: GraphicsLinker
-    let logStore: GameLogStore
     let orchestrator: LaunchOrchestrator
     let discovery: DiscoveryEngine
     let runtimeManager: RuntimeManager
@@ -34,18 +32,13 @@ public final class AppEnvironment {
         self.updater = updater
 
         let configStore = ConfigStore(paths: paths)
-        let provisioner = PrefixProvisioner(runner: runner, paths: paths)
         let linker = GraphicsLinker()
-        let logStore = GameLogStore(paths: paths)
         let discovery = DiscoveryEngine()
-        let orchestrator = LaunchOrchestrator(
-            runner: runner, provisioner: provisioner, linker: linker, logStore: logStore)
+        let orchestrator = LaunchOrchestrator(runner: runner, linker: linker)
         let runtimeManager = RuntimeManager(paths: paths, runner: runner)
 
         self.configStore = configStore
-        self.provisioner = provisioner
         self.linker = linker
-        self.logStore = logStore
         self.discovery = discovery
         self.orchestrator = orchestrator
         self.runtimeManager = runtimeManager
@@ -121,7 +114,7 @@ public final class AppEnvironment {
 
     /// A game's launch log (per appID).
     public nonisolated func logURL(forAppID appID: Int) -> URL {
-        logStore.logURL(forAppID: appID)
+        paths.log(forAppID: appID)
     }
 
     /// The log-window target for a game (title + its log URL), opened via `openWindow(id:)`.

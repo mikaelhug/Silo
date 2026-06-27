@@ -1,9 +1,8 @@
 import Foundation
 
-/// How an isolated game prefix satisfies a game's expectation that Steam is present.
-///
-/// An isolated game prefix can't see an external Steam client (Steam IPC is prefix-scoped), so each
-/// game picks a strategy to satisfy titles that expect Steam.
+/// How a game satisfies its expectation that Steam is present. In the bottle model a real Steam client is
+/// already co-resident, so the default (`.steamAppIDFile`) is usually enough; this stays per-game for the
+/// rare title that needs more.
 public enum SteamPresenceStrategy: String, Sendable, CaseIterable, Identifiable {
     /// Game needs no Steam presence.
     case none

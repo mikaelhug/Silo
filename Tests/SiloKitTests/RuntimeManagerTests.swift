@@ -11,31 +11,6 @@ struct RuntimeManagerTests {
                        runner: fake, session: session)
     }
 
-    @Test("Lists installed runtimes from the Runtimes dir")
-    func installed() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        try tmp.makeDir("Silo/Runtimes/GPTK-2.1/bin")
-        try tmp.makeDir("Silo/Runtimes/CrossOver-24/bin")
-        let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
-        let runtimes = await manager.installedRuntimes()
-        #expect(runtimes.map(\.name) == ["CrossOver-24", "GPTK-2.1"])   // sorted
-    }
-
-    @Test("Fetches available assets from a release")
-    func available() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let json = """
-        { "tag_name":"GPTK-2.1","name":"GPTK 2.1","assets":[
-          {"name":"gptk-2.1.tar.gz","browser_download_url":"https://example.com/gptk.tar.gz","size":999}]}
-        """
-        FakeURLProtocol.stub("https://api.github.com/repos/acme/gptk/releases/latest", data: Data(json.utf8))
-        let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
-        let assets = try await manager.availableAssets(repo: "acme/gptk")
-        #expect(assets.count == 1)
-        #expect(assets[0].name == "gptk-2.1.tar.gz")
-        #expect(assets[0].browserDownloadUrl.absoluteString == "https://example.com/gptk.tar.gz")
-    }
-
     @Test("Downloads and extracts a runtime via tar")
     func install() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -67,10 +42,10 @@ struct RuntimeManagerTests {
 
         // Archive is cleaned up; installed list now includes the runtime.
         #expect(!FileManager.default.fileExists(atPath: runtimesDir.appendingPathComponent("GPTK-Test.archive").path))
-        #expect(await manager.installedRuntimes().map(\.name) == ["GPTK-Test"])
+        #expect(await manager.installedWines().map(\.name) == ["GPTK-Test"])
 
         try await manager.remove(name: "GPTK-Test")
-        #expect(await manager.installedRuntimes().isEmpty)
+        #expect(await manager.installedWines().isEmpty)
     }
 
     @Test("Lists the latest N releases and picks the archive asset")

@@ -10,7 +10,7 @@ struct LogTarget: Identifiable, Hashable, Codable {
     let url: URL
 }
 
-/// Live, trailing viewer for any log file (per-game launch log or the master Steam log). Opens as a
+/// Live, trailing viewer for any log file (a per-game launch log or the Steam-bottle log). Opens as a
 /// standalone window (not a modal sheet) so it stays up while you drive the main app.
 /// Updates **reactively** when the file is written (a kqueue file-watcher, no polling); autoscrolls to
 /// the bottom unless the user pauses it.

@@ -11,14 +11,13 @@ struct GameLibraryViewModelTests {
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
         let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
-        let orchestrator = LaunchOrchestrator(
-            runner: fake, provisioner: PrefixProvisioner(runner: fake, paths: paths),
-            linker: GraphicsLinker(), logStore: GameLogStore(paths: paths))
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
         var backend = BackendConfig()
         if wine { backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64") }
         let vm = GameLibraryViewModel(
             bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
             configStore: ConfigStore(paths: paths), paths: paths, backend: backend)
+        vm.coldStartGraceSeconds = 0   // don't wait for the (fake) Steam to "boot" in tests
         return (vm, fake, paths)
     }
 

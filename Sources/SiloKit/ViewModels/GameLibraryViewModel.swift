@@ -25,6 +25,12 @@ public final class GameLibraryViewModel {
     private let paths: AppPaths
     private var backend: BackendConfig
     private var runObservers: [Int: any ProcessObservation] = [:]
+    /// The bottle's Steam client PID (so we launch it once and don't relaunch per game).
+    private var steamPID: Int32?
+    private var steamObserver: (any ProcessObservation)?
+    /// Seconds to wait after cold-starting Steam before launching a game (lets it boot + auto-login).
+    /// Overridden to 0 in tests.
+    var coldStartGraceSeconds: Double = 10
 
     public init(
         bottle: SteamBottle,
@@ -84,32 +90,52 @@ public final class GameLibraryViewModel {
 
     public func refresh() async { await load() }
 
+    // MARK: - The co-resident Steam client
+
+    /// Bring the bottle's Steam client up (and keep it tracked) if it isn't already running. On a cold
+    /// start, waits briefly for Steam to boot, auto-login from cache, and connect before returning — so a
+    /// game launched right after can actually reach it via Steamworks.
+    private func ensureSteamRunning() async {
+        if let pid = steamPID, orchestrator.isRunning(pid: pid) { return }   // already up
+        guard let pid = await launchSteamProcess() else { return }
+        steamPID = pid
+        steamObserver = orchestrator.observeExit(pid: pid) { [weak self] in
+            Task { @MainActor in if self?.steamPID == pid { self?.steamPID = nil } }
+        }
+        if coldStartGraceSeconds > 0 { try? await Task.sleep(for: .seconds(coldStartGraceSeconds)) }
+    }
+
+    /// Launch the bottle's Steam (re-applying the steamwebhelper wrapper first); returns the PID.
+    @discardableResult
+    private func launchSteamProcess(extra: [String] = []) async -> Int32? {
+        do {
+            if let wine = backend.wineBinaryPath { try bottle.installWebHelperWrapper(wine: wine) }
+            return try await bottle.launchSteam(wine: backend.wineBinaryPath,
+                                                extraArgs: SteamBottle.cefRenderArgs + extra)
+        } catch {
+            setStatus("Couldn't launch Steam: \((error as NSError).localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Install / uninstall (delegated to the bottle's Steam)
 
     /// Open the bottle's Steam to a game's install dialog (Steam handles the download + DRM).
     public func install(appID: Int) async {
-        await launchSteam(extra: ["steam://install/\(appID)"])
+        await ensureSteamRunning()
+        _ = await launchSteamProcess(extra: ["steam://install/\(appID)"])
         setStatus("Opening Steam to install… install it there, then Refresh.")
     }
 
     /// Open the bottle's Steam (Store/Library) so the user can browse + install games.
-    public func openSteam() async { await launchSteam(extra: []) }
+    public func openSteam() async { await ensureSteamRunning() }
 
     /// Ask the bottle's Steam to uninstall a game, then refresh.
     public func uninstall(_ game: SteamApp) async {
         guard !isRunning(game) else { return }
-        await launchSteam(extra: ["steam://uninstall/\(game.appID)"])
+        await ensureSteamRunning()
+        _ = await launchSteamProcess(extra: ["steam://uninstall/\(game.appID)"])
         setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
-    }
-
-    private func launchSteam(extra: [String]) async {
-        do {
-            if let wine = backend.wineBinaryPath { try? bottle.installWebHelperWrapper(wine: wine) }
-            _ = try await bottle.launchSteam(wine: backend.wineBinaryPath,
-                                             extraArgs: SteamBottle.cefRenderArgs + extra)
-        } catch {
-            setStatus("Couldn't launch Steam: \((error as NSError).localizedDescription)")
-        }
     }
 
     // MARK: - Launch (co-resident in the bottle)
@@ -119,8 +145,8 @@ public final class GameLibraryViewModel {
         guard backend.isWineConfigured, !busyAppIDs.contains(game.appID), runningPIDs[game.appID] == nil else { return }
         busyAppIDs.insert(game.appID); defer { busyAppIDs.remove(game.appID) }
         do {
-            // Make sure the co-resident Steam client is up first (Steamworks IPC needs it in this prefix).
-            await launchSteam(extra: [])
+            // Steamworks IPC is prefix-scoped: the client must be up + logged in in this same prefix first.
+            await ensureSteamRunning()
             let config = await configStore.load().config(for: game.appID)
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: backend,

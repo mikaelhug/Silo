@@ -12,8 +12,9 @@ struct SiloEnvironmentTests {
             wine: URL(fileURLWithPath: "/rt/bin/wine"))
         #expect(env["WINEPREFIX"] == "/p/220")
         #expect(env["WINEDEBUG"] == "-all")
-        // <wine root>/lib/silo-bundled is first so wine's dlopen'd deps (freetype) resolve from the bundle.
-        #expect(env["DYLD_FALLBACK_LIBRARY_PATH"] == "/rt/lib/silo-bundled:/usr/local/lib:/usr/lib")
+        // <wine root>/lib/silo-bundled is first (so wine's dlopen'd deps resolve from the hermetic bundle);
+        // /usr/local/lib (Homebrew) is deliberately NOT on the path — it leaked a duplicate gtk into wine.
+        #expect(env["DYLD_FALLBACK_LIBRARY_PATH"] == "/rt/lib/silo-bundled:/usr/lib")
         #expect(env.count == 3)   // base only — callers layer their own overrides
     }
 }

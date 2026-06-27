@@ -1,9 +1,8 @@
 import Foundation
 
 /// Drives the experimental Steam-bottle setup + launch (the revert path for Steamworks/DRM games):
-/// install Windows Steam into the shared bottle, seed the macOS login so it comes up authenticated, and
-/// launch it in the background. The on-device validation surface for "does a co-resident, seeded Steam
-/// client serve Steamworks for games in its prefix".
+/// install Windows Steam into the shared bottle and launch it (in a Wine virtual desktop with the
+/// CEF-render flags + wrapper) for a one-time sign-in, after which games run co-resident with it.
 @MainActor
 @Observable
 public final class SteamBottleViewModel {
