@@ -22,6 +22,19 @@ public struct AppPaths: Sendable, Hashable {
     public var logsDir: URL { supportDir.appendingPathComponent("Logs", isDirectory: true) }
     public var configFile: URL { supportDir.appendingPathComponent("config.json") }
 
+    /// Native macOS SteamCMD install dir + its bootstrap script.
+    public var steamCMDDir: URL { supportDir.appendingPathComponent("SteamCMD", isDirectory: true) }
+    public var steamCMDScript: URL { steamCMDDir.appendingPathComponent("steamcmd.sh") }
+
+    /// Library root where SteamCMD installs the downloaded Windows games (parsed by DiscoveryEngine as
+    /// a Steam library: `<root>/steamapps/appmanifest_*.acf`).
+    public var gameLibraryDir: URL { supportDir.appendingPathComponent("GameLibrary", isDirectory: true) }
+
+    /// Per-game install dir under the game library (SteamCMD `force_install_dir` target).
+    public func gameInstallDir(forAppID appID: Int) -> URL {
+        gameLibraryDir.appendingPathComponent("steamapps/common/\(appID)", isDirectory: true)
+    }
+
     /// Isolated Wine prefix root for a game.
     public func prefix(forAppID appID: Int) -> URL {
         prefixesDir.appendingPathComponent("\(appID)", isDirectory: true)

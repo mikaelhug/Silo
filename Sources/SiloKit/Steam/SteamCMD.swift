@@ -38,4 +38,14 @@ public enum SteamCMD {
     public static func licensesArguments(username: String) -> [String] {
         ["+login", username, "+licenses_print", "+quit"]
     }
+
+    /// Arguments to establish a login session. First time, pass `password` (+ `guardCode` for Steam
+    /// Guard); SteamCMD then caches a refresh token so later calls need only the username. Credentials
+    /// go as args for a headless flow (brief `ps` visibility) — the cached token avoids re-entry.
+    public static func loginArguments(username: String, password: String? = nil, guardCode: String? = nil) -> [String] {
+        var login = ["+login", username]
+        if let password { login.append(password) }
+        if let guardCode { login.append(guardCode) }
+        return login + ["+quit"]
+    }
 }
