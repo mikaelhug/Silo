@@ -12,6 +12,7 @@ struct GameDetailView: View {
     @State private var details: SteamStoreDetails?
     @State private var loading = true
     @State private var showRequirements = false
+    @State private var confirmingUninstall = false
 
     var body: some View {
         let lib = env.gameLibrary
@@ -83,6 +84,17 @@ struct GameDetailView: View {
                 openWindow(id: "silo-log", value: LogTarget(title: "\(game.name) — Log", url: env.logURL(forAppID: game.appID)))
             }
             Spacer()
+            if lib.isInstalled(game) {
+                Button(role: .destructive) { confirmingUninstall = true } label: {
+                    Label("Uninstall", systemImage: "trash")
+                }
+            }
+        }
+        .confirmationDialog("Uninstall \(game.name)?", isPresented: $confirmingUninstall, titleVisibility: .visible) {
+            Button("Uninstall", role: .destructive) { Task { await lib.uninstall(game) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deletes the downloaded game files to free up space. You can re-download it anytime.")
         }
     }
 
