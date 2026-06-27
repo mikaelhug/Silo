@@ -68,15 +68,18 @@ struct SteamCMDClientTests {
         let fake = FakeProcessRunner()
         // Three captures in order: licenses_print, package_info_print, app_info_print.
         fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data("License packageID 54321 :\n".utf8)))
-        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data(#""54321" { "appids" { "0" "220" "1" "70" } }"#.utf8)))
+        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data(#""54321" { "appids" { "0" "220" "1" "70" "2" "1493710" "3" "205" } }"#.utf8)))
         fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data("""
         "70"  { "common" { "name" "Half-Life" "type" "Game" "oslist" "windows,macos" } }
         "220" { "common" { "name" "Half-Life 2" "type" "Game" "oslist" "windows" } }
+        "1493710" { "common" { "name" "Proton Experimental" "type" "Tool" "oslist" "windows" } }
+        "205" { "common" { "oslist" "windows" } }
         """.utf8)))
         let client = SteamCMDClient(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
 
         let games = try await client.ownedGames(username: "alice")
-        #expect(games.map(\.appID) == [70, 220])      // both run on Windows (HL also has Mac, still listed)
+        // Proton (Tool) and 205 (un-typed) are excluded; only real games remain.
+        #expect(games.map(\.appID) == [70, 220])
         #expect(games.first?.name == "Half-Life")
     }
 
