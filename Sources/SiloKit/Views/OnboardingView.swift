@@ -3,12 +3,12 @@ import SwiftUI
 /// First-run guided setup shown in the Library when Silo isn't configured yet.
 struct OnboardingView: View {
     @Environment(AppEnvironment.self) private var env
-    @Binding var showLogin: Bool
 
     var body: some View {
         let runtime = env.runtime
         let gptk = env.gptkManager
         let backend = env.backendSettings
+        let steam = env.steamBottleVM
 
         ScrollView {
             VStack(spacing: 22) {
@@ -35,15 +35,18 @@ struct OnboardingView: View {
                         action: { if let dmg = chooseDiskImage() { Task { await env.gptkManager.importGPTK(from: dmg) } } })
 
                     StepRow(
-                        number: 3, title: "Sign in to Steam",
-                        subtitle: "One-time SteamCMD login to list + download the Windows games you own.",
-                        done: env.steamLoggedIn,
-                        actionLabel: "Sign In…",
-                        action: { showLogin = true })
+                        number: 3, title: "Set up the Steam bottle",
+                        subtitle: "Installs a Windows Steam client into a shared prefix; launch it and sign "
+                            + "in once to install + run your games.",
+                        done: env.steamReady, busy: steam.busy, locked: !env.wineReady,
+                        actionLabel: "Set up…",
+                        action: { Task { await env.steamBottleVM.setUp() } })
                 }
                 .frame(maxWidth: 540)
 
-                if let message = runtime.statusMessage ?? gptk.statusMessage ?? backend.statusMessage {
+                let message = steam.status.isEmpty
+                    ? (runtime.statusMessage ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
+                if let message {
                     Text(message).font(.callout).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).frame(maxWidth: 540)
                 }

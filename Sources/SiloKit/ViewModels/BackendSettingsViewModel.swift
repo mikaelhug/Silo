@@ -32,12 +32,7 @@ public final class BackendSettingsViewModel {
         let detected = resolver.autodetect(
             homeDirectory: homeDirectory, applicationsDirectory: applicationsDirectory)
         if detected.detectedSource != .none {
-            // Autodetect only discovers *runtime* paths — never the Steam sign-in. Carry the account over
-            // so re-detecting a runtime doesn't sign the user out (the bug where the logged-in account
-            // "fell away" from the UI).
-            var merged = detected
-            merged.steamUsername = merged.steamUsername ?? config.steamUsername
-            config = merged
+            config = detected
             statusMessage = "Detected \(detected.detectedSource.rawValue)."
         } else {
             statusMessage = "No backend found. Install a runtime or set paths manually."

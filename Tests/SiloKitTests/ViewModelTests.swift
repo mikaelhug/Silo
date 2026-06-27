@@ -70,19 +70,19 @@ struct ViewModelTests {
         #expect(vm.installed.map(\.name) == ["wine-cx-26.2.0"])
     }
 
-    @Test("AppEnvironment.setupComplete needs Wine + GPTK + Steam sign-in")
+    @Test("AppEnvironment.setupComplete needs Wine + GPTK + the Steam bottle")
     func setupComplete() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let env = AppEnvironment(
-            paths: AppPaths(supportDir: tmp.url.appendingPathComponent("Silo")),
-            runner: FakeProcessRunner())
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
         #expect(!env.setupComplete)
         env.backendSettings.config.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
         env.backendSettings.config.gptkLibDirPath = URL(fileURLWithPath: "/g/lib")
-        #expect(!env.setupComplete)                       // not signed in to Steam yet
-        env.backendSettings.config.steamUsername = "alice"
+        #expect(!env.setupComplete)                       // Steam not installed in the bottle yet
+        try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
         #expect(env.setupComplete)
-        #expect(env.wineReady && env.gptkReady && env.steamLoggedIn)
+        #expect(env.wineReady && env.gptkReady && env.steamReady)
     }
 
     @Test("AppEnvironment bootstraps from persisted config")

@@ -26,14 +26,13 @@ struct GameArtworkPlaceholder: View {
 extension View {
     /// The shared "Uninstall this game?" confirmation used by both the tile and the detail view.
     func uninstallConfirmation(
-        game: SteamAppInfo, isPresented: Binding<Bool>, library: GameLibraryViewModel
+        game: SteamApp, isPresented: Binding<Bool>, library: GameLibraryViewModel
     ) -> some View {
         confirmationDialog("Uninstall \(game.name)?", isPresented: isPresented, titleVisibility: .visible) {
             Button("Uninstall", role: .destructive) { Task { await library.uninstall(game) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Deletes the game's files and its isolated Wine prefix (its settings and any local "
-                 + "saves). You can re-download it anytime.")
+            Text("Asks the bottle's Steam to uninstall this game. You can reinstall it anytime.")
         }
     }
 }

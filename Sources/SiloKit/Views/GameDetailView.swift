@@ -7,7 +7,7 @@ struct GameDetailView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
-    let game: SteamAppInfo
+    let game: SteamApp
     let onSettings: () -> Void
     @State private var details: SteamStoreDetails?
     @State private var loading = true
@@ -63,27 +63,17 @@ struct GameDetailView: View {
             if lib.isRunning(game) {
                 Button(role: .destructive) { Task { await lib.stop(game) } } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(.borderedProminent).tint(.red)
-            } else if lib.isInstalled(game) {
+            } else {
                 Button { Task { await lib.play(game) } } label: { Label("Play", systemImage: "play.fill") }
                     .buttonStyle(.borderedProminent).disabled(!lib.canLaunch || lib.isBusy(game))
-            } else if lib.isPaused(game) {
-                Button { Task { await lib.download(game) } } label: { Label("Resume", systemImage: "play.circle") }
-                    .buttonStyle(.borderedProminent)
-            } else if !lib.isDownloading(game) {
-                Button { Task { await lib.download(game) } } label: { Label("Download", systemImage: "arrow.down.circle") }
-                    .buttonStyle(.borderedProminent)
-            } else {
-                Button {} label: { Label("Downloading…", systemImage: "arrow.down.circle") }.disabled(true)
             }
             Button("Settings…", action: onSettings)
             Button("Log") {
                 openWindow(id: LogTarget.windowID, value: env.logTarget(for: game))
             }
             Spacer()
-            if lib.isInstalled(game) {
-                Button(role: .destructive) { confirmingUninstall = true } label: {
-                    Label("Uninstall", systemImage: "trash")
-                }
+            Button(role: .destructive) { confirmingUninstall = true } label: {
+                Label("Uninstall", systemImage: "trash")
             }
         }
         .uninstallConfirmation(game: game, isPresented: $confirmingUninstall, library: lib)
@@ -105,7 +95,6 @@ struct GameDetailView: View {
             if !d.developers.isEmpty { LabeledContent("Developer", value: d.developers.joined(separator: ", ")) }
             if !d.publishers.isEmpty { LabeledContent("Publisher", value: d.publishers.joined(separator: ", ")) }
             if let date = d.releaseDate, !date.isEmpty { LabeledContent("Released", value: date) }
-            LabeledContent("Platforms", value: game.oslist.isEmpty ? "—" : game.oslist.joined(separator: ", "))
             // Storage: the on-disk size once installed, otherwise the store's minimum-spec requirement.
             if let installed = lib.sizeString(game) {
                 LabeledContent("Disk size", value: installed)

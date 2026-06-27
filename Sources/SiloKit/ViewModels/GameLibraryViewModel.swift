@@ -1,73 +1,66 @@
 import Foundation
 
-/// The pivoted library: the signed-in account's owned **Windows-only** games. Each is downloaded with
-/// SteamCMD into its own bucket (`AppPaths.gameInstallDir`) and launched via GPTK by `LaunchOrchestrator`.
+/// The library = games installed in the shared **Steam bottle** (a Wine prefix running a logged-in
+/// Windows Steam client). Silo discovers them from the bottle's `appmanifest_*.acf`, launches each
+/// **co-resident** with the Steam client (so Steamworks/DRM works) under GPTK/D3DMetal, and triggers
+/// installs/uninstalls through the bottle's Steam. No SteamCMD: the bottle's Steam is the downloader.
 @MainActor
 @Observable
 public final class GameLibraryViewModel {
-    public enum LoadState: Equatable { case idle, needsLogin, loading, loaded, empty, error(String) }
+    public enum LoadState: Equatable { case idle, notReady, loading, loaded, empty, error(String) }
 
-    public private(set) var owned: [SteamAppInfo] = []
-    /// Install state per appID, parsed from each bucket's `appmanifest_*.acf` (size + download progress).
-    public private(set) var installedByID: [Int: SteamApp] = [:]
+    /// Games installed in the Steam bottle (parsed from its `appmanifest_*.acf`).
+    public private(set) var games: [SteamApp] = []
     public private(set) var loadState: LoadState = .idle
-    public private(set) var isRefreshing = false
     public private(set) var busyAppIDs: Set<Int> = []
-    public private(set) var downloadingIDs: Set<Int> = []
-    public private(set) var downloadProgressByID: [Int: Double] = [:]   // appID → 0...1 (from the log)
-    public private(set) var downloadSpeeds: [Int: Double] = [:]   // appID → bytes/sec
-    public private(set) var runningPIDs: [Int: Int32] = [:]   // appID → launched wine PID
-    private var downloadPIDs: [Int: Int32] = [:]             // appID → SteamCMD PID (this session)
-    private var lastBytes: [Int: (bytes: Int64, at: Date)] = [:]
+    public private(set) var runningPIDs: [Int: Int32] = [:]
     public var searchText: String = ""
-    /// Hide games that also have a native macOS build (run those in the Steam app instead). On by
-    /// default — Silo is for the games that *need* Wine/GPTK.
-    public var showWindowsOnly: Bool = true
-    /// Transient one-line status (auto-clears after a few seconds via `setStatus`).
     public private(set) var statusMessage: String?
     private var statusDismiss: Task<Void, Never>?
 
-    private let steamCMD: SteamCMDClient
+    private let bottle: SteamBottle
     private let discovery: DiscoveryEngine
     private let orchestrator: LaunchOrchestrator
     private let configStore: ConfigStore
-    private let cache: LibraryCacheStore
     private let paths: AppPaths
     private var backend: BackendConfig
-    private var username: String?
-    private var refreshTask: Task<Void, Never>?
-    /// kqueue observers (no polling): per-download [log-write, process-exit] tokens, and per-game exit.
-    private var downloadObservers: [Int: [any ProcessObservation]] = [:]
     private var runObservers: [Int: any ProcessObservation] = [:]
 
     public init(
-        steamCMD: SteamCMDClient,
+        bottle: SteamBottle,
         discovery: DiscoveryEngine,
         orchestrator: LaunchOrchestrator,
         configStore: ConfigStore,
-        cache: LibraryCacheStore,
         paths: AppPaths,
         backend: BackendConfig
     ) {
-        self.steamCMD = steamCMD
+        self.bottle = bottle
         self.discovery = discovery
         self.orchestrator = orchestrator
         self.configStore = configStore
-        self.cache = cache
         self.paths = paths
         self.backend = backend
     }
 
-    public func setAccount(username: String?) { self.username = username }
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
 
     public var canLaunch: Bool { backend.isWineConfigured }
-    public var isLoggedIn: Bool { !(username ?? "").isEmpty }
-    /// The signed-in Steam account driving the library (for display), or nil.
-    public var account: String? { (username?.isEmpty == false) ? username : nil }
+    public var steamReady: Bool { bottle.isSteamInstalled }
 
-    /// Post a transient status message that auto-clears after a few seconds (so the bottom bar doesn't
-    /// show e.g. "Cancelled download" forever).
+    /// Search filter over the installed games (already name-sorted by `DiscoveryEngine`).
+    public var filtered: [SteamApp] {
+        searchText.isEmpty ? games
+            : games.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    public func isRunning(_ game: SteamApp) -> Bool { runningPIDs[game.appID] != nil }
+    public func isBusy(_ game: SteamApp) -> Bool { busyAppIDs.contains(game.appID) }
+
+    public func sizeString(_ game: SteamApp) -> String? {
+        guard game.sizeOnDisk > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: game.sizeOnDisk, countStyle: .file)
+    }
+
     private func setStatus(_ message: String?) {
         statusMessage = message
         statusDismiss?.cancel()
@@ -78,335 +71,81 @@ public final class GameLibraryViewModel {
             self?.statusMessage = nil
         }
     }
-    public var installedCount: Int { owned.filter { isInstalled($0) }.count }
 
-    /// Search + Windows-only filter. `owned` is already name-sorted (from `merge`) and the UI groups by
-    /// state in sections, so no per-access re-sort is needed — keeps this cheap during a download.
-    public var filtered: [SteamAppInfo] {
-        var base = owned
-        if showWindowsOnly { base = base.filter { !$0.supportsMac } }
-        if !searchText.isEmpty { base = base.filter { $0.name.localizedCaseInsensitiveContains(searchText) } }
-        return base
-    }
+    // MARK: - Library
 
-    // MARK: - Install state
-
-    public func isInstalled(_ info: SteamAppInfo) -> Bool { installedByID[info.appID]?.isFullyInstalled == true }
-    public func isDownloading(_ info: SteamAppInfo) -> Bool { downloadingIDs.contains(info.appID) }
-    public func isRunning(_ info: SteamAppInfo) -> Bool { runningPIDs[info.appID] != nil }
-    public func isBusy(_ info: SteamAppInfo) -> Bool { busyAppIDs.contains(info.appID) }
-    /// Partially downloaded but not actively running (e.g. interrupted by a closed app or lost network).
-    /// SteamCMD's app_update resumes from here — surfaced as a "Resume" action.
-    public func isPaused(_ info: SteamAppInfo) -> Bool {
-        installedByID[info.appID] != nil && !isInstalled(info) && !isDownloading(info)
-    }
-
-    /// `0...1` download progress — live from the SteamCMD log while active, else the manifest's bytes.
-    public func downloadProgress(_ info: SteamAppInfo) -> Double? {
-        downloadProgressByID[info.appID] ?? installedByID[info.appID]?.downloadProgress
-    }
-    /// Human-readable on-disk size for an installed game, else nil.
-    public func sizeString(_ info: SteamAppInfo) -> String? {
-        guard let size = installedByID[info.appID]?.sizeOnDisk, size > 0 else { return nil }
-        return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
-    }
-    /// Current download speed (e.g. "12.3 MB/s") for an in-progress game, else nil.
-    public func speedString(_ info: SteamAppInfo) -> String? {
-        guard let bps = downloadSpeeds[info.appID], bps > 1 else { return nil }
-        return ByteCountFormatter.string(fromByteCount: Int64(bps), countStyle: .file) + "/s"
-    }
-    /// Estimated time remaining (e.g. "4 min") for an in-progress game, else nil.
-    public func etaString(_ info: SteamAppInfo) -> String? {
-        guard let app = installedByID[info.appID], let total = app.bytesToDownload,
-              let done = app.bytesDownloaded, total > done,
-              let bps = downloadSpeeds[info.appID], bps > 1 else { return nil }
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.hour, .minute, .second]
-        formatter.unitsStyle = .abbreviated
-        formatter.maximumUnitCount = 2
-        return formatter.string(from: Double(total - done) / bps)
-    }
-    /// Owned games currently downloading (for the status bar).
-    public var activeDownloads: [SteamAppInfo] { owned.filter { isDownloading($0) } }
-
-    /// Re-parse every bucket's `appmanifest_*.acf` into `installedByID` (pure file read — no process
-    /// probes). SteamCMD's `force_install_dir` nests each manifest at
-    /// `<gameLibrary>/steamapps/common/<appID>/steamapps/appmanifest_<appID>.acf`, so scan each bucket
-    /// and normalise the `SteamApp` to the bucket layout (installURL = the bucket, matching launch).
-    private func refreshInstalled() async {
-        let common = paths.gameLibraryDir.appendingPathComponent("steamapps/common")
-        let buckets = (try? FileManager.default.contentsOfDirectory(atPath: common.path)) ?? []
-        var byID: [Int: SteamApp] = [:]
-        for bucket in buckets {
-            guard let appID = Int(bucket) else { continue }
-            let bucketURL = common.appendingPathComponent(bucket)
-            guard let apps = try? await discovery.discoverGames(steamRoot: bucketURL),
-                  let app = apps.first(where: { $0.appID == appID }) else { continue }
-            byID[appID] = SteamApp(
-                appID: appID, name: app.name, installDir: String(appID),
-                stateFlags: app.stateFlags, sizeOnDisk: app.sizeOnDisk,
-                bytesDownloaded: app.bytesDownloaded, bytesToDownload: app.bytesToDownload,
-                buildID: app.buildID, lastUpdated: app.lastUpdated, libraryPath: paths.gameLibraryDir)
-        }
-        installedByID = byID
-    }
-
-    /// Re-attach to any SteamCMD download still running for a partially-installed bucket (e.g. orphaned
-    /// when the app was closed mid-download). Looks up the live PID once, then observes it — no polling.
-    private func reattachOrphanedDownloads() async {
-        for (appID, app) in installedByID where !app.isFullyInstalled && !downloadingIDs.contains(appID) {
-            guard let pid = await steamCMD.downloadPID(appID: appID) else { continue }
-            downloadPIDs[appID] = pid
-            downloadingIDs.insert(appID)
-            observeDownload(appID: appID, pid: pid)
-        }
-    }
-
-    // MARK: - Catalog
-
-    /// Show the cached catalog **instantly**, then refresh from SteamCMD in the background and merge —
-    /// so launch is fast, the cold-cache "random subset" converges to the full set, and nothing that
-    /// was showing disappears on a flaky refresh.
+    /// Re-scan the bottle's Steam library for installed games.
     public func load() async {
-        await refreshInstalled()
-        await reattachOrphanedDownloads()
-        guard let username, !username.isEmpty else { loadState = .needsLogin; return }
-        if let cached = await cache.load(), cached.username == username {
-            owned = cached.games.filter(\.windowsPlayable)   // self-heal: drop anything stale that isn't a Windows game
-        }
-        if owned.isEmpty { loadState = .loading } else { loadState = .loaded }
-        startRefresh(username: username)
+        guard bottle.isSteamInstalled else { loadState = .notReady; return }
+        let found = (try? await discovery.discoverGames(steamRoot: paths.steamBottleClientDir)) ?? []
+        games = found
+        loadState = found.isEmpty ? .empty : .loaded
     }
 
-    /// Manual refresh (toolbar) — re-enumerate in the background and merge into the cache.
-    public func refresh() async {
-        guard let username, !username.isEmpty else { loadState = .needsLogin; return }
-        await refreshInstalled()
-        await reattachOrphanedDownloads()
-        startRefresh(username: username)
+    public func refresh() async { await load() }
+
+    // MARK: - Install / uninstall (delegated to the bottle's Steam)
+
+    /// Open the bottle's Steam to a game's install dialog (Steam handles the download + DRM).
+    public func install(appID: Int) async {
+        await launchSteam(extra: ["steam://install/\(appID)"])
+        setStatus("Opening Steam to install… install it there, then Refresh.")
     }
 
-    /// Add a game that isn't in the Steam-owned enumeration by its App ID, then install it. The entry is
-    /// persisted in the library cache so it survives refreshes/relaunch; after install, the user points
-    /// Silo at the right `.exe` in the game's Settings. Requires being signed in (SteamCMD downloads it).
-    public func addManualGame(appID: Int, name: String) async {
-        guard appID > 0 else { return }
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        let info = SteamAppInfo(appID: appID, name: trimmed.isEmpty ? "App \(appID)" : trimmed,
-                                oslist: ["windows"], type: "game")
-        if !owned.contains(where: { $0.appID == appID }) {
-            owned.append(info)
-            owned.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        }
-        if loadState == .empty { loadState = .loaded }
-        // Persist into the cached catalog (union with what's there) so the manual entry isn't lost.
-        var catalog = (await cache.load())?.games ?? []
-        if let i = catalog.firstIndex(where: { $0.appID == appID }) { catalog[i] = info } else { catalog.append(info) }
-        await cache.save(username: username ?? "", games: catalog, at: Date())
-        await download(info)
+    /// Open the bottle's Steam (Store/Library) so the user can browse + install games.
+    public func openSteam() async { await launchSteam(extra: []) }
+
+    /// Ask the bottle's Steam to uninstall a game, then refresh.
+    public func uninstall(_ game: SteamApp) async {
+        guard !isRunning(game) else { return }
+        await launchSteam(extra: ["steam://uninstall/\(game.appID)"])
+        setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
     }
 
-    private func startRefresh(username: String) {
-        guard refreshTask == nil else { return }
-        isRefreshing = true
-        refreshTask = Task { [weak self] in
-            await self?.performRefresh(username: username)
-            self?.isRefreshing = false
-            self?.refreshTask = nil
-        }
-    }
-
-    /// Enumerate from SteamCMD and merge into the catalog (awaitable; `startRefresh` wraps it in a Task).
-    /// The previously-cached catalog is passed as `known` so SteamCMD only fetches metadata for new apps.
-    func performRefresh(username: String) async {
-        let known = Dictionary((await cache.load())?.games.map { ($0.appID, $0) } ?? [],
-                               uniquingKeysWith: { _, new in new })
-        if let fresh = try? await steamCMD.ownedGames(username: username, known: known) {
-            let catalog = merge(fresh)
-            await cache.save(username: username, games: catalog, at: Date())
-        } else if owned.isEmpty {
-            loadState = .error("Couldn't reach Steam — try Refresh.")
-        }
-    }
-
-    /// Union the fresh catalog into what we have (newer metadata wins; cached-but-missing games are kept,
-    /// guarding a partial enumeration). Persists the **full** owned-app catalog (the next refresh's
-    /// `known`), but displays only the Windows-playable subset.
-    @discardableResult
-    private func merge(_ fresh: [SteamAppInfo]) -> [SteamAppInfo] {
-        var byID = Dictionary(owned.map { ($0.appID, $0) }, uniquingKeysWith: { _, new in new })
-        for game in fresh { byID[game.appID] = game }
-        let catalog = byID.values
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        owned = catalog.filter(\.windowsPlayable)   // hide non-games / Mac titles from the displayed list
-        loadState = owned.isEmpty ? .empty : .loaded
-        return catalog
-    }
-
-    // MARK: - Download
-
-    /// Download (or update) a game's Windows files into its bucket via SteamCMD (detached). Progress is
-    /// read **reactively** from the SteamCMD log (a kqueue file-watcher), and completion/interruption is
-    /// detected from the process's exit — no polling.
-    public func download(_ info: SteamAppInfo) async {
-        guard let username, !busyAppIDs.contains(info.appID), !downloadingIDs.contains(info.appID) else { return }
-        busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
+    private func launchSteam(extra: [String]) async {
         do {
-            // app_update resumes from any kept partial — this same call is "Download" and "Resume".
-            let pid = try await steamCMD.download(appID: info.appID, username: username,
-                                                  logURL: paths.log(forAppID: info.appID))
-            downloadPIDs[info.appID] = pid
-            lastBytes[info.appID] = nil
-            downloadingIDs.insert(info.appID)   // the status bar tracks progress + speed from here
-            observeDownload(appID: info.appID, pid: pid)
+            if let wine = backend.wineBinaryPath { try? bottle.installWebHelperWrapper(wine: wine) }
+            _ = try await bottle.launchSteam(wine: backend.wineBinaryPath,
+                                             extraArgs: SteamBottle.cefRenderArgs + extra)
         } catch {
-            setStatus("\(info.name): \((error as NSError).localizedDescription)")
+            setStatus("Couldn't launch Steam: \((error as NSError).localizedDescription)")
         }
     }
 
-    /// Wire up reactive progress (log writes) + completion (process exit) for an active download.
-    private func observeDownload(appID: Int, pid: Int32) {
-        let log = paths.log(forAppID: appID)
-        cancelDownloadObservers(appID)
-        downloadObservers[appID] = steamCMD.observeDownload(
-            pid: pid, logURL: log,
-            // Both handlers run on a background queue: read + parse the log there (off the main actor),
-            // then hop to the main actor with the small parsed result.
-            onProgress: { [weak self] in
-                let snapshot = Self.parseLog(at: log, appID: appID)
-                Task { @MainActor in self?.applyProgress(appID: appID, snapshot) }
-            },
-            onExit: { [weak self] in
-                Task { @MainActor in await self?.downloadDidExit(appID: appID) }
-            })
-    }
+    // MARK: - Launch (co-resident in the bottle)
 
-    private func applyProgress(appID id: Int, _ snapshot: (progress: SteamCMD.Progress?, finished: Bool)) {
-        guard downloadingIDs.contains(id) else { return }   // a late write after we already finished
-        // Completion goes through the same manifest-authoritative path as a process exit (refresh →
-        // check fully-installed → finish), so the install state flips immediately and correctly.
-        if snapshot.finished { Task { await downloadDidExit(appID: id) }; return }
-        guard let p = snapshot.progress else { return }
-        if downloadProgressByID[id] != p.fraction { downloadProgressByID[id] = p.fraction }
-        let now = Date()
-        if let prev = lastBytes[id], now.timeIntervalSince(prev.at) > 0.5 {
-            downloadSpeeds[id] = max(0, Double(p.done - prev.bytes) / now.timeIntervalSince(prev.at))
-            lastBytes[id] = (p.done, now)
-        } else if lastBytes[id] == nil {
-            lastBytes[id] = (p.done, now)
-        }
-    }
-
-    /// SteamCMD exited. The manifest is authoritative: fully installed → done; otherwise the partial is
-    /// kept and the game drops to a resumable "paused" state (this is the *only* path to "Resume", so a
-    /// live download is never mis-shown as paused).
-    private func downloadDidExit(appID id: Int) async {
-        guard downloadingIDs.contains(id) else { return }   // already finished via the log watcher
-        await refreshInstalled()
-        endDownload(id, installed: installedByID[id]?.isFullyInstalled == true)
-    }
-
-    /// Pause a download — stop SteamCMD but KEEP the partial files (Resume continues from here).
-    public func pause(_ info: SteamAppInfo) async {
-        await steamCMD.pauseDownload(appID: info.appID, pid: downloadPIDs[info.appID])
-        clearDownloadState(info.appID)
-        await refreshInstalled()
-        setStatus("Paused \(info.name).")
-    }
-
-    /// Cancel a download and discard the partial files.
-    public func cancel(_ info: SteamAppInfo) async {
-        await steamCMD.cancelDownload(appID: info.appID, pid: downloadPIDs[info.appID])
-        clearDownloadState(info.appID)
-        await refreshInstalled()
-        setStatus("Cancelled \(info.name).")
-    }
-
-    /// Stop tracking a download (cancel its observers + drop transient progress state).
-    private func clearDownloadState(_ id: Int) {
-        cancelDownloadObservers(id)
-        downloadingIDs.remove(id)
-        downloadProgressByID[id] = nil; downloadSpeeds[id] = nil; lastBytes[id] = nil; downloadPIDs[id] = nil
-    }
-
-    private func cancelDownloadObservers(_ id: Int) {
-        downloadObservers[id]?.forEach { $0.cancel() }
-        downloadObservers[id] = nil
-    }
-
-    /// Finish/stop a download: clear its state and post a one-line status.
-    private func endDownload(_ id: Int, installed: Bool) {
-        let gameName = name(forAppID: id)
-        clearDownloadState(id)
-        setStatus(installed ? "\(gameName) finished downloading."
-                            : "\(gameName) download stopped — Resume to continue.")
-    }
-
-    /// Read + parse a SteamCMD log tail (progress + completion). `nonisolated` so observer handlers can
-    /// call it off the main actor.
-    private nonisolated static func parseLog(at url: URL, appID: Int)
-        -> (progress: SteamCMD.Progress?, finished: Bool) {
-        let text = url.tailString(maxBytes: 32 * 1024)
-        return (SteamCMD.parseProgress(text), SteamCMD.isInstalledInLog(text, appID: appID))
-    }
-
-    private func name(forAppID id: Int) -> String {
-        owned.first { $0.appID == id }?.name ?? installedByID[id]?.name ?? "Game"
-    }
-
-    // MARK: - Launch
-
-    /// Launch an installed game in its isolated GPTK bucket. Its exit is observed (kqueue), not polled.
-    public func play(_ info: SteamAppInfo) async {
-        guard backend.isWineConfigured, !busyAppIDs.contains(info.appID),
-              runningPIDs[info.appID] == nil else { return }
-        busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
+    /// Launch a game in the Steam bottle under GPTK, with the Steam client co-resident so Steamworks works.
+    public func play(_ game: SteamApp) async {
+        guard backend.isWineConfigured, !busyAppIDs.contains(game.appID), runningPIDs[game.appID] == nil else { return }
+        busyAppIDs.insert(game.appID); defer { busyAppIDs.remove(game.appID) }
         do {
-            let saved = await configStore.load().config(for: info.appID)
-            // Honour the saved backend, but fall back to CrossOver for this launch if GPTK was chosen yet
-            // isn't installed — so the game still gets DirectX translation (the saved choice is untouched).
-            var launchConfig = saved
-            launchConfig.backend = BackendPolicy.effective(
-                requested: saved.backend,
-                gptkInstalled: backend.gptkLibDirPath != nil,
-                crossoverInstalled: backend.crossoverWinePath != nil)
-            let pid = try await orchestrator.launch(app: steamApp(for: info), config: launchConfig, backend: backend)
-            var stamped = saved; stamped.lastPlayed = Date()
+            // Make sure the co-resident Steam client is up first (Steamworks IPC needs it in this prefix).
+            await launchSteam(extra: [])
+            let config = await configStore.load().config(for: game.appID)
+            let pid = try await orchestrator.launchInBottle(
+                app: game, config: config, backend: backend,
+                prefix: paths.steamBottle, logURL: paths.log(forAppID: game.appID))
+            var stamped = config; stamped.lastPlayed = Date()
             _ = try? await configStore.saveGame(stamped)
-            runningPIDs[info.appID] = pid
-            observeRun(appID: info.appID, pid: pid)
-            setStatus("Launched \(info.name).")
+            runningPIDs[game.appID] = pid
+            observeRun(appID: game.appID, pid: pid)
+            setStatus("Launched \(game.name).")
         } catch {
-            setStatus("\(info.name): \((error as NSError).localizedDescription)")
+            setStatus("\(game.name): \((error as NSError).localizedDescription)")
         }
     }
 
-    public func stop(_ info: SteamAppInfo) async {
-        guard runningPIDs[info.appID] != nil else { return }
-        await orchestrator.stop(appID: info.appID, backend: backend)
-        clearRunState(info.appID)
+    /// Stop a running game. Terminates just the game process (the shared bottle keeps Steam alive — a
+    /// `wineserver -k` would kill the co-resident Steam client too).
+    public func stop(_ game: SteamApp) async {
+        guard let pid = runningPIDs[game.appID] else { return }
+        orchestrator.terminate(pid: pid)
+        clearRunState(game.appID)
     }
 
-    public func openWinecfg(_ info: SteamAppInfo) async {
+    public func openWinecfg(_ game: SteamApp) async {
         guard backend.isWineConfigured else { setStatus("No Wine configured."); return }
-        await orchestrator.runWineTool("winecfg", appID: info.appID, backend: backend)
-    }
-
-    /// Fully remove an installed game: delete its downloaded files (the bucket), its isolated wine prefix,
-    /// **and** its saved per-game settings — so a later reinstall starts from fresh defaults. No-op while
-    /// the game is running or downloading.
-    public func uninstall(_ info: SteamAppInfo) async {
-        guard !isRunning(info), !isDownloading(info), !busyAppIDs.contains(info.appID) else { return }
-        busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
-        let bucket = paths.gameInstallDir(forAppID: info.appID)
-        let prefix = paths.prefix(forAppID: info.appID)
-        await Task.detached {   // off the main actor
-            try? FileManager.default.removeItem(at: bucket)
-            try? FileManager.default.removeItem(at: prefix)
-        }.value
-        _ = try? await configStore.removeGame(appID: info.appID)   // reinstall gets fresh settings
-        await refreshInstalled()
-        setStatus("Uninstalled \(info.name).")
+        await orchestrator.runWineTool("winecfg", prefix: paths.steamBottle, backend: backend)
     }
 
     private func observeRun(appID: Int, pid: Int32) {
@@ -417,20 +156,12 @@ public final class GameLibraryViewModel {
     }
 
     private func gameDidExit(appID: Int, pid: Int32) {
-        guard runningPIDs[appID] == pid else { return }   // ignore a stale exit after relaunch
+        guard runningPIDs[appID] == pid else { return }
         clearRunState(appID)
     }
 
     private func clearRunState(_ id: Int) {
         runningPIDs[id] = nil
         runObservers[id]?.cancel(); runObservers[id] = nil
-    }
-
-    /// Bridge owned metadata → the `SteamApp` the launch pipeline expects. Prefer the installed manifest
-    /// (real installDir/name); fall back to the bucket layout that matches SteamCMD's force_install_dir.
-    private func steamApp(for info: SteamAppInfo) -> SteamApp {
-        installedByID[info.appID]
-            ?? SteamApp(appID: info.appID, name: info.name, installDir: String(info.appID),
-                        stateFlags: .fullyInstalled, sizeOnDisk: 0, libraryPath: paths.gameLibraryDir)
     }
 }

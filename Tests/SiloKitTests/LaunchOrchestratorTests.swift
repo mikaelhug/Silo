@@ -96,24 +96,16 @@ struct LaunchPipelineTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
-        let provisioner = PrefixProvisioner(runner: fake, paths: paths)
-        let logStore = GameLogStore(paths: paths)
         let orchestrator = LaunchOrchestrator(
-            runner: fake, provisioner: provisioner, linker: GraphicsLinker(), logStore: logStore)
+            runner: fake, provisioner: PrefixProvisioner(runner: fake, paths: paths),
+            linker: GraphicsLinker(), logStore: GameLogStore(paths: paths))
 
-        // wineboot hook creates drive_c + system.reg so provisioning completes.
-        let prefix = provisioner.prefixURL(forAppID: 220)
-        fake.onRun = { _ in
-            let layout = PrefixLayout(prefix: prefix)
-            try? FileManager.default.createDirectory(at: layout.driveC, withIntermediateDirectories: true)
-            try? "reg".write(to: layout.systemReg, atomically: true, encoding: .utf8)
-        }
-
-        // Fake GPTK lib dir + a fake install tree with the exe.
+        // Fake GPTK lib dir + a fake install tree with the exe + the shared (bottle) prefix.
         let gptkDir = try tmp.makeDir("gptk")
         try tmp.write("gptk/D3DMetal.dll", "x")
         let lib = try tmp.makeDir("lib")
         try tmp.write("lib/steamapps/common/Half-Life 2/hl2.exe", "MZ")
+        let prefix = try tmp.makeDir("bottle")
 
         var backend = BackendConfig()
         backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
@@ -125,16 +117,15 @@ struct LaunchPipelineTests {
         cfg.backend = .gptk
         cfg.executableRelativePath = "hl2.exe"
 
-        let pid = try await orchestrator.launch(app: app, config: cfg, backend: backend)
+        let pid = try await orchestrator.launchInBottle(
+            app: app, config: cfg, backend: backend, prefix: prefix, logURL: paths.log(forAppID: 220))
         #expect(pid == 4242)
 
-        // Prefix booted, graphics injected, log created.
-        #expect(await provisioner.isProvisioned(appID: 220))
+        // Graphics injected into the shared prefix.
         let injected = PrefixLayout(prefix: prefix).system32.appendingPathComponent("D3DMetal.dll")
         #expect(FileManager.default.fileExists(atPath: injected.path))
-        #expect(FileManager.default.fileExists(atPath: paths.log(forAppID: 220).path))
 
-        // The detached spawn used the isolated prefix and the resolved exe.
+        // The detached spawn used the shared (bottle) prefix and the resolved exe.
         let spawn = try #require(fake.invocations.last { $0.detached })
         #expect(spawn.environment["WINEPREFIX"] == prefix.path)
         #expect(spawn.executable.path == "/w/wine64")
@@ -158,7 +149,9 @@ struct LaunchPipelineTests {
                            stateFlags: .fullyInstalled, sizeOnDisk: 1,
                            libraryPath: tmp.url)   // install dir doesn't exist → no exe
         await #expect(throws: LaunchOrchestrator.LaunchError.self) {
-            try await orchestrator.launch(app: app, config: GameConfig(appID: 9), backend: backend)
+            try await orchestrator.launchInBottle(
+                app: app, config: GameConfig(appID: 9), backend: backend,
+                prefix: tmp.url, logURL: paths.log(forAppID: 9))
         }
     }
 }
