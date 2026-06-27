@@ -49,6 +49,18 @@ struct GameSettingsSheet: View {
                 Toggle("ESYNC", isOn: $vm.config.envFlags.esync)
                 Toggle("MSYNC (Apple Silicon)", isOn: $vm.config.envFlags.msync)
                 Toggle("Metal HUD", isOn: $vm.config.envFlags.metalHUD)
+                if vm.config.backend == .crossover {
+                    TextField("DXVK HUD (e.g. fps,memory)", text: Binding(
+                        get: { vm.config.envFlags.dxvkHUD ?? "" },
+                        set: { vm.config.envFlags.dxvkHUD = $0.isEmpty ? nil : $0 }))
+                }
+            }
+
+            Section("Launch options") {
+                TextField("e.g. -windowed -dx11 -novid", text: $vm.config.launchOptionsString)
+                    .autocorrectionDisabled()
+                Text("Extra arguments passed to the game executable (space-separated).")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Executable") {
