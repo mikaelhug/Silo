@@ -63,6 +63,30 @@ public enum SteamCMD {
         return ids
     }
 
+    /// Live download progress, parsed from a SteamCMD download log.
+    public struct Progress: Sendable, Equatable {
+        public let fraction: Double   // 0...1
+        public let done: Int64
+        public let total: Int64
+    }
+
+    /// Parse the LAST `… progress: 41.60 (39212266698 / 94252010251)` line from a download log tail.
+    public static func parseProgress(_ log: String) -> Progress? {
+        let pattern = #"progress:\s*([0-9.]+)\s*\(\s*([0-9]+)\s*/\s*([0-9]+)\s*\)"#
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = log as NSString
+        guard let m = re.matches(in: log, range: NSRange(location: 0, length: ns.length)).last else { return nil }
+        let pct = Double(ns.substring(with: m.range(at: 1))) ?? 0
+        let done = Int64(ns.substring(with: m.range(at: 2))) ?? 0
+        let total = Int64(ns.substring(with: m.range(at: 3))) ?? 0
+        return Progress(fraction: total > 0 ? Double(done) / Double(total) : pct / 100, done: done, total: total)
+    }
+
+    /// True once the log reports the app fully installed (SteamCMD prints `Success! App '<id>' fully installed.`).
+    public static func isInstalledInLog(_ log: String, appID: Int) -> Bool {
+        log.contains("Success! App '\(appID)' fully installed")
+    }
+
     /// App IDs granted by a package, from its `package_info_print` block (`appids { "0" "220" … }`).
     public static func parsePackageAppIDs(_ output: String, packageID: Int) -> [Int] {
         guard let block = SteamAppInfo.extractBlock(output, key: String(packageID)),

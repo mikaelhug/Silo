@@ -14,6 +14,7 @@ public final class GameLibraryViewModel {
     public private(set) var isRefreshing = false
     public private(set) var busyAppIDs: Set<Int> = []
     public private(set) var downloadingIDs: Set<Int> = []
+    public private(set) var downloadProgressByID: [Int: Double] = [:]   // appID → 0...1 (from the log)
     public private(set) var downloadSpeeds: [Int: Double] = [:]   // appID → bytes/sec
     public private(set) var runningPIDs: [Int: Int32] = [:]   // appID → launched wine PID
     private var downloadPIDs: [Int: Int32] = [:]             // appID → SteamCMD PID (this session)
@@ -78,20 +79,19 @@ public final class GameLibraryViewModel {
     // MARK: - Install state
 
     public func isInstalled(_ info: SteamAppInfo) -> Bool { installedByID[info.appID]?.isFullyInstalled == true }
-    public func isDownloading(_ info: SteamAppInfo) -> Bool {
-        downloadingIDs.contains(info.appID) || installedByID[info.appID]?.stateFlags.isDownloading == true
-    }
+    public func isDownloading(_ info: SteamAppInfo) -> Bool { downloadingIDs.contains(info.appID) }
     public func isRunning(_ info: SteamAppInfo) -> Bool { runningPIDs[info.appID] != nil }
     public func isBusy(_ info: SteamAppInfo) -> Bool { busyAppIDs.contains(info.appID) }
     /// Partially downloaded but not actively running (e.g. interrupted by a closed app or lost network).
     /// SteamCMD's app_update resumes from here — surfaced as a "Resume" action.
     public func isPaused(_ info: SteamAppInfo) -> Bool {
-        guard let app = installedByID[info.appID] else { return false }
-        return !app.isFullyInstalled && !isDownloading(info)
+        installedByID[info.appID] != nil && !isInstalled(info) && !isDownloading(info)
     }
 
-    /// `0...1` download progress for a game being fetched, else nil.
-    public func downloadProgress(_ info: SteamAppInfo) -> Double? { installedByID[info.appID]?.downloadProgress }
+    /// `0...1` download progress — live from the SteamCMD log while active, else the manifest's bytes.
+    public func downloadProgress(_ info: SteamAppInfo) -> Double? {
+        downloadProgressByID[info.appID] ?? installedByID[info.appID]?.downloadProgress
+    }
     /// Human-readable on-disk size for an installed game, else nil.
     public func sizeString(_ info: SteamAppInfo) -> String? {
         guard let size = installedByID[info.appID]?.sizeOnDisk, size > 0 else { return nil }
@@ -117,13 +117,31 @@ public final class GameLibraryViewModel {
     public var activeDownloads: [SteamAppInfo] { owned.filter { isDownloading($0) } }
 
     private func refreshInstalled() async {
-        let found = (try? await discovery.discoverGames(steamRoot: paths.gameLibraryDir)) ?? []
-        installedByID = Dictionary(found.map { ($0.appID, $0) }, uniquingKeysWith: { first, _ in first })
-        // Re-attach to a download already in progress — e.g. a SteamCMD orphaned when the app was closed
-        // mid-download keeps running and updating its appmanifest; pick its progress back up.
+        // SteamCMD's `force_install_dir` nests each game's manifest at
+        // <gameLibrary>/steamapps/common/<appID>/steamapps/appmanifest_<appID>.acf — so scan each bucket
+        // and normalise the SteamApp to the bucket layout (installURL = the bucket, matching launch).
+        let common = paths.gameLibraryDir.appendingPathComponent("steamapps/common")
+        let buckets = (try? FileManager.default.contentsOfDirectory(atPath: common.path)) ?? []
+        var byID: [Int: SteamApp] = [:]
+        for bucket in buckets {
+            guard let appID = Int(bucket) else { continue }
+            let bucketURL = common.appendingPathComponent(bucket)
+            guard let apps = try? await discovery.discoverGames(steamRoot: bucketURL),
+                  let app = apps.first(where: { $0.appID == appID }) else { continue }
+            byID[appID] = SteamApp(
+                appID: appID, name: app.name, installDir: String(appID),
+                stateFlags: app.stateFlags, sizeOnDisk: app.sizeOnDisk,
+                bytesDownloaded: app.bytesDownloaded, bytesToDownload: app.bytesToDownload,
+                buildID: app.buildID, lastUpdated: app.lastUpdated, libraryPath: paths.gameLibraryDir)
+        }
+        installedByID = byID
+
+        // Re-attach to a download still running (e.g. orphaned when the app was closed mid-download).
         var reattached = false
-        for app in found where app.stateFlags.isDownloading && !downloadingIDs.contains(app.appID) {
-            downloadingIDs.insert(app.appID); reattached = true
+        for (appID, app) in byID where !app.isFullyInstalled && !downloadingIDs.contains(appID) {
+            if await steamCMD.isDownloadProcessRunning(appID: appID) {
+                downloadingIDs.insert(appID); reattached = true
+            }
         }
         if reattached { startDownloadMonitor() }
     }
@@ -202,43 +220,68 @@ public final class GameLibraryViewModel {
         }
     }
 
+    /// Pause a download — stop SteamCMD but KEEP the partial files (Resume continues from here).
+    public func pause(_ info: SteamAppInfo) async {
+        await steamCMD.pauseDownload(appID: info.appID, pid: downloadPIDs[info.appID])
+        clearDownloadState(info.appID)
+        await refreshInstalled()
+        statusMessage = "Paused \(info.name)."
+    }
+
     /// Cancel a download and discard the partial files.
     public func cancel(_ info: SteamAppInfo) async {
-        steamCMD.cancelDownload(appID: info.appID, pid: downloadPIDs[info.appID])
-        downloadingIDs.remove(info.appID)
-        downloadSpeeds[info.appID] = nil
-        lastBytes[info.appID] = nil
-        downloadPIDs[info.appID] = nil
+        await steamCMD.cancelDownload(appID: info.appID, pid: downloadPIDs[info.appID])
+        clearDownloadState(info.appID)
         await refreshInstalled()
         statusMessage = "Cancelled \(info.name)."
+    }
+
+    private func clearDownloadState(_ id: Int) {
+        downloadingIDs.remove(id)
+        downloadProgressByID[id] = nil; downloadSpeeds[id] = nil; lastBytes[id] = nil; downloadPIDs[id] = nil
     }
 
     private func startDownloadMonitor() {
         guard downloadMonitor == nil else { return }
         downloadMonitor = Task { [weak self] in
             while true {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
                 guard let self, !self.downloadingIDs.isEmpty else { break }
-                await self.refreshInstalled()
                 let now = Date()
                 for id in self.downloadingIDs {
-                    if self.installedByID[id]?.isFullyInstalled == true {
-                        self.downloadingIDs.remove(id)
-                        self.downloadSpeeds[id] = nil; self.lastBytes[id] = nil
-                        self.statusMessage = "\(self.installedByID[id]?.name ?? "Game") finished downloading."
+                    let log = Self.tail(self.paths.log(forAppID: id))
+                    if SteamCMD.isInstalledInLog(log, appID: id) {
+                        self.finishDownload(id)
+                        await self.refreshInstalled()
                         continue
                     }
-                    // Speed = Δbytes / Δtime between polls.
-                    guard let done = self.installedByID[id]?.bytesDownloaded else { continue }
+                    guard let progress = SteamCMD.parseProgress(log) else { continue }
+                    self.downloadProgressByID[id] = progress.fraction
                     if let prev = self.lastBytes[id], now.timeIntervalSince(prev.at) > 0.5 {
-                        self.downloadSpeeds[id] = max(0, Double(done - prev.bytes) / now.timeIntervalSince(prev.at))
+                        self.downloadSpeeds[id] = max(0, Double(progress.done - prev.bytes) / now.timeIntervalSince(prev.at))
                     }
-                    self.lastBytes[id] = (done, now)
+                    self.lastBytes[id] = (progress.done, now)
                 }
                 if self.downloadingIDs.isEmpty { break }
             }
             self?.downloadMonitor = nil
         }
+    }
+
+    private func finishDownload(_ id: Int) {
+        let name = owned.first { $0.appID == id }?.name ?? "Game"
+        downloadingIDs.remove(id)
+        downloadProgressByID[id] = nil; downloadSpeeds[id] = nil; lastBytes[id] = nil; downloadPIDs[id] = nil
+        statusMessage = "\(name) finished downloading."
+    }
+
+    /// Read the tail of a log file (SteamCMD progress lines live near the end).
+    private static func tail(_ url: URL, maxBytes: Int = 64 * 1024) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? handle.close() }
+        let end = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: end > UInt64(maxBytes) ? end - UInt64(maxBytes) : 0)
+        return String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
     }
 
     // MARK: - Launch

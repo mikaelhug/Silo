@@ -64,6 +64,20 @@ struct SteamCMDTests {
         #expect(SteamCMD.parsePackageAppIDs(out, packageID: 54321) == [220, 320])
     }
 
+    @Test("Parses live download progress (last line) + completion from a SteamCMD log")
+    func progress() {
+        let log = """
+         Update state (0x61) downloading, progress: 41.52 (39136090106 / 94252010251)
+         Update state (0x61) downloading, progress: 41.60 (39212266698 / 94252010251)
+        """
+        let p = try! #require(SteamCMD.parseProgress(log))
+        #expect(p.done == 39212266698)
+        #expect(p.total == 94252010251)
+        #expect(abs(p.fraction - 0.416) < 0.01)
+        #expect(!SteamCMD.isInstalledInLog(log, appID: 761890))
+        #expect(SteamCMD.isInstalledInLog("Success! App '761890' fully installed.", appID: 761890))
+    }
+
     @Test("Batch app-info builder forces Windows + updates + prints each app")
     func batchAppInfo() {
         let args = SteamCMD.appInfoArguments(appIDs: [220, 320])
