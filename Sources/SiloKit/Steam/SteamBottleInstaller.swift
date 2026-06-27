@@ -34,10 +34,8 @@ public struct SteamBottleInstaller: Sendable {
     ) async throws -> URL {
         guard let wine else { throw InstallError.wineNotConfigured }
         let fileManager = FileManager.default
-        // Disable mono/gecko so first-run wineboot doesn't hang on install dialogs.
-        let env = ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all",
-                   "WINEDLLOVERRIDES": Silo.winePrefixInitOverrides,
-                   "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback]
+        var env = Silo.wineEnvironment(prefix: bottle, wine: wine)
+        env["WINEDLLOVERRIDES"] = Silo.winePrefixInitOverrides  // no mono/gecko hang on first boot
 
         progress?(.booting)
         try fileManager.createDirectory(at: bottle, withIntermediateDirectories: true)

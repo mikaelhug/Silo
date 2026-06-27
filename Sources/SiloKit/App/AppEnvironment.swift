@@ -108,31 +108,32 @@ public final class AppEnvironment {
 
     /// Launch the Steam client in the Master bottle (detached) so the user can browse/download games.
     public func openSteam() async {
-        let config = backendSettings.config
-        guard let bottle = config.masterBottlePath, let wine = config.steamWine else { return }
+        guard let bottle = backendSettings.config.masterBottlePath else { return }
         let steamExe = DiscoveryEngine.steamRoot(inBottle: bottle).appendingPathComponent("steam.exe")
-        _ = try? await runner.spawnDetached(
-            executable: wine, arguments: [steamExe.path] + Silo.steamLaunchArgs,
-            environment: ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all",
-                          "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback],
-            currentDirectory: nil, logURL: steamLogURL)
+        guard let wine = await spawnInMasterBottle([steamExe.path] + Silo.steamLaunchArgs, logName: "steam.log")
+        else { return }
         // Safety net: if Steam's CEF ever crash-loops again, kill the bottle before it floods the Mac.
-        let guardWine = wine, guardBottle = bottle
         Task.detached { [runner] in
-            await CrashLoopGuard(runner: runner).monitor(wine: guardWine, bottle: guardBottle)
+            await CrashLoopGuard(runner: runner).monitor(wine: wine, bottle: bottle)
         }
     }
 
     /// Open winecfg against the Master Steam bottle (detached).
     public func openMasterWinecfg() async {
+        await spawnInMasterBottle(["winecfg"], logName: "winecfg.log")
+    }
+
+    /// Spawn a command detached in the Master Steam bottle. Returns the wine binary used (for follow-up
+    /// like the crash-loop guard), or nil if the bottle/wine isn't configured.
+    @discardableResult
+    private func spawnInMasterBottle(_ arguments: [String], logName: String) async -> URL? {
         let config = backendSettings.config
-        guard let bottle = config.masterBottlePath, let wine = config.steamWine else { return }
-        let log = paths.logsDir.appendingPathComponent("winecfg.log")
+        guard let bottle = config.masterBottlePath, let wine = config.steamWine else { return nil }
         _ = try? await runner.spawnDetached(
-            executable: wine, arguments: ["winecfg"],
-            environment: ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all",
-                          "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback],
-            currentDirectory: nil, logURL: log)
+            executable: wine, arguments: arguments,
+            environment: Silo.wineEnvironment(prefix: bottle, wine: wine),
+            currentDirectory: nil, logURL: paths.logsDir.appendingPathComponent(logName))
+        return wine
     }
 
     /// Build a per-game settings view model with the game's persisted config.

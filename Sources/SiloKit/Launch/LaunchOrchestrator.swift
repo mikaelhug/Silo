@@ -45,9 +45,12 @@ public struct LaunchOrchestrator: Sendable {
         }
 
         var environment = config.envFlags.environment(for: config.backend)
+        // Layer the base wine env (WINEDEBUG, DYLD bundled deps) under the user's flags, then force the
+        // isolated WINEPREFIX — never the master bottle, regardless of any user override.
+        for (key, value) in Silo.wineEnvironment(prefix: prefix, wine: wine) where environment[key] == nil {
+            environment[key] = value
+        }
         environment["WINEPREFIX"] = prefix.path
-        environment["DYLD_FALLBACK_LIBRARY_PATH"] = wine.siloDyldFallback   // bundled deps (freetype, …)
-        if environment["WINEDEBUG"] == nil { environment["WINEDEBUG"] = "-all" }
 
         switch config.backend {
         case .gptk:
@@ -116,8 +119,7 @@ public struct LaunchOrchestrator: Sendable {
         let log = (try? await logStore.prepare(appID: appID)) ?? logStore.logURL(forAppID: appID)
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: [tool],
-            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all",
-                          "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback],
+            environment: Silo.wineEnvironment(prefix: prefix, wine: wine),
             currentDirectory: nil, logURL: log)
     }
 

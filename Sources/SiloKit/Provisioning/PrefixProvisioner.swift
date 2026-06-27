@@ -58,14 +58,11 @@ public actor PrefixProvisioner {
         try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
 
         progress?(.booting)
+        var environment = Silo.wineEnvironment(prefix: prefix, wine: wineBinary)
+        environment["WINEDLLOVERRIDES"] = Silo.winePrefixInitOverrides  // no mono/gecko hang on first boot
         let result = try await runner.run(
-            executable: wineBinary,
-            arguments: ["wineboot", "--init"],
-            // Disable mono/gecko so first-run wineboot doesn't hang on install dialogs.
-            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": "-all",
-                          "WINEDLLOVERRIDES": Silo.winePrefixInitOverrides,
-                          "DYLD_FALLBACK_LIBRARY_PATH": wineBinary.siloDyldFallback],
-            currentDirectory: nil
+            executable: wineBinary, arguments: ["wineboot", "--init"],
+            environment: environment, currentDirectory: nil
         )
         guard result.succeeded else {
             throw ProvisionError.winebootFailed(exitCode: result.exitCode)

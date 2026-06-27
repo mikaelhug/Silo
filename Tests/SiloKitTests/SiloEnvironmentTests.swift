@@ -1,0 +1,19 @@
+import Foundation
+import Testing
+@testable import SiloKit
+
+@Suite("Silo.wineEnvironment")
+struct SiloEnvironmentTests {
+
+    @Test("Base wine env: isolated WINEPREFIX, quiet logging, bundled DYLD fallback")
+    func base() {
+        let env = Silo.wineEnvironment(
+            prefix: URL(fileURLWithPath: "/p/220"),
+            wine: URL(fileURLWithPath: "/rt/bin/wine"))
+        #expect(env["WINEPREFIX"] == "/p/220")
+        #expect(env["WINEDEBUG"] == "-all")
+        // <wine root>/lib/silo-bundled is first so wine's dlopen'd deps (freetype) resolve from the bundle.
+        #expect(env["DYLD_FALLBACK_LIBRARY_PATH"] == "/rt/lib/silo-bundled:/usr/local/lib:/usr/lib")
+        #expect(env.count == 3)   // base only — callers layer their own overrides
+    }
+}

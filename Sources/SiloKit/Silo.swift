@@ -37,6 +37,17 @@ public enum Silo {
     /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
     public static let winePrefixInitOverrides = "mscoree,mshtml="
+
+    /// The single source of truth for a wine invocation's base environment: the isolated `WINEPREFIX`,
+    /// quiet logging, and the bundled-dylib fallback path (so freetype/etc. resolve). Every wine launch
+    /// builds on this and merges its own overrides, so a fix here (e.g. the DYLD path) reaches them all.
+    public static func wineEnvironment(prefix: URL, wine: URL) -> [String: String] {
+        [
+            "WINEPREFIX": prefix.path,
+            "WINEDEBUG": "-all",
+            "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback,
+        ]
+    }
 }
 
 extension URL {
