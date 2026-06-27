@@ -31,6 +31,13 @@ public enum Silo {
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
     public static let winePrefixInitOverrides = "mscoree,mshtml="
 
+    /// `WINEDLLOVERRIDES` fragment disabling Wine drivers that crash the whole Wine process on macOS.
+    /// `winebus.sys` (the HID/game-controller bus) `dlopen`s libSDL2 on a Wine worker thread; SDL's macOS
+    /// initializer pops an `NSAlert` off the main thread → "NSWindow should only be instantiated on the
+    /// main thread" → the process aborts before Steam (or a game) ever draws. `winexinput.sys` rides on the
+    /// same path. Disabling them costs in-Wine controller support but lets Steam/games actually launch.
+    public static let crashyDriverOverrides = "winebus,winexinput=d"
+
     /// The single source of truth for a wine invocation's base environment: the isolated `WINEPREFIX`,
     /// quiet logging, and the bundled-dylib fallback path (so freetype/etc. resolve). Every wine launch
     /// builds on this and merges its own overrides, so a fix here (e.g. the DYLD path) reaches them all.
