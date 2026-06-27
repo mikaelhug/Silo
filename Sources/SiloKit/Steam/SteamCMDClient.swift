@@ -60,9 +60,20 @@ public struct SteamCMDClient: Sendable {
             environment: [:], currentDirectory: paths.steamCMDDir, logURL: logURL)
     }
 
-    /// Is a SteamCMD `app_update <id>` currently running (e.g. orphaned after the app was closed)?
-    public func isDownloadProcessRunning(appID: Int) async -> Bool {
-        await runner.processCount(matching: "app_update \(appID)") > 0
+    /// PID of a SteamCMD `app_update <id>` still running (e.g. orphaned after the app was closed), or nil.
+    public func downloadPID(appID: Int) async -> Int32? {
+        await runner.firstPID(matching: "app_update \(appID)")
+    }
+
+    /// Observe a running download **reactively** (no polling): `onProgress` fires when SteamCMD appends to
+    /// its log, `onExit` when the SteamCMD process terminates. Returns the observation tokens to retain.
+    public func observeDownload(
+        pid: Int32, logURL: URL,
+        onProgress: @escaping @Sendable () -> Void,
+        onExit: @escaping @Sendable () -> Void
+    ) -> [any ProcessObservation] {
+        [runner.observeWrites(at: logURL, onWrite: onProgress),
+         runner.observeExit(pid: pid, onExit: onExit)]
     }
 
     /// Pause: stop the SteamCMD process but KEEP the partial files — `app_update` resumes from here.

@@ -1,6 +1,7 @@
 import Foundation
 
-/// Rich, public Steam-store metadata for a game's detail view (description, developer, genres, art).
+/// Rich, public Steam-store metadata for a game's detail view (description, developer, genres, art,
+/// minimum system requirements incl. disk space, Metacritic, capabilities).
 /// Fetched on demand (only when a detail view opens — keeps within the store API's rate limits).
 public struct SteamStoreDetails: Sendable, Equatable {
     public let appID: Int
@@ -10,6 +11,14 @@ public struct SteamStoreDetails: Sendable, Equatable {
     public let genres: [String]
     public let headerImageURL: URL?
     public let releaseDate: String?
+    /// Minimum PC requirements as readable text (the source of disk-size info before install).
+    public let minimumRequirements: String?
+    /// The storage line pulled out of the minimum requirements, e.g. "50 GB available space".
+    public let diskSpace: String?
+    /// Metacritic score (0–100), when the store provides one.
+    public let metacritic: Int?
+    /// Store capabilities/categories, e.g. "Single-player", "Full controller support".
+    public let categories: [String]
 }
 
 /// Fetches `SteamStoreDetails` from the public `store.steampowered.com/api/appdetails` endpoint
@@ -31,6 +40,10 @@ public struct SteamStoreClient: Sendable {
               entry["success"] as? Bool == true,
               let d = entry["data"] as? [String: Any] else { return nil }
         let genres = (d["genres"] as? [[String: Any]])?.compactMap { $0["description"] as? String } ?? []
+        let categories = (d["categories"] as? [[String: Any]])?.compactMap { $0["description"] as? String } ?? []
+        // `pc_requirements` is a dict when present, or an empty array when the store lists none.
+        let minRaw = (d["pc_requirements"] as? [String: Any])?["minimum"] as? String
+        let minText = minRaw.map(stripHTML).flatMap { $0.isEmpty ? nil : $0 }
         return SteamStoreDetails(
             appID: appID,
             shortDescription: (d["short_description"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -38,6 +51,37 @@ public struct SteamStoreClient: Sendable {
             publishers: d["publishers"] as? [String] ?? [],
             genres: genres,
             headerImageURL: (d["header_image"] as? String).flatMap { URL(string: $0) },
-            releaseDate: (d["release_date"] as? [String: Any])?["date"] as? String)
+            releaseDate: (d["release_date"] as? [String: Any])?["date"] as? String,
+            minimumRequirements: minText,
+            diskSpace: minText.flatMap(diskSpace),
+            metacritic: (d["metacritic"] as? [String: Any])?["score"] as? Int,
+            categories: categories)
+    }
+
+    /// Pull the storage requirement out of the minimum-requirements text (the disk-size signal).
+    static func diskSpace(in requirements: String) -> String? {
+        guard let line = requirements.split(separator: "\n").first(where: {
+            let l = $0.lowercased()
+            return l.contains("storage") || l.contains("hard drive") || l.contains("available space")
+        }) else { return nil }
+        let value = line.firstIndex(of: ":").map { String(line[line.index(after: $0)...]) } ?? String(line)
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Convert Steam's requirements HTML (`<ul><li><strong>OS:</strong> …`) into readable lines.
+    static func stripHTML(_ html: String) -> String {
+        var s = html
+        for tag in ["<br>", "<br/>", "<br />", "</li>", "</p>", "</ul>"] {
+            s = s.replacingOccurrences(of: tag, with: "\n", options: .caseInsensitive)
+        }
+        s = s.replacingOccurrences(of: "<li>", with: "• ", options: .caseInsensitive)
+        s = s.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        for (entity, char) in ["&amp;": "&", "&lt;": "<", "&gt;": ">", "&nbsp;": " ", "&quot;": "\"", "&#39;": "'"] {
+            s = s.replacingOccurrences(of: entity, with: char)
+        }
+        var lines = s.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if lines.first?.lowercased() == "minimum:" { lines.removeFirst() }   // redundant with the section header
+        return lines.joined(separator: "\n")
     }
 }

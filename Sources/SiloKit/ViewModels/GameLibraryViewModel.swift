@@ -33,9 +33,10 @@ public final class GameLibraryViewModel {
     private let paths: AppPaths
     private var backend: BackendConfig
     private var username: String?
-    private var monitorTask: Task<Void, Never>?
-    private var downloadMonitor: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    /// kqueue observers (no polling): per-download [log-write, process-exit] tokens, and per-game exit.
+    private var downloadObservers: [Int: [any ProcessObservation]] = [:]
+    private var runObservers: [Int: any ProcessObservation] = [:]
 
     public init(
         steamCMD: SteamCMDClient,
@@ -111,10 +112,11 @@ public final class GameLibraryViewModel {
     /// Owned games currently downloading (for the status bar).
     public var activeDownloads: [SteamAppInfo] { owned.filter { isDownloading($0) } }
 
+    /// Re-parse every bucket's `appmanifest_*.acf` into `installedByID` (pure file read — no process
+    /// probes). SteamCMD's `force_install_dir` nests each manifest at
+    /// `<gameLibrary>/steamapps/common/<appID>/steamapps/appmanifest_<appID>.acf`, so scan each bucket
+    /// and normalise the `SteamApp` to the bucket layout (installURL = the bucket, matching launch).
     private func refreshInstalled() async {
-        // SteamCMD's `force_install_dir` nests each game's manifest at
-        // <gameLibrary>/steamapps/common/<appID>/steamapps/appmanifest_<appID>.acf — so scan each bucket
-        // and normalise the SteamApp to the bucket layout (installURL = the bucket, matching launch).
         let common = paths.gameLibraryDir.appendingPathComponent("steamapps/common")
         let buckets = (try? FileManager.default.contentsOfDirectory(atPath: common.path)) ?? []
         var byID: [Int: SteamApp] = [:]
@@ -130,15 +132,17 @@ public final class GameLibraryViewModel {
                 buildID: app.buildID, lastUpdated: app.lastUpdated, libraryPath: paths.gameLibraryDir)
         }
         installedByID = byID
+    }
 
-        // Re-attach to a download still running (e.g. orphaned when the app was closed mid-download).
-        var reattached = false
-        for (appID, app) in byID where !app.isFullyInstalled && !downloadingIDs.contains(appID) {
-            if await steamCMD.isDownloadProcessRunning(appID: appID) {
-                downloadingIDs.insert(appID); reattached = true
-            }
+    /// Re-attach to any SteamCMD download still running for a partially-installed bucket (e.g. orphaned
+    /// when the app was closed mid-download). Looks up the live PID once, then observes it — no polling.
+    private func reattachOrphanedDownloads() async {
+        for (appID, app) in installedByID where !app.isFullyInstalled && !downloadingIDs.contains(appID) {
+            guard let pid = await steamCMD.downloadPID(appID: appID) else { continue }
+            downloadPIDs[appID] = pid
+            downloadingIDs.insert(appID)
+            observeDownload(appID: appID, pid: pid)
         }
-        if reattached { startDownloadMonitor() }
     }
 
     // MARK: - Catalog
@@ -148,6 +152,7 @@ public final class GameLibraryViewModel {
     /// was showing disappears on a flaky refresh.
     public func load() async {
         await refreshInstalled()
+        await reattachOrphanedDownloads()
         guard let username, !username.isEmpty else { loadState = .needsLogin; return }
         if let cached = await cache.load(), cached.username == username {
             owned = cached.games.filter(\.windowsPlayable)   // self-heal: drop anything stale that isn't a Windows game
@@ -160,6 +165,7 @@ public final class GameLibraryViewModel {
     public func refresh() async {
         guard let username, !username.isEmpty else { loadState = .needsLogin; return }
         await refreshInstalled()
+        await reattachOrphanedDownloads()
         startRefresh(username: username)
     }
 
@@ -198,8 +204,9 @@ public final class GameLibraryViewModel {
 
     // MARK: - Download
 
-    /// Download (or update) a game's Windows files into its bucket via SteamCMD (detached), then poll
-    /// its appmanifest for live progress until it finishes.
+    /// Download (or update) a game's Windows files into its bucket via SteamCMD (detached). Progress is
+    /// read **reactively** from the SteamCMD log (a kqueue file-watcher), and completion/interruption is
+    /// detected from the process's exit — no polling.
     public func download(_ info: SteamAppInfo) async {
         guard let username, !busyAppIDs.contains(info.appID), !downloadingIDs.contains(info.appID) else { return }
         busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
@@ -208,11 +215,52 @@ public final class GameLibraryViewModel {
             let pid = try await steamCMD.download(appID: info.appID, username: username,
                                                   logURL: paths.log(forAppID: info.appID))
             downloadPIDs[info.appID] = pid
+            lastBytes[info.appID] = nil
             downloadingIDs.insert(info.appID)   // the status bar tracks progress + speed from here
-            startDownloadMonitor()
+            observeDownload(appID: info.appID, pid: pid)
         } catch {
             statusMessage = "\(info.name): \((error as NSError).localizedDescription)"
         }
+    }
+
+    /// Wire up reactive progress (log writes) + completion (process exit) for an active download.
+    private func observeDownload(appID: Int, pid: Int32) {
+        let log = paths.log(forAppID: appID)
+        cancelDownloadObservers(appID)
+        downloadObservers[appID] = steamCMD.observeDownload(
+            pid: pid, logURL: log,
+            // Both handlers run on a background queue: read + parse the log there (off the main actor),
+            // then hop to the main actor with the small parsed result.
+            onProgress: { [weak self] in
+                let snapshot = Self.parseLog(at: log, appID: appID)
+                Task { @MainActor in self?.applyProgress(appID: appID, snapshot) }
+            },
+            onExit: { [weak self] in
+                Task { @MainActor in await self?.downloadDidExit(appID: appID) }
+            })
+    }
+
+    private func applyProgress(appID id: Int, _ snapshot: (progress: SteamCMD.Progress?, finished: Bool)) {
+        guard downloadingIDs.contains(id) else { return }   // a late write after we already finished
+        if snapshot.finished { endDownload(id, installed: true); Task { await refreshInstalled() }; return }
+        guard let p = snapshot.progress else { return }
+        if downloadProgressByID[id] != p.fraction { downloadProgressByID[id] = p.fraction }
+        let now = Date()
+        if let prev = lastBytes[id], now.timeIntervalSince(prev.at) > 0.5 {
+            downloadSpeeds[id] = max(0, Double(p.done - prev.bytes) / now.timeIntervalSince(prev.at))
+            lastBytes[id] = (p.done, now)
+        } else if lastBytes[id] == nil {
+            lastBytes[id] = (p.done, now)
+        }
+    }
+
+    /// SteamCMD exited. The manifest is authoritative: fully installed → done; otherwise the partial is
+    /// kept and the game drops to a resumable "paused" state (this is the *only* path to "Resume", so a
+    /// live download is never mis-shown as paused).
+    private func downloadDidExit(appID id: Int) async {
+        guard downloadingIDs.contains(id) else { return }   // already finished via the log watcher
+        await refreshInstalled()
+        endDownload(id, installed: installedByID[id]?.isFullyInstalled == true)
     }
 
     /// Pause a download — stop SteamCMD but KEEP the partial files (Resume continues from here).
@@ -231,63 +279,35 @@ public final class GameLibraryViewModel {
         statusMessage = "Cancelled \(info.name)."
     }
 
+    /// Stop tracking a download (cancel its observers + drop transient progress state).
     private func clearDownloadState(_ id: Int) {
+        cancelDownloadObservers(id)
         downloadingIDs.remove(id)
         downloadProgressByID[id] = nil; downloadSpeeds[id] = nil; lastBytes[id] = nil; downloadPIDs[id] = nil
     }
 
-    private func startDownloadMonitor() {
-        guard downloadMonitor == nil else { return }
-        downloadMonitor = Task { [weak self] in
-            var tick = 0
-            while true {
-                try? await Task.sleep(for: .seconds(2))
-                guard let self, !self.downloadingIDs.isEmpty else { break }
-                let ids = self.downloadingIDs
-                let paths = self.paths
-                tick &+= 1
-                // Read the logs + run the progress regex OFF the main actor (file I/O + NSRegularExpression).
-                let parsed: [Int: (progress: SteamCMD.Progress?, finished: Bool)] =
-                    await Task.detached(priority: .utility) {
-                        ids.reduce(into: [:]) { acc, id in
-                            let text = Self.tail(paths.log(forAppID: id))
-                            acc[id] = (SteamCMD.parseProgress(text), SteamCMD.isInstalledInLog(text, appID: id))
-                        }
-                    }.value
-
-                let now = Date()
-                for id in ids {
-                    guard let entry = parsed[id] else { continue }
-                    if entry.finished { self.finishDownload(id); await self.refreshInstalled(); continue }
-                    guard let progress = entry.progress else { continue }
-                    self.downloadProgressByID[id] = progress.fraction
-                    if let prev = self.lastBytes[id], now.timeIntervalSince(prev.at) > 0.5 {
-                        self.downloadSpeeds[id] = max(0, Double(progress.done - prev.bytes) / now.timeIntervalSince(prev.at))
-                    }
-                    self.lastBytes[id] = (progress.done, now)
-                }
-                // Every ~12s, stop tracking a download whose SteamCMD has died (crash / lost network) so the
-                // loop can't spin forever — it falls back to the "paused" state, resumable by the user.
-                if tick % 6 == 0 {
-                    for id in self.downloadingIDs where !(await self.steamCMD.isDownloadProcessRunning(appID: id)) {
-                        self.clearDownloadState(id)
-                    }
-                    await self.refreshInstalled()
-                }
-            }
-            self?.downloadMonitor = nil
-        }
+    private func cancelDownloadObservers(_ id: Int) {
+        downloadObservers[id]?.forEach { $0.cancel() }
+        downloadObservers[id] = nil
     }
 
-    private func finishDownload(_ id: Int) {
-        let name = owned.first { $0.appID == id }?.name ?? "Game"
-        downloadingIDs.remove(id)
-        downloadProgressByID[id] = nil; downloadSpeeds[id] = nil; lastBytes[id] = nil; downloadPIDs[id] = nil
-        statusMessage = "\(name) finished downloading."
+    /// Finish/stop a download: clear its state and post a one-line status.
+    private func endDownload(_ id: Int, installed: Bool) {
+        let gameName = name(forAppID: id)
+        clearDownloadState(id)
+        statusMessage = installed ? "\(gameName) finished downloading."
+                                  : "\(gameName) download stopped — Resume to continue."
     }
 
-    /// Read the tail of a log file (SteamCMD progress lines live near the end). `nonisolated` so the
-    /// monitor can call it off the main actor.
+    /// Read + parse a SteamCMD log tail (progress + completion). `nonisolated` so observer handlers can
+    /// call it off the main actor.
+    private nonisolated static func parseLog(at url: URL, appID: Int)
+        -> (progress: SteamCMD.Progress?, finished: Bool) {
+        let text = tail(url)
+        return (SteamCMD.parseProgress(text), SteamCMD.isInstalledInLog(text, appID: appID))
+    }
+
+    /// Read the tail of a log file (SteamCMD progress lines live near the end).
     private nonisolated static func tail(_ url: URL, maxBytes: Int = 32 * 1024) -> String {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
         defer { try? handle.close() }
@@ -296,9 +316,13 @@ public final class GameLibraryViewModel {
         return String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
     }
 
+    private func name(forAppID id: Int) -> String {
+        owned.first { $0.appID == id }?.name ?? installedByID[id]?.name ?? "Game"
+    }
+
     // MARK: - Launch
 
-    /// Launch an installed game in its isolated GPTK bucket.
+    /// Launch an installed game in its isolated GPTK bucket. Its exit is observed (kqueue), not polled.
     public func play(_ info: SteamAppInfo) async {
         guard backend.isWineConfigured, !busyAppIDs.contains(info.appID),
               runningPIDs[info.appID] == nil else { return }
@@ -309,8 +333,8 @@ public final class GameLibraryViewModel {
             var stamped = config; stamped.lastPlayed = Date()
             _ = try? await configStore.saveGame(stamped)
             runningPIDs[info.appID] = pid
+            observeRun(appID: info.appID, pid: pid)
             statusMessage = "Launched \(info.name)."
-            startMonitor()
         } catch {
             statusMessage = "\(info.name): \((error as NSError).localizedDescription)"
         }
@@ -319,12 +343,29 @@ public final class GameLibraryViewModel {
     public func stop(_ info: SteamAppInfo) async {
         guard runningPIDs[info.appID] != nil else { return }
         await orchestrator.stop(appID: info.appID, backend: backend)
-        runningPIDs[info.appID] = nil
+        clearRunState(info.appID)
     }
 
     public func openWinecfg(_ info: SteamAppInfo) async {
         guard backend.isWineConfigured else { statusMessage = "No Wine configured."; return }
         await orchestrator.runWineTool("winecfg", appID: info.appID, backend: backend)
+    }
+
+    private func observeRun(appID: Int, pid: Int32) {
+        runObservers[appID]?.cancel()
+        runObservers[appID] = orchestrator.observeExit(pid: pid) { [weak self] in
+            Task { @MainActor in self?.gameDidExit(appID: appID, pid: pid) }
+        }
+    }
+
+    private func gameDidExit(appID: Int, pid: Int32) {
+        guard runningPIDs[appID] == pid else { return }   // ignore a stale exit after relaunch
+        clearRunState(appID)
+    }
+
+    private func clearRunState(_ id: Int) {
+        runningPIDs[id] = nil
+        runObservers[id]?.cancel(); runObservers[id] = nil
     }
 
     /// Bridge owned metadata → the `SteamApp` the launch pipeline expects. Prefer the installed manifest
@@ -333,20 +374,5 @@ public final class GameLibraryViewModel {
         installedByID[info.appID]
             ?? SteamApp(appID: info.appID, name: info.name, installDir: String(info.appID),
                         stateFlags: .fullyInstalled, sizeOnDisk: 0, libraryPath: paths.gameLibraryDir)
-    }
-
-    private func startMonitor() {
-        guard monitorTask == nil else { return }
-        monitorTask = Task { [weak self] in
-            while true {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard let self, !self.runningPIDs.isEmpty else { break }
-                for (appID, pid) in self.runningPIDs where !self.orchestrator.isRunning(pid: pid) {
-                    self.runningPIDs[appID] = nil
-                }
-                if self.runningPIDs.isEmpty { break }
-            }
-            self?.monitorTask = nil
-        }
     }
 }

@@ -140,6 +140,51 @@ struct GameLibraryViewModelTests {
         #expect(!FileManager.default.fileExists(atPath: paths.gameInstallDir(forAppID: 220).path))
     }
 
+    /// Spin the main actor until `condition` holds or we give up (lets event-driven hops settle).
+    private func settle(until condition: @escaping () -> Bool) async {
+        for _ in 0..<200 where !condition() { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    @Test("an interrupted download (SteamCMD exits before completion) becomes resumable, not lost")
+    func downloadInterrupted() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        vm.setAccount(username: "alice")
+        let info = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"], type: "game")
+        await vm.download(info)
+        #expect(vm.isDownloading(info))
+
+        // SteamCMD wrote a partial manifest, then its process died (e.g. lost network) — no "fully installed".
+        try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "1026" "installdir" "HL2" "BytesDownloaded" "30" "BytesToDownload" "100" }"#, appID: 220)
+        fake.setAlive(4242, false)   // process-exit observer fires (no polling)
+
+        await settle { !vm.isDownloading(info) }
+        #expect(!vm.isDownloading(info))
+        #expect(vm.isPaused(info))   // the partial is kept → "Resume", never silently dropped
+    }
+
+    @Test("a launched game clears its running state on process exit (event-driven, no poll)")
+    func gameExitClearsState() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        let bucket = paths.gameInstallDir(forAppID: 220)
+        try FileManager.default.createDirectory(at: bucket, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: bucket.appendingPathComponent("game.exe").path, contents: Data("MZ".utf8))
+        let prefix = paths.prefix(forAppID: 220)
+        fake.onRun = { _ in
+            let layout = PrefixLayout(prefix: prefix)
+            try? FileManager.default.createDirectory(at: layout.driveC, withIntermediateDirectories: true)
+            try? "reg".write(to: layout.systemReg, atomically: true, encoding: .utf8)
+        }
+        let info = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])
+        await vm.play(info)
+        #expect(vm.isRunning(info))
+
+        fake.setAlive(4242, false)   // the game process exits → observeExit handler clears it
+        await settle { !vm.isRunning(info) }
+        #expect(!vm.isRunning(info))
+    }
+
     @Test("play is a no-op without a configured Wine backend")
     func playNeedsWine() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
