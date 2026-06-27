@@ -185,11 +185,13 @@ struct GameLibraryViewModelTests {
         #expect(!vm.isRunning(info))
     }
 
-    @Test("uninstall deletes the installed game files and clears installed state")
+    @Test("uninstall deletes the game files AND its prefix, and clears installed state")
     func uninstall() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, _, paths) = make(tmp)
         try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "SizeOnDisk" "12000000" }"#, appID: 220)
+        // A pre-existing isolated prefix for the game (created by a prior launch).
+        try FileManager.default.createDirectory(at: paths.prefix(forAppID: 220), withIntermediateDirectories: true)
         await vm.load()
         let info = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])
         #expect(vm.isInstalled(info))
@@ -198,6 +200,7 @@ struct GameLibraryViewModelTests {
         await vm.uninstall(info)
         #expect(!vm.isInstalled(info))
         #expect(!FileManager.default.fileExists(atPath: paths.gameInstallDir(forAppID: 220).path))
+        #expect(!FileManager.default.fileExists(atPath: paths.prefix(forAppID: 220).path))   // prefix nuked too
     }
 
     @Test("play is a no-op without a configured Wine backend")

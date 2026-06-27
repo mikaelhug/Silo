@@ -94,7 +94,8 @@ struct GameDetailView: View {
             Button("Uninstall", role: .destructive) { Task { await lib.uninstall(game) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Deletes the downloaded game files to free up space. You can re-download it anytime.")
+            Text("Deletes the game's files and its isolated Wine prefix (its settings and any local "
+                 + "saves). You can re-download it anytime.")
         }
     }
 
