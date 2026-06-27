@@ -104,7 +104,7 @@ public final class GameLibraryViewModel {
     /// start, waits briefly for Steam to boot, auto-login from cache, and connect before returning — so a
     /// game launched right after can actually reach it via Steamworks. Concurrent callers (two quick Play
     /// clicks, or Play + Open Steam) coalesce onto ONE launch via `steamLaunch` — `steamPID` is only set
-    /// after an `await`, so without this they'd each start a second Steam in its own virtual desktop.
+    /// after an `await`, so without this they'd each start a second Steam client.
     private func ensureSteamRunning() async {
         if let pid = steamPID, orchestrator.isRunning(pid: pid) { return }   // already up
         if let inFlight = steamLaunch { await inFlight.value; return }       // a launch is already running

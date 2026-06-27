@@ -69,10 +69,24 @@ public struct SteamBottle: Sendable {
 
     // MARK: - steamwebhelper wrapper
 
-    /// Replace the bottle's `steamwebhelper.exe` with Silo's wrapper so the CEF UI paints (`--single-process`
-    /// — no steam.exe flag injects it). Idempotent and safe to call before every launch: Steam updates can
-    /// restore the stock binary, in which case the current real one is re-preserved as `…_orig.exe`. No-op
-    /// if the wine runtime doesn't ship the wrapper (older build) or Steam isn't installed yet.
+    /// Forget any cached Steam login in the bottle so the next launch shows a FRESH login. Removes
+    /// `loginusers.vdf` (the auto-login account list) and Steam Guard machine tokens (`ssfn*`). Necessary
+    /// because a stale/seeded login auto-retries and fails ("Received logon failure response") forever,
+    /// masking a clean login. Idempotent; safe if Steam isn't installed.
+    public func resetLogin() throws {
+        let client = paths.steamBottleClientDir
+        let loginUsers = client.appendingPathComponent("config/loginusers.vdf")
+        if fileManager.fileExists(atPath: loginUsers.path) { try fileManager.removeItem(at: loginUsers) }
+        let entries = (try? fileManager.contentsOfDirectory(at: client, includingPropertiesForKeys: nil)) ?? []
+        for entry in entries where entry.lastPathComponent.hasPrefix("ssfn") {
+            try? fileManager.removeItem(at: entry)
+        }
+    }
+
+    /// Replace the bottle's `steamwebhelper.exe` with Silo's CEF wrapper so the UI paints. Idempotent and
+    /// safe to call before every launch: Steam updates can restore the stock binary, in which case the
+    /// current real one is re-preserved as `…_orig.exe`. No-op if the wine runtime doesn't ship the wrapper
+    /// (older build) or Steam isn't installed yet.
     public func installWebHelperWrapper(wine: URL) throws {
         let wrapper = wine.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe")
@@ -89,37 +103,32 @@ public struct SteamBottle: Sendable {
 
     // MARK: - Launch
 
-    /// Steam flags aimed at getting `steamwebhelper`'s Chromium UI to paint under Wine (without them it's
-    /// a black window). `-cef-disable-gpu`/`-cef-disable-gpu-compositing` force software rendering;
-    /// `-no-cef-sandbox` avoids the CEF crash-loop; `-cef-disable-chrome-runtime` selects CEF's older
-    /// "alloy" runtime, which paints under Wine where the default chrome runtime doesn't. (The fully
-    /// proven fix is `--single-process` injected into steamwebhelper via a wrapper — no steam.exe flag
-    /// exists for it — which is what the patched-wine build adds.)
+    /// `steam.exe` flags that route its CEF UI onto software rendering so it paints under Wine (without
+    /// them it's a black window). This is the **verified** Vineport set (MelonForAll/vineport, working on
+    /// Apple-Silicon macOS 2026): `-cef-in-process-gpu` folds the GPU into the browser process (NOT
+    /// `--single-process`, which also breaks Chromium's network service → login Transport Error), the
+    /// `-cef-disable-*` flags force software GL, and `-noverifyfiles -norepairfiles` skip Steam's slow
+    /// self-repair. The real software-GL switch (`--use-gl=swiftshader`) is injected via the wrapper +
+    /// `STEAM_CEF_COMMAND_LINE` (see `steamEnvironment`), since no steam.exe flag carries it.
     public static let cefRenderArgs = [
-        "-cef-disable-gpu", "-cef-disable-gpu-compositing", "-no-cef-sandbox", "-cef-disable-chrome-runtime",
+        "-cef-disable-gpu", "-cef-disable-gpu-compositing", "-cef-in-process-gpu",
+        "-cef-disable-sandbox", "-no-cef-sandbox", "-noverifyfiles", "-norepairfiles",
     ]
 
-    /// The Steam client renders into a single Wine **virtual desktop** (one NSWindow/Metal surface) — on
-    /// macOS, winemac.drv's per-window layered surfaces are exactly what black-screens for CEF, and the
-    /// verified recipe routes Steam through `explorer /desktop=` to sidestep that. Games still launch
-    /// rootless under GPTK (so this doesn't affect gameplay).
-    static let desktopGeometry = "1600x1000"
-
-    /// Launch the bottle's Steam client detached, inside a Wine virtual desktop with the CEF-render flags
-    /// so the (one-time) login window paints.
+    /// Launch the bottle's Steam client detached, **rootless** (no Wine virtual desktop — Vineport runs
+    /// rootless, and a virtual desktop broke mouse input here), with the CEF software-render flags + env.
     @discardableResult
     public func launchSteam(wine: URL?, extraArgs: [String] = SteamBottle.cefRenderArgs) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }
-        let args = ["explorer", "/desktop=Silo,\(Self.desktopGeometry)", paths.steamBottleExe.path] + extraArgs
         return try await runner.spawnDetached(
-            executable: wine, arguments: args,
+            executable: wine, arguments: [paths.steamBottleExe.path] + extraArgs,
             environment: steamEnvironment(wine: wine),
             currentDirectory: paths.steamBottleClientDir, logURL: paths.steamBottleLog)
     }
 
-    /// Hand a `steam://…` URL to the (already-running) bottle Steam. A plain `steam.exe <url>` — no virtual
-    /// desktop, no CEF flags — so Steam's single-instance forwarder routes the URL to the running client
-    /// and the transient process exits, rather than standing up a second client in its own desktop.
+    /// Hand a `steam://…` URL to the (already-running) bottle Steam. A plain `steam.exe <url>` — no CEF
+    /// flags — so Steam's single-instance forwarder routes the URL to the running client and the transient
+    /// process exits, rather than standing up a second client.
     @discardableResult
     public func sendURL(_ url: String, wine: URL?) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }
@@ -131,16 +140,25 @@ public struct SteamBottle: Sendable {
 
     // MARK: - Helpers
 
-    /// Environment for launching the Steam client. `WINEMSYNC=1` matches the per-game launch env (default
-    /// `EnvFlags`) so Steam and the games it co-hosts agree on the wineserver sync mode and share one
-    /// wineserver. The overrides disable Steam's in-game overlay injector (a known crash/black-window
-    /// source under Wine), force builtin crypto, and disable the SDL controller bus (see
-    /// `Silo.crashyDriverOverrides`).
+    /// Environment for launching the Steam client — the verified Vineport recipe. `STEAM_CEF_COMMAND_LINE`
+    /// forces steamwebhelper's Chromium onto its bundled SwiftShader **software GL** renderer (the route
+    /// that actually paints under Wine, rather than Metal/winemac.drv presentation), with `--in-process-gpu`
+    /// (NOT `--single-process`, which breaks Chromium's network service → login Transport Error).
+    /// `STEAM_DISABLE_GPU_PROCESS`/`GALLIUM_DRIVER=llvmpipe` keep all GL software-side. `WINEMSYNC=1` matches
+    /// the per-game launch env so Steam + co-hosted games share one wineserver; the overrides disable the
+    /// in-game overlay injector and the SDL controller bus (`Silo.crashyDriverOverrides`).
     private func steamEnvironment(wine: URL) -> [String: String] {
         var env = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
         env["WINEMSYNC"] = "1"
+        env["WINEESYNC"] = "1"
+        env["STEAM_CEF_COMMAND_LINE"] =
+            "--no-sandbox --in-process-gpu --disable-gpu --disable-gpu-compositing "
+            + "--use-gl=swiftshader --disable-software-rasterizer"
+        env["STEAM_DISABLE_GPU_PROCESS"] = "1"
+        env["GALLIUM_DRIVER"] = "llvmpipe"
+        env["DOTNET_EnableWriteXorExecute"] = "0"
         env["WINEDLLOVERRIDES"] =
-            "\(Silo.crashyDriverOverrides);gameoverlayrenderer,gameoverlayrenderer64=d;bcrypt,ncrypt=b"
+            "\(Silo.crashyDriverOverrides);gameoverlayrenderer,gameoverlayrenderer64=d"
         return env
     }
 

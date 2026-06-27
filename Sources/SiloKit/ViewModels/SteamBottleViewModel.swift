@@ -1,8 +1,8 @@
 import Foundation
 
 /// Drives the experimental Steam-bottle setup + launch (the revert path for Steamworks/DRM games):
-/// install Windows Steam into the shared bottle and launch it (in a Wine virtual desktop with the
-/// CEF-render flags + wrapper) for a one-time sign-in, after which games run co-resident with it.
+/// install Windows Steam into the shared bottle and launch it (rootless, with the software-GL CEF env +
+/// wrapper) for a one-time sign-in, after which games run co-resident with it.
 @MainActor
 @Observable
 public final class SteamBottleViewModel {
@@ -29,6 +29,18 @@ public final class SteamBottleViewModel {
             status = "Steam installed. Launch it, sign in once (it caches the login), then run a game."
         } catch {
             status = "Setup failed: \(message(error))"
+        }
+    }
+
+    /// Forget the bottle's cached/seeded Steam login so the next launch shows a fresh login.
+    public func resetLogin() async {
+        guard !busy else { return }
+        busy = true; defer { busy = false }
+        do {
+            try bottle.resetLogin()
+            status = "Cleared the bottle's saved login. Launch Steam and sign in fresh."
+        } catch {
+            status = "Couldn't reset login: \(message(error))"
         }
     }
 
