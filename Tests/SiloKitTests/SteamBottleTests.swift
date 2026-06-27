@@ -38,6 +38,28 @@ struct SteamBottleTests {
         #expect(call.environment["WINEPREFIX"] == paths.steamBottle.path)
     }
 
+    @Test("installWebHelperWrapper preserves the real webhelper and drops the wrapper in its place")
+    func webHelperWrapper() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (bottle, _, paths) = make(tmp)
+        // The wine runtime ships the wrapper at <wineRoot>/share/silo/.
+        let wine = tmp.url.appendingPathComponent("wine/bin/wine64")
+        _ = try tmp.write("wine/share/silo/steamwebhelper-wrapper.exe", "WRAPPER")
+        // Steam installed its real webhelper in the bottle.
+        let helper = paths.steamBottleWebHelper
+        try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "REAL".write(to: helper, atomically: true, encoding: .utf8)
+
+        try bottle.installWebHelperWrapper(wine: wine)
+        let orig = helper.deletingLastPathComponent().appendingPathComponent("steamwebhelper_orig.exe")
+        #expect(try String(contentsOf: helper, encoding: .utf8) == "WRAPPER")   // wrapper in place
+        #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")        // real one preserved
+
+        // Idempotent: a second call doesn't clobber the preserved real binary.
+        try bottle.installWebHelperWrapper(wine: wine)
+        #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")
+    }
+
     @Test("launchGame runs the exe inside the shared bottle prefix (never an isolated one)")
     func launchGame() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

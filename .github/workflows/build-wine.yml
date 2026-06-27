@@ -105,6 +105,11 @@ jobs:
           $ARCH_PREFIX make -j"$(sysctl -n hw.ncpu)"
           $ARCH_PREFIX make install
           test -x "$GITHUB_WORKSPACE/wine-install/bin/wine64" || test -x "$GITHUB_WORKSPACE/wine-install/bin/wine"
+          # steamwebhelper wrapper (forces CEF --single-process so Steam's UI paints) — shipped in the runtime.
+          mkdir -p "$GITHUB_WORKSPACE/wine-install/share/silo"
+          "$($ARCH_PREFIX $BREW --prefix mingw-w64)/bin/x86_64-w64-mingw32-gcc" -O2 -municode -mwindows \
+            -o "$GITHUB_WORKSPACE/wine-install/share/silo/steamwebhelper-wrapper.exe" \
+            "$GITHUB_WORKSPACE/Scripts/steamwebhelper-wrapper.c"
 
       - name: Bundle dependency dylibs (self-contained runtime)
         run: ./Scripts/bundle-wine-dylibs.sh "$GITHUB_WORKSPACE/wine-install"

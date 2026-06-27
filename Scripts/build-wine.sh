@@ -33,11 +33,22 @@ WINE_SRC="$(find src -maxdepth 3 -type d -name wine | head -1)"
 echo "==> Configure + build (x86_64, wow64) — this takes ~30–60 min"
 export PATH="$($ARCH "$BREW" --prefix bison)/bin:$PATH"
 rm -rf build install && mkdir build install && cd build
-$ARCH "$WORK/$WINE_SRC/configure" --prefix="$WORK/install" \
+# CFLAGS=-fvisibility=default: build Wine's UNIX side with all symbols visible so winemac.drv ('macdrv')
+# exposes its Metal/window-surface helpers via dlsym. Without this the macOS surface-presentation path is
+# broken for layered windows and Steam's CEF UI (and D3D→Metal games) paint BLACK/transparent even in
+# software compositing — the verified fix for running Windows Steam on Apple-Silicon macOS. -O2 restores
+# the optimization an explicit CFLAGS would otherwise drop.
+$ARCH env CFLAGS="-fvisibility=default -O2" \
+  "$WORK/$WINE_SRC/configure" --prefix="$WORK/install" \
   --enable-archs=i386,x86_64 --disable-tests --without-x \
   --with-freetype --with-gstreamer --with-gnutls
 $ARCH make -j"$(sysctl -n hw.ncpu)"
 $ARCH make install
+
+echo "==> Build the steamwebhelper wrapper (forces CEF --single-process so Steam's UI paints)"
+mkdir -p "$WORK/install/share/silo"
+"$($ARCH "$BREW" --prefix mingw-w64)/bin/x86_64-w64-mingw32-gcc" -O2 -municode -mwindows \
+  -o "$WORK/install/share/silo/steamwebhelper-wrapper.exe" "$ROOT/Scripts/steamwebhelper-wrapper.c"
 
 echo "==> Bundle dependency dylibs (self-contained runtime)"
 "$ROOT/Scripts/bundle-wine-dylibs.sh" "$WORK/install"
