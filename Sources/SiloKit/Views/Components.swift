@@ -13,6 +13,31 @@ func chooseDiskImage() -> URL? {
     return panel.runModal() == .OK ? panel.url : nil
 }
 
+/// Gradient fallback shown while a game's cover art loads or is unavailable (tile + detail hero).
+struct GameArtworkPlaceholder: View {
+    var iconFont: Font = .title2
+    var body: some View {
+        LinearGradient(colors: [.indigo.opacity(0.55), .cyan.opacity(0.45)],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(Image(systemName: "gamecontroller.fill").font(iconFont).foregroundStyle(.white.opacity(0.7)))
+    }
+}
+
+extension View {
+    /// The shared "Uninstall this game?" confirmation used by both the tile and the detail view.
+    func uninstallConfirmation(
+        game: SteamAppInfo, isPresented: Binding<Bool>, library: GameLibraryViewModel
+    ) -> some View {
+        confirmationDialog("Uninstall \(game.name)?", isPresented: isPresented, titleVisibility: .visible) {
+            Button("Uninstall", role: .destructive) { Task { await library.uninstall(game) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deletes the game's files and its isolated Wine prefix (its settings and any local "
+                 + "saves). You can re-download it anytime.")
+        }
+    }
+}
+
 /// A row that displays a path and lets the user pick a file or directory via NSOpenPanel
 /// (powerbox grant — avoids TCC denials for non-sandboxed access).
 struct PathPickerRow: View {

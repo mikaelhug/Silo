@@ -130,6 +130,11 @@ public final class AppEnvironment {
         logStore.logURL(forAppID: appID)
     }
 
+    /// The log-window target for a game (title + its log URL), opened via `openWindow(id:)`.
+    func logTarget(for game: SteamAppInfo) -> LogTarget {
+        LogTarget(title: "\(game.name) — Log", url: logURL(forAppID: game.appID))
+    }
+
     /// Install dir for an owned game's bucket (for "Reveal in Finder").
     public nonisolated func gameInstallDir(forAppID appID: Int) -> URL {
         paths.gameInstallDir(forAppID: appID)
