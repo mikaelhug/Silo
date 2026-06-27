@@ -22,16 +22,23 @@ struct LibraryGridView: View {
         .toolbar {
             if env.setupComplete {
                 Button { showLogin = true } label: {
-                    Label(env.backendSettings.config.steamUsername ?? "Account", systemImage: "person.crop.circle")
+                    Label(lib.account ?? env.backendSettings.config.steamUsername ?? "Account",
+                          systemImage: "person.crop.circle")
                 }
+                .help(lib.account.map { "Signed in as \($0)" } ?? "Steam account")
                 Menu {
                     Toggle("Windows-only (hide games with a Mac version)", isOn: $lib.showWindowsOnly)
                 } label: { Label("Filter", systemImage: "line.3.horizontal.decrease.circle") }
-                if lib.isRefreshing {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button { Task { await lib.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                // Keep the button chrome while refreshing (spinner inside) so the toolbar group doesn't
+                // shrink and crowd the spinner against its border.
+                Button { Task { await lib.refresh() } } label: {
+                    if lib.isRefreshing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
+                .disabled(lib.isRefreshing)
             }
             Button { showAdvanced = true } label: { Label("Advanced", systemImage: "gearshape") }
         }
@@ -41,8 +48,16 @@ struct LibraryGridView: View {
         .sheet(item: $detailTarget) { game in
             GameDetailView(game: game, onSettings: { detailTarget = nil; settingsTarget = game })
         }
-        .navigationSubtitle(env.setupComplete ? "\(lib.filtered.count) games" : "")
+        .navigationSubtitle(librarySubtitle(lib))
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
+    }
+
+    /// "N games · signed in as alice" — keeps the logged-in account visible next to the library.
+    private func librarySubtitle(_ lib: GameLibraryViewModel) -> String {
+        guard env.setupComplete else { return "" }
+        var parts = ["\(lib.filtered.count) games"]
+        if let account = lib.account { parts.append("signed in as \(account)") }
+        return parts.joined(separator: "  ·  ")
     }
 
     @ViewBuilder
