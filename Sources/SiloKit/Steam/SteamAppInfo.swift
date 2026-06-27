@@ -1,8 +1,8 @@
 import Foundation
 
-/// Metadata for a Steam app, parsed from SteamCMD `app_info_print` output. Drives the Windows-only
-/// library filter and (later) the per-game GPTK bucket defaults.
-public struct SteamAppInfo: Sendable, Equatable, Identifiable {
+/// Metadata for a Steam app, parsed from SteamCMD `app_info_print` output. Drives the library filter
+/// (and the per-game GPTK bucket defaults). `Codable` so the library can be cached to disk.
+public struct SteamAppInfo: Sendable, Equatable, Identifiable, Codable {
     public let appID: Int
     public let name: String
     /// Platforms from `common/oslist`, e.g. `["windows", "macos", "linux"]`.
@@ -23,9 +23,15 @@ public struct SteamAppInfo: Sendable, Equatable, Identifiable {
     public var supportsMac: Bool {
         oslist.contains { ["macos", "macosx", "mac"].contains($0.lowercased()) }
     }
-    /// A game that runs on Windows but has **no** native macOS build — the kind Silo exists to launch.
+    /// A game that runs on Windows but has **no** native macOS build.
     public var isWindowsOnly: Bool { supportsWindows && !supportsMac }
     public var isGame: Bool { (type ?? "game").caseInsensitiveCompare("game") == .orderedSame }
+
+    /// Whether to list in Silo: an owned **game** (not DLC/tool/soundtrack) that can run on Windows.
+    /// Resilient to missing metadata — if platforms are unknown (e.g. a cold app_info cache), keep it
+    /// rather than silently hiding an owned game. Mac-capable games are still listed (you may prefer the
+    /// Windows build via GPTK); the UI can filter those out separately.
+    public var windowsPlayable: Bool { isGame && (supportsWindows || oslist.isEmpty) }
 
     // MARK: - Parsing
 

@@ -20,7 +20,8 @@ struct GameLibraryViewModelTests {
         if wine { backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64") }
         let vm = GameLibraryViewModel(
             steamCMD: steamCMD, discovery: DiscoveryEngine(), orchestrator: orchestrator,
-            configStore: ConfigStore(paths: paths), paths: paths, backend: backend)
+            configStore: ConfigStore(paths: paths), cache: LibraryCacheStore(paths: paths),
+            paths: paths, backend: backend)
         return (vm, fake, paths)
     }
 
@@ -39,18 +40,41 @@ struct GameLibraryViewModelTests {
         #expect(vm.loadState == .needsLogin)
     }
 
-    @Test("load populates the owned Windows-only catalog")
-    func loadsOwned() async throws {
+    @Test("refresh enumerates owned Windows-playable games (incl. Mac-capable) and persists to cache")
+    func refreshesOwned() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, _) = make(tmp)
+        let (vm, fake, paths) = make(tmp)
         fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data("License packageID 5 :\n".utf8)))
-        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data(#""5" { "appids" { "0" "220" } }"#.utf8)))
-        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data(
-            #""220" { "common" { "name" "Half-Life 2" "type" "Game" "oslist" "windows" } }"#.utf8)))
+        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data(#""5" { "appids" { "0" "220" "1" "70" } }"#.utf8)))
+        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data("""
+        "70"  { "common" { "name" "Half-Life" "type" "Game" "oslist" "windows,macos" } }
+        "220" { "common" { "name" "Half-Life 2" "type" "Game" "oslist" "windows" } }
+        """.utf8)))
+        vm.setAccount(username: "alice")
+        await vm.performRefresh(username: "alice")
+
+        #expect(vm.loadState == .loaded)
+        #expect(vm.owned.map(\.appID) == [70, 220])      // both run on Windows (HL also has Mac)
+        // Windows-only toggle hides the Mac-capable one.
+        vm.showWindowsOnly = true
+        #expect(vm.filtered.map(\.appID) == [220])
+        // Persisted to the cache.
+        let cached = await LibraryCacheStore(paths: paths).load()
+        #expect(cached?.games.map(\.appID).sorted() == [70, 220])
+    }
+
+    @Test("load shows the cached catalog instantly (before any SteamCMD call)")
+    func loadsFromCache() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        await LibraryCacheStore(paths: paths).save(
+            username: "alice",
+            games: [SteamAppInfo(appID: 730, name: "CS", oslist: ["windows"])], at: Date())
         vm.setAccount(username: "alice")
         await vm.load()
+        #expect(vm.owned.map(\.appID) == [730])           // shown from cache, no enumeration needed
         #expect(vm.loadState == .loaded)
-        #expect(vm.owned.map(\.appID) == [220])
+        _ = fake   // (refresh runs in the background; we only assert the instant cache path here)
     }
 
     @Test("install state: parses bucket appmanifests for installed size + live download progress")

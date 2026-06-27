@@ -23,7 +23,14 @@ struct LibraryGridView: View {
                 Button { showLogin = true } label: {
                     Label(env.backendSettings.config.steamUsername ?? "Account", systemImage: "person.crop.circle")
                 }
-                Button { Task { await lib.load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                Menu {
+                    Toggle("Windows-only (hide games with a Mac version)", isOn: $lib.showWindowsOnly)
+                } label: { Label("Filter", systemImage: "line.3.horizontal.decrease.circle") }
+                if lib.isRefreshing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button { Task { await lib.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                }
             }
             Button { showAdvanced = true } label: { Label("Advanced", systemImage: "gearshape") }
         }
