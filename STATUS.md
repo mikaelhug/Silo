@@ -241,11 +241,14 @@
 
 ## BLOCKED
 - _(none for the build — the items below need a real Wine runtime + on-device launch, not code changes)_
-- **Bottle Steam CEF render (THE gate):** does the Windows Steam client's CEF UI actually paint (not a
-  black window) with the rebuilt wine (`-fvisibility=default` on CFLAGS **and** CROSSCFLAGS) + the
-  `explorer /desktop=` virtual desktop + the steamwebhelper `--single-process` wrapper? This is the
-  prerequisite for the whole bottle model and can only be confirmed by launching it. User is rebuilding
-  wine via `Scripts/build-wine.sh 26.2.0`.
+- **Bottle Steam CEF render + login (M76, verified recipe applied — needs on-device confirm):** deep-research
+  (→ MelonForAll/vineport, confirmed working macOS 2026) found the root cause of BOTH the black window AND
+  the `Transport Error 2` login failure: the steamwebhelper wrapper injected `--single-process`, which also
+  breaks Chromium's network service under Wine. Fixed to `--in-process-gpu` + SwiftShader software GL
+  (`STEAM_CEF_COMMAND_LINE`/`STEAM_DISABLE_GPU_PROCESS`/`GALLIUM_DRIVER=llvmpipe`) + rootless launch +
+  Vineport's steam.exe flags. **To verify:** rebuild wine (`Scripts/build-wine.sh <ver>` — corrected
+  wrapper) + rebuild the app, Advanced → Reset Steam login → Launch Steam → confirm the UI paints + login
+  completes. If still failing, the research's fallback is kaon's model (native macOS Steam primary).
 - **`explorer /desktop=` program-path form:** `launchSteam` passes the macOS **unix** path of `steam.exe`
   as the program arg to `wine explorer /desktop=Silo,<geom>`. If wine's explorer needs a Windows path
   (`C:\Program Files (x86)\Steam\steam.exe`) instead, Steam won't launch — verify on-device and switch if so.
