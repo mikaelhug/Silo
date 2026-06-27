@@ -33,6 +33,13 @@ public struct SteamAppInfo: Sendable, Equatable, Identifiable, Codable {
     /// games are still returned by the enumerator; the UI hides them by default via the Windows-only toggle.
     public var windowsPlayable: Bool { isGame && supportsWindows }
 
+    /// Library cover art (Steam CDN `header.jpg`).
+    public var headerArtURL: URL? {
+        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appID)/header.jpg")
+    }
+    /// Public Steam store page.
+    public var storePageURL: URL? { URL(string: "https://store.steampowered.com/app/\(appID)") }
+
     // MARK: - Parsing
 
     /// Parse one app's block out of SteamCMD's noisy `app_info_print` output.

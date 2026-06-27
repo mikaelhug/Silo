@@ -21,12 +21,12 @@ struct SteamGameTileView: View {
         let running = lib.isRunning(game)
 
         VStack(alignment: .leading, spacing: 0) {
-            AsyncImage(url: headerArtURL) { phase in
+            AsyncImage(url: game.headerArtURL) { phase in
                 switch phase {
                 case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
                 // No spinner here: an animating ProgressView inside the grid drives a per-frame
                 // CADisplayLink that re-lays out the whole grid (the gradient placeholder is enough).
-                default: artPlaceholder
+                default: GameArtworkPlaceholder()
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92).clipped()
@@ -78,13 +78,7 @@ struct SteamGameTileView: View {
         .onHover { hovering = $0 }
         .help("Show details")
         .contextMenu { menuItems(installed: installed) }
-        .confirmationDialog("Uninstall \(game.name)?", isPresented: $confirmingUninstall, titleVisibility: .visible) {
-            Button("Uninstall", role: .destructive) { Task { await env.gameLibrary.uninstall(game) } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Deletes the game's files and its isolated Wine prefix (its settings and any local "
-                 + "saves). You can re-download it anytime.")
-        }
+        .uninstallConfirmation(game: game, isPresented: $confirmingUninstall, library: env.gameLibrary)
     }
 
     /// Progress · speed · ETA line shown while downloading.
@@ -138,7 +132,7 @@ struct SteamGameTileView: View {
         Button("Details…", action: onDetails)
         Button("Settings…", action: onSettings)
         Button("View Download/Run Log…") {
-            openWindow(id: "silo-log", value: LogTarget(title: "\(game.name) — Log", url: env.logURL(forAppID: game.appID)))
+            openWindow(id: LogTarget.windowID, value: env.logTarget(for: game))
         }
         if installed {
             Button("Update / Re-download") { Task { await env.gameLibrary.download(game) } }
@@ -148,21 +142,12 @@ struct SteamGameTileView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([env.paths.gameInstallDir(forAppID: game.appID)])
             }
         }
-        if let store = URL(string: "https://store.steampowered.com/app/\(game.appID)") {
+        if let store = game.storePageURL {
             Button("View on Steam Store") { NSWorkspace.shared.open(store) }
         }
         if installed {
             Divider()
             Button("Uninstall…", role: .destructive) { confirmingUninstall = true }
         }
-    }
-
-    private var headerArtURL: URL? {
-        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(game.appID)/header.jpg")
-    }
-    private var artPlaceholder: some View {
-        LinearGradient(colors: [Color.indigo.opacity(0.55), Color.cyan.opacity(0.45)],
-                       startPoint: .topLeading, endPoint: .bottomTrailing)
-            .overlay(Image(systemName: "gamecontroller.fill").font(.title2).foregroundStyle(.white.opacity(0.7)))
     }
 }

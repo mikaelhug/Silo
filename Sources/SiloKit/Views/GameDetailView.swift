@@ -19,10 +19,10 @@ struct GameDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    AsyncImage(url: details?.headerImageURL ?? headerArtURL) { phase in
+                    AsyncImage(url: details?.headerImageURL ?? game.headerArtURL) { phase in
                         switch phase {
                         case .success(let image): image.resizable().aspectRatio(contentMode: .fit)
-                        default: heroPlaceholder
+                        default: GameArtworkPlaceholder(iconFont: .largeTitle).aspectRatio(460.0 / 215.0, contentMode: .fit)
                         }
                     }
                     .frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: 12))
@@ -47,11 +47,7 @@ struct GameDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
                 ToolbarItem {
-                    Button("Store") {
-                        if let url = URL(string: "https://store.steampowered.com/app/\(game.appID)") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
+                    Button("Store") { if let url = game.storePageURL { NSWorkspace.shared.open(url) } }
                 }
             }
         }
@@ -81,7 +77,7 @@ struct GameDetailView: View {
             }
             Button("Settings…", action: onSettings)
             Button("Log") {
-                openWindow(id: "silo-log", value: LogTarget(title: "\(game.name) — Log", url: env.logURL(forAppID: game.appID)))
+                openWindow(id: LogTarget.windowID, value: env.logTarget(for: game))
             }
             Spacer()
             if lib.isInstalled(game) {
@@ -90,13 +86,7 @@ struct GameDetailView: View {
                 }
             }
         }
-        .confirmationDialog("Uninstall \(game.name)?", isPresented: $confirmingUninstall, titleVisibility: .visible) {
-            Button("Uninstall", role: .destructive) { Task { await lib.uninstall(game) } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Deletes the game's files and its isolated Wine prefix (its settings and any local "
-                 + "saves). You can re-download it anytime.")
-        }
+        .uninstallConfirmation(game: game, isPresented: $confirmingUninstall, library: lib)
     }
 
     @ViewBuilder private func chips(_ items: [String]) -> some View {
@@ -151,14 +141,5 @@ struct GameDetailView: View {
             }
             .font(.callout)
         }
-    }
-
-    private var headerArtURL: URL? {
-        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(game.appID)/header.jpg")
-    }
-    private var heroPlaceholder: some View {
-        LinearGradient(colors: [.indigo.opacity(0.55), .cyan.opacity(0.45)], startPoint: .topLeading, endPoint: .bottomTrailing)
-            .aspectRatio(460.0 / 215.0, contentMode: .fit)
-            .overlay(Image(systemName: "gamecontroller.fill").font(.largeTitle).foregroundStyle(.white.opacity(0.7)))
     }
 }

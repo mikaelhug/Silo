@@ -1,8 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// Identifies a log to open in its own window (`openWindow(id: "silo-log", value:)`).
+/// Identifies a log to open in its own window (`openWindow(id: LogTarget.windowID, value:)`).
 struct LogTarget: Identifiable, Hashable, Codable {
+    /// The `WindowGroup` / `openWindow` id (must match `SiloApp`'s log window group).
+    static let windowID = "silo-log"
     var id: URL { url }
     let title: String
     let url: URL
@@ -54,19 +56,10 @@ struct LogViewerView: View {
         .onChange(of: url, initial: true) { _, newURL in tailer.start(url: newURL) }
         .onDisappear { tailer.stop() }
     }
-
-    /// Read the last `maxBytes` of the file so a huge log doesn't blow memory. "" if missing.
-    /// `nonisolated` so the file-watcher can read it off the main actor.
-    nonisolated static func tail(of url: URL, maxBytes: Int = 256 * 1024) -> String {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
-        defer { try? handle.close() }
-        let end = (try? handle.seekToEnd()) ?? 0
-        let start = end > UInt64(maxBytes) ? end - UInt64(maxBytes) : 0
-        try? handle.seek(toOffset: start)
-        let data = (try? handle.readToEnd()) ?? Data()
-        return String(decoding: data, as: UTF8.self)
-    }
 }
+
+/// A log file's tail (256 KB cap — logs can get large).
+private let logTailBytes = 256 * 1024
 
 /// Watches a log file and republishes its tail whenever it's written — kqueue-based, no polling.
 @MainActor
@@ -83,7 +76,7 @@ final class LogTailer {
         if !FileManager.default.fileExists(atPath: url.path) {
             FileManager.default.createFile(atPath: url.path, contents: nil)
         }
-        contents = LogViewerView.tail(of: url)
+        contents = url.tailString(maxBytes: logTailBytes)
         watch = FileWatch(url: url) { text in
             Task { @MainActor [weak self] in self?.contents = text }
         }
@@ -103,7 +96,7 @@ private final class FileWatch {
         guard fd >= 0 else { return nil }
         let src = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd, eventMask: [.write, .extend], queue: .global())
-        src.setEventHandler { onChange(LogViewerView.tail(of: url)) }   // read off the main actor
+        src.setEventHandler { onChange(url.tailString(maxBytes: logTailBytes)) }   // read off the main actor
         src.setCancelHandler { close(fd) }
         source = src
         src.resume()

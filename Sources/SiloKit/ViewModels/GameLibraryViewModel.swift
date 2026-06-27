@@ -324,17 +324,8 @@ public final class GameLibraryViewModel {
     /// call it off the main actor.
     private nonisolated static func parseLog(at url: URL, appID: Int)
         -> (progress: SteamCMD.Progress?, finished: Bool) {
-        let text = tail(url)
+        let text = url.tailString(maxBytes: 32 * 1024)
         return (SteamCMD.parseProgress(text), SteamCMD.isInstalledInLog(text, appID: appID))
-    }
-
-    /// Read the tail of a log file (SteamCMD progress lines live near the end).
-    private nonisolated static func tail(_ url: URL, maxBytes: Int = 32 * 1024) -> String {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
-        defer { try? handle.close() }
-        let end = (try? handle.seekToEnd()) ?? 0
-        try? handle.seek(toOffset: end > UInt64(maxBytes) ? end - UInt64(maxBytes) : 0)
-        return String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
     }
 
     private func name(forAppID id: Int) -> String {
