@@ -96,7 +96,7 @@ jobs:
           # paint to a BLACK/transparent window even with software compositing. This is the verified fix
           # for running the Windows Steam client on Apple-Silicon macOS (per notpop/steam-on-m1-wine).
           # -O2 restores the optimization that an explicit CFLAGS would otherwise drop.
-          $ARCH_PREFIX env CFLAGS="-fvisibility=default -O2" \
+          $ARCH_PREFIX env CFLAGS="-fvisibility=default -O2" CROSSCFLAGS="-fvisibility=default -O2" \
             "$GITHUB_WORKSPACE/$WINE_SRC/configure" \
             --prefix="$GITHUB_WORKSPACE/wine-install" \
             --enable-archs=i386,x86_64 \

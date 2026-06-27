@@ -98,31 +98,36 @@ public struct SteamBottle: Sendable {
         "-cef-disable-gpu", "-cef-disable-gpu-compositing", "-no-cef-sandbox", "-cef-disable-chrome-runtime",
     ]
 
-    /// Launch the bottle's Steam client detached. Defaults to the CEF-render flags so the (one-time)
-    /// login window paints; pass `["-silent", …]` to start to tray once a login is cached.
+    /// The Steam client renders into a single Wine **virtual desktop** (one NSWindow/Metal surface) — on
+    /// macOS, winemac.drv's per-window layered surfaces are exactly what black-screens for CEF, and the
+    /// verified recipe routes Steam through `explorer /desktop=` to sidestep that. Games still launch
+    /// rootless under GPTK (so this doesn't affect gameplay).
+    static let desktopGeometry = "1600x1000"
+
+    /// Launch the bottle's Steam client detached, inside a Wine virtual desktop with the CEF-render flags
+    /// so the (one-time) login window paints.
     @discardableResult
     public func launchSteam(wine: URL?, extraArgs: [String] = SteamBottle.cefRenderArgs) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }
+        let args = ["explorer", "/desktop=Silo,\(Self.desktopGeometry)", paths.steamBottleExe.path] + extraArgs
         return try await runner.spawnDetached(
-            executable: wine, arguments: [paths.steamBottleExe.path] + extraArgs,
-            environment: Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine),
+            executable: wine, arguments: args,
+            environment: steamEnvironment(wine: wine),
             currentDirectory: paths.steamBottleClientDir, logURL: paths.steamBottleLog)
     }
 
-    /// Launch a game executable **inside the bottle prefix** (co-resident with the running Steam client),
-    /// with a caller-built environment (GPTK/D3DMetal etc.). Returns the child PID.
-    @discardableResult
-    public func launchGame(
-        exe: URL, wine: URL, environment: [String: String], logURL: URL
-    ) async throws -> Int32 {
-        var env = environment
-        env["WINEPREFIX"] = paths.steamBottle.path   // force the shared bottle, never an isolated prefix
-        return try await runner.spawnDetached(
-            executable: wine, arguments: [exe.path],
-            environment: env, currentDirectory: exe.deletingLastPathComponent(), logURL: logURL)
-    }
-
     // MARK: - Helpers
+
+    /// Environment for launching the Steam client. `WINEMSYNC=1` matches the per-game launch env (default
+    /// `EnvFlags`) so Steam and the games it co-hosts agree on the wineserver sync mode and share one
+    /// wineserver. The overrides disable Steam's in-game overlay injector (a known crash/black-window
+    /// source under Wine) and force builtin crypto.
+    private func steamEnvironment(wine: URL) -> [String: String] {
+        var env = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
+        env["WINEMSYNC"] = "1"
+        env["WINEDLLOVERRIDES"] = "gameoverlayrenderer,gameoverlayrenderer64=d;bcrypt,ncrypt=b"
+        return env
+    }
 
     private func downloadInstaller() async throws -> URL {
         let dest = paths.steamBottle.appendingPathComponent("SteamSetup.exe")

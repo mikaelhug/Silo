@@ -1,6 +1,6 @@
 import Foundation
 
-/// A Steam game discovered from a Master-bottle `appmanifest_*.acf`.
+/// A Steam game discovered from the Steam bottle's `appmanifest_*.acf`.
 public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
     public var id: Int { appID }
 
@@ -42,7 +42,6 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
     }
 
     public var isFullyInstalled: Bool { stateFlags.isFullyInstalled }
-    public var needsUpdate: Bool { stateFlags.needsUpdate }
 
     /// Library cover art (Steam CDN `header.jpg`).
     public var headerArtURL: URL? {
@@ -50,12 +49,6 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
     }
     /// Public Steam store page.
     public var storePageURL: URL? { URL(string: "https://store.steampowered.com/app/\(appID)") }
-
-    /// Download progress in `0...1` while a download is active, else `nil`.
-    public var downloadProgress: Double? {
-        guard let total = bytesToDownload, total > 0, let done = bytesDownloaded else { return nil }
-        return min(1.0, max(0.0, Double(done) / Double(total)))
-    }
 
     /// Absolute on-disk install directory: `<library>/steamapps/common/<installDir>`.
     public var installURL: URL {

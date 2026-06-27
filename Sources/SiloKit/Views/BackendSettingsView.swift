@@ -43,8 +43,8 @@ struct BackendSettingsView: View {
         .navigationTitle("Advanced Settings")
     }
 
-    /// Experimental: stand up a shared Steam bottle (real Windows Steam, login seeded from macOS Steam)
-    /// for Steamworks/DRM games. This is the validation surface for the in-prefix-Steam approach.
+    /// Stand up a shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
+    /// co-resident with a logged-in Steam client.
     @ViewBuilder private var steamBottleSection: some View {
         let bottle = env.steamBottleVM
         Section {

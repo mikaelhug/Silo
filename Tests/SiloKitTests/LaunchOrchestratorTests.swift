@@ -96,9 +96,7 @@ struct LaunchPipelineTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
-        let orchestrator = LaunchOrchestrator(
-            runner: fake, provisioner: PrefixProvisioner(runner: fake, paths: paths),
-            linker: GraphicsLinker(), logStore: GameLogStore(paths: paths))
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
 
         // Fake GPTK lib dir + a fake install tree with the exe + the shared (bottle) prefix.
         let gptkDir = try tmp.makeDir("gptk")
@@ -137,11 +135,7 @@ struct LaunchPipelineTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
-        let orchestrator = LaunchOrchestrator(
-            runner: fake,
-            provisioner: PrefixProvisioner(runner: fake, paths: paths),
-            linker: GraphicsLinker(),
-            logStore: GameLogStore(paths: paths))
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
 
         var backend = BackendConfig()
         backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
@@ -156,8 +150,8 @@ struct LaunchPipelineTests {
     }
 }
 
-@Suite("ExecutableResolver + GameLogStore")
-struct ExecutableAndLogTests {
+@Suite("ExecutableResolver")
+struct ExecutableResolverTests {
 
     @Test("Auto-detects the largest exe, preferring the install-dir name")
     func autodetect() throws {
@@ -174,17 +168,5 @@ struct ExecutableAndLogTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let dir = try tmp.makeDir("Empty")
         #expect(ExecutableResolver.firstExecutable(in: dir) == nil)
-    }
-
-    @Test("GameLogStore prepares, reads, and clears a fresh log")
-    func logStore() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let store = GameLogStore(paths: AppPaths(supportDir: tmp.url.appendingPathComponent("Silo")))
-        let url = try await store.prepare(appID: 5)
-        #expect(FileManager.default.fileExists(atPath: url.path))
-        try "line1\n".write(to: url, atomically: true, encoding: .utf8)
-        #expect(await store.read(appID: 5) == "line1\n")
-        try await store.clear(appID: 5)
-        #expect(await store.read(appID: 5).isEmpty)
     }
 }

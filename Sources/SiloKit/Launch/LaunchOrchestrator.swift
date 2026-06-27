@@ -1,27 +1,21 @@
 import Foundation
 
-/// Builds launch plans and runs the full launch pipeline for a game.
+/// Builds launch plans and runs the launch pipeline for a game in the Steam bottle.
 ///
-/// `makePlan` is a **pure** function (exhaustively tested); `launch` is the thin async wrapper that
-/// provisions the prefix, injects graphics libraries, and spawns the detached game process.
+/// `makePlan` is a **pure** function (exhaustively tested); `launchInBottle` is the thin async wrapper
+/// that injects graphics libraries into the (already-provisioned) bottle prefix and spawns the game.
 public struct LaunchOrchestrator: Sendable {
     private let runner: ProcessRunning
-    private let provisioner: PrefixProvisioner
     private let linker: GraphicsLinker
-    private let logStore: GameLogStore
     private let presenceInstaller: SteamPresenceInstaller
 
     public init(
         runner: ProcessRunning,
-        provisioner: PrefixProvisioner,
         linker: GraphicsLinker,
-        logStore: GameLogStore,
         presenceInstaller: SteamPresenceInstaller = SteamPresenceInstaller()
     ) {
         self.runner = runner
-        self.provisioner = provisioner
         self.linker = linker
-        self.logStore = logStore
         self.presenceInstaller = presenceInstaller
     }
 
@@ -46,7 +40,8 @@ public struct LaunchOrchestrator: Sendable {
 
         var environment = config.envFlags.environment(for: config.backend)
         // Layer the base wine env (WINEDEBUG, DYLD bundled deps) under the user's flags, then force the
-        // isolated per-game WINEPREFIX — never a shared one, regardless of any user override.
+        // shared Steam-bottle WINEPREFIX (so the game is co-resident with the Steam client), regardless of
+        // any user override.
         for (key, value) in Silo.wineEnvironment(prefix: prefix, wine: wine) where environment[key] == nil {
             environment[key] = value
         }

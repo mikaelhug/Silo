@@ -15,7 +15,6 @@ public struct AppPaths: Sendable, Hashable {
         return AppPaths(supportDir: base)
     }
 
-    public var prefixesDir: URL { supportDir.appendingPathComponent("Prefixes", isDirectory: true) }
     public var runtimesDir: URL { supportDir.appendingPathComponent("Runtimes", isDirectory: true) }
     public var logsDir: URL { supportDir.appendingPathComponent("Logs", isDirectory: true) }
     public var configFile: URL { supportDir.appendingPathComponent("config.json") }
@@ -43,11 +42,6 @@ public struct AppPaths: Sendable, Hashable {
 
     /// The bottle's Steam log.
     public var steamBottleLog: URL { logsDir.appendingPathComponent("steam-bottle.log") }
-
-    /// Isolated Wine prefix root for a game (used by per-game tooling; games run in the shared bottle).
-    public func prefix(forAppID appID: Int) -> URL {
-        prefixesDir.appendingPathComponent("\(appID)", isDirectory: true)
-    }
 
     /// Per-game launch log file.
     public func log(forAppID appID: Int) -> URL {

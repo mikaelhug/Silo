@@ -14,22 +14,18 @@ struct AppManifestDecoderTests {
         #expect(app.name == "Half-Life 2")
         #expect(app.installDir == "Half-Life 2")
         #expect(app.isFullyInstalled)
-        #expect(!app.needsUpdate)
         #expect(app.sizeOnDisk == 6_845_413_587)
         #expect(app.buildID == 6_906_421)
         #expect(app.lastUpdated == Date(timeIntervalSince1970: 1_659_899_091))
-        #expect(app.downloadProgress == nil)          // BytesToDownload == 0
         #expect(app.installURL.path == "/tmp/Steam/steamapps/common/Half-Life 2")
     }
 
-    @Test("Decodes an updating game with partial download progress (570)")
+    @Test("Decodes an updating game (570)")
     func decode570() throws {
         let app = try decoder.decode(text: FixtureLoader.text("appmanifest_570.acf"), libraryPath: lib)
         #expect(app.appID == 570)
         #expect(app.name == "Dota 2")
         #expect(app.isFullyInstalled)                  // StateFlags 6 = fullyInstalled | updateRequired
-        #expect(app.needsUpdate)
-        #expect(app.downloadProgress == 0.25)          // 12.5e9 / 50e9
     }
 
     @Test("Throws missingRoot when AppState is absent")

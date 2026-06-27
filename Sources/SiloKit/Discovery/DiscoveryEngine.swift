@@ -1,6 +1,6 @@
 import Foundation
 
-/// Parses a Steam library root (post-pivot: a SteamCMD game "bucket") for installed games.
+/// Parses a Steam library root (the Steam bottle's `steamapps`) for installed games.
 ///
 /// Reads the primary `steamapps` directory plus any additional libraries listed in
 /// `libraryfolders.vdf`, parses every `appmanifest_*.acf`, and returns the games sorted by name.

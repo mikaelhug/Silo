@@ -26,16 +26,20 @@ struct SteamBottleTests {
         #expect(install.arguments.first?.hasSuffix("SteamSetup.exe") == true)
     }
 
-    @Test("launchSteam spawns steam.exe detached, silent, in the bottle prefix")
+    @Test("launchSteam runs steam.exe in a Wine virtual desktop with the CEF-render flags + msync")
     func launchSteam() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (bottle, fake, paths) = make(tmp)
         _ = try await bottle.launchSteam(wine: URL(fileURLWithPath: "/w/wine64"))
         let call = try #require(fake.lastInvocation)
         #expect(call.detached)
-        #expect(call.arguments == [paths.steamBottleExe.path] + SteamBottle.cefRenderArgs)
+        #expect(call.arguments.first == "explorer")
+        #expect(call.arguments.contains { $0.hasPrefix("/desktop=") })   // virtual desktop
+        #expect(call.arguments.contains(paths.steamBottleExe.path))
         #expect(call.arguments.contains("-cef-disable-gpu"))
         #expect(call.environment["WINEPREFIX"] == paths.steamBottle.path)
+        #expect(call.environment["WINEMSYNC"] == "1")                    // co-residency with games
+        #expect(call.environment["WINEDLLOVERRIDES"]?.contains("gameoverlayrenderer") == true)
     }
 
     @Test("installWebHelperWrapper preserves the real webhelper and drops the wrapper in its place")
@@ -60,19 +64,4 @@ struct SteamBottleTests {
         #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")
     }
 
-    @Test("launchGame runs the exe inside the shared bottle prefix (never an isolated one)")
-    func launchGame() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (bottle, fake, paths) = make(tmp)
-        let exe = URL(fileURLWithPath: "/games/HL2/hl2.exe")
-        _ = try await bottle.launchGame(
-            exe: exe, wine: URL(fileURLWithPath: "/w/wine64"),
-            environment: ["WINEPREFIX": "/some/isolated/prefix", "DXVK_HUD": "fps"],
-            logURL: paths.log(forAppID: 220))
-        let call = try #require(fake.lastInvocation)
-        #expect(call.detached)
-        #expect(call.arguments == [exe.path])
-        #expect(call.environment["WINEPREFIX"] == paths.steamBottle.path)   // forced to the bottle
-        #expect(call.environment["DXVK_HUD"] == "fps")                       // caller env preserved
-    }
 }

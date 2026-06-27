@@ -51,11 +51,12 @@ extension URL {
             .appendingPathComponent("lib/silo-bundled", isDirectory: true)
     }
 
-    /// `DYLD_FALLBACK_LIBRARY_PATH` value so wine resolves missing deps. The bundle comes FIRST:
-    /// empirically wine only finds its dlopen'd FreeType from the bundle, not from /usr/local/lib.
-    /// (The glib/gstreamer double-load is avoided by NOT bundling that media stack — see
-    /// Scripts/bundle-wine-dylibs.sh — rather than by reordering, which breaks fonts.)
+    /// `DYLD_FALLBACK_LIBRARY_PATH` value so wine resolves missing deps. ONLY the self-contained bundle +
+    /// system `/usr/lib` — deliberately NOT `/usr/local/lib` (x86_64 Homebrew). With Homebrew on the
+    /// fallback path, winegstreamer dlopen'd Homebrew's gtk3 AND gtk4, triggering "Class … is implemented
+    /// in both" ObjC duplicate-registration crashes (seen launching Steam in the bottle). The bundle
+    /// carries wine's real deps (freetype etc.), so dropping /usr/local/lib keeps the runtime hermetic.
     public var siloDyldFallback: String {
-        "\(siloBundledDylibDir.path):/usr/local/lib:/usr/lib"
+        "\(siloBundledDylibDir.path):/usr/lib"
     }
 }

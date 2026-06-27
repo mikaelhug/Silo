@@ -29,17 +29,6 @@ public actor RuntimeManager {
         case checksumMismatch(expected: String, actual: String)
     }
 
-    /// Runtimes already extracted under the Runtimes dir.
-    public func installedRuntimes() -> [WineRuntime] {
-        guard let entries = try? fileManager.contentsOfDirectory(
-            at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]
-        ) else { return [] }
-        return entries
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-            .map { WineRuntime(name: $0.lastPathComponent, installPath: $0, kind: .gptk) }
-            .sorted { $0.name < $1.name }
-    }
-
     /// The latest `limit` releases of `repo` (newest first) — for the Heroic-style Wine list.
     public func availableReleases(repo: String, limit: Int = 3) async throws -> [GitHubRelease] {
         let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=\(limit)")!
@@ -95,18 +84,6 @@ public actor RuntimeManager {
             ?? candidates.first { $0.lastPathComponent == "wine64" }
             ?? candidates.first(where: inBin)
             ?? candidates.first
-    }
-
-    /// Downloadable assets from the latest release of `repo`.
-    public func availableAssets(repo: String) async throws -> [GitHubRelease.Asset] {
-        let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!
-        let (data, response) = try await session.data(for: .github(url))
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw RuntimeError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(GitHubRelease.self, from: data).assets
     }
 
     /// Download an asset and extract it into `Runtimes/<name>`.
