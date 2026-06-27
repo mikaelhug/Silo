@@ -79,7 +79,8 @@ struct SteamBottleTests {
         _ = try await bottle.launchSteam(wine: URL(fileURLWithPath: "/w/wine64"))
         let call = try #require(fake.lastInvocation)
         #expect(call.detached)
-        #expect(call.arguments == [paths.steamBottleExe.path, "-silent"])
+        #expect(call.arguments == [paths.steamBottleExe.path] + SteamBottle.cefRenderArgs)
+        #expect(call.arguments.contains("-cef-disable-gpu"))
         #expect(call.environment["WINEPREFIX"] == paths.steamBottle.path)
     }
 

@@ -81,10 +81,15 @@ public struct SteamBottle: Sendable {
 
     // MARK: - Launch
 
-    /// Launch the bottle's Steam client detached. Defaults to `-silent` (start to tray — we only need the
-    /// background client serving Steamworks, not the window).
+    /// CEF flags that make Steam's `steamwebhelper` (Chromium) compositor actually paint under Wine —
+    /// without them the login/store/library panes render as a black window. `-cef-disable-gpu` +
+    /// `-cef-in-process-gpu` force software compositing; `-no-cef-sandbox` avoids the CEF crash-loop.
+    public static let cefRenderArgs = ["-cef-disable-gpu", "-cef-in-process-gpu", "-no-cef-sandbox"]
+
+    /// Launch the bottle's Steam client detached. Defaults to the CEF-render flags so the (one-time)
+    /// login window paints; pass `["-silent", …]` to start to tray once a login is cached.
     @discardableResult
-    public func launchSteam(wine: URL?, extraArgs: [String] = ["-silent"]) async throws -> Int32 {
+    public func launchSteam(wine: URL?, extraArgs: [String] = SteamBottle.cefRenderArgs) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }
         return try await runner.spawnDetached(
             executable: wine, arguments: [paths.steamBottleExe.path] + extraArgs,
