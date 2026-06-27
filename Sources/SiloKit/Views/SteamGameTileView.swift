@@ -10,6 +10,7 @@ struct SteamGameTileView: View {
     let onSettings: () -> Void
     let onDetails: () -> Void
     @State private var hovering = false
+    @State private var confirmingUninstall = false
 
     var body: some View {
         let lib = env.gameLibrary
@@ -77,6 +78,12 @@ struct SteamGameTileView: View {
         .onHover { hovering = $0 }
         .help("Show details")
         .contextMenu { menuItems(installed: installed) }
+        .confirmationDialog("Uninstall \(game.name)?", isPresented: $confirmingUninstall, titleVisibility: .visible) {
+            Button("Uninstall", role: .destructive) { Task { await env.gameLibrary.uninstall(game) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deletes the downloaded game files to free up space. You can re-download it anytime.")
+        }
     }
 
     /// Progress · speed · ETA line shown while downloading.
@@ -142,6 +149,10 @@ struct SteamGameTileView: View {
         }
         if let store = URL(string: "https://store.steampowered.com/app/\(game.appID)") {
             Button("View on Steam Store") { NSWorkspace.shared.open(store) }
+        }
+        if installed {
+            Divider()
+            Button("Uninstall…", role: .destructive) { confirmingUninstall = true }
         }
     }
 
