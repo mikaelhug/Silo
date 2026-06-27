@@ -68,4 +68,23 @@ public struct SteamCMDClient: Sendable {
             currentDirectory: paths.steamCMDDir)
         return result.stdoutString
     }
+
+    /// The logged-in account's owned, **Windows-only** games (the Silo library), sorted by name.
+    /// Three batched SteamCMD sessions: licenses → packages → app metadata.
+    public func ownedWindowsGames(username: String) async throws -> [SteamAppInfo] {
+        let packageIDs = SteamCMD.parseLicensePackageIDs(
+            try await capture(SteamCMD.licensesArguments(username: username)))
+        guard !packageIDs.isEmpty else { return [] }
+
+        let packageOutput = try await capture(
+            SteamCMD.packageInfoArguments(username: username, packageIDs: packageIDs))
+        var appIDs = Set<Int>()
+        for pkg in packageIDs { appIDs.formUnion(SteamCMD.parsePackageAppIDs(packageOutput, packageID: pkg)) }
+        guard !appIDs.isEmpty else { return [] }
+
+        let infoOutput = try await capture(SteamCMD.appInfoArguments(appIDs: Array(appIDs)))
+        return SteamAppInfo.parseAll(appInfoOutput: infoOutput, appIDs: Array(appIDs))
+            .filter { $0.isWindowsOnly && $0.isGame }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
 }
