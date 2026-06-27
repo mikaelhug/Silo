@@ -41,10 +41,13 @@ rm -rf build install && mkdir build install && cd build
 # SteamBottle.steamEnvironment), not by Metal presentation. Set on BOTH CFLAGS (Wine's Unix-side .so
 # thunks, incl. winemac.so) AND CROSSCFLAGS (the PE-side built-in DLLs). -O2 keeps the optimization an
 # explicit *FLAGS would otherwise drop. gnutls = Wine's schannel TLS (Steam's networking needs it).
+# --without-sdl: build winebus WITHOUT the SDL game-controller backend. On macOS that backend `dlopen`s
+# libSDL2, whose initializer pops an NSAlert off the main thread → the whole Wine process aborts the moment
+# winebus loads (before Steam draws). Costs in-Wine controller support; gains a Wine that actually launches.
 $ARCH env CFLAGS="-fvisibility=default -O2" CROSSCFLAGS="-fvisibility=default -O2" \
   "$WORK/$WINE_SRC/configure" --prefix="$WORK/install" \
   --enable-archs=i386,x86_64 --disable-tests --without-x \
-  --with-freetype --with-gstreamer --with-gnutls
+  --with-freetype --with-gstreamer --with-gnutls --without-sdl
 $ARCH make -j"$(sysctl -n hw.ncpu)"
 $ARCH make install
 

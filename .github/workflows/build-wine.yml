@@ -101,7 +101,8 @@ jobs:
             --prefix="$GITHUB_WORKSPACE/wine-install" \
             --enable-archs=i386,x86_64 \
             --disable-tests --without-x \
-            --with-freetype --with-gstreamer --with-gnutls
+            --with-freetype --with-gstreamer --with-gnutls \
+            --without-sdl  # winebus's SDL backend dlopens libSDL2 → off-main-thread NSAlert aborts Wine on macOS
           $ARCH_PREFIX make -j"$(sysctl -n hw.ncpu)"
           $ARCH_PREFIX make install
           test -x "$GITHUB_WORKSPACE/wine-install/bin/wine64" || test -x "$GITHUB_WORKSPACE/wine-install/bin/wine"

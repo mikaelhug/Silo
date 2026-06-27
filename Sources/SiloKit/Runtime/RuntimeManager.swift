@@ -123,9 +123,28 @@ public actor RuntimeManager {
             throw RuntimeError.extractionFailed(result.exitCode)
         }
 
+        // winebus's SDL controller backend dlopens libSDL2, whose macOS initializer pops an NSAlert off the
+        // main thread → the WHOLE Wine process aborts the instant winebus loads (before Steam draws). Runtimes
+        // built before `--without-sdl` bundle libSDL2; strip it so a downloaded runtime can't crash on launch,
+        // with no Wine rebuild required.
+        Self.stripBundledSDL(in: dest, fileManager: fileManager)
+
         // Downloaded Wine is unsigned and may be quarantined → Gatekeeper blocks it. Strip quarantine
         // and ad-hoc re-sign so it launches on a clean Mac.
         await harden(dest, reSign: true)
+    }
+
+    /// Remove any bundled `libSDL2*` from a runtime (see `install`). Idempotent; no-op if absent.
+    @discardableResult
+    static func stripBundledSDL(in runtimeDir: URL, fileManager: FileManager = .default) -> Int {
+        let bundled = runtimeDir.appendingPathComponent("lib/silo-bundled", isDirectory: true)
+        guard let entries = try? fileManager.contentsOfDirectory(at: bundled, includingPropertiesForKeys: nil)
+        else { return 0 }
+        var removed = 0
+        for entry in entries where entry.lastPathComponent.lowercased().hasPrefix("libsdl2") {
+            if (try? fileManager.removeItem(at: entry)) != nil { removed += 1 }
+        }
+        return removed
     }
 
     public func remove(name: String) throws {
