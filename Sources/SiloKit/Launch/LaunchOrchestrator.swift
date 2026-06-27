@@ -97,8 +97,7 @@ public struct LaunchOrchestrator: Sendable {
         let prefix = try await provisioner.provision(appID: app.appID, wineBinary: wine)
         try linkGraphics(backend: config.backend, prefix: prefix, backendConfig: backend)
         try presenceInstaller.apply(
-            strategy: config.presence, appID: app.appID, gameExe: gameExe,
-            stubSource: config.steamStubSourcePath, prefix: prefix)
+            strategy: config.presence, appID: app.appID, gameExe: gameExe, prefix: prefix)
         let logURL = try await logStore.prepare(appID: app.appID)
 
         let plan = try Self.makePlan(

@@ -34,7 +34,7 @@ struct ConfigStoreTests {
         var game = GameConfig(appID: 220)
         game.backend = .crossover
         game.envFlags = EnvFlags(syncMode: .msync, metalHUD: true, dxvkHUD: "fps")
-        game.presence = .emulatorStub
+        game.presence = .none
         game.customArgs = ["-novid", "-high"]
         try await store.saveGame(game)
 
@@ -47,7 +47,7 @@ struct ConfigStoreTests {
         let g = reloaded.config(for: 220)
         #expect(g.backend == .crossover)
         #expect(g.envFlags.syncMode == .msync && g.envFlags.metalHUD)
-        #expect(g.presence == .emulatorStub)
+        #expect(g.presence == .none)
         #expect(g.customArgs == ["-novid", "-high"])
     }
 
