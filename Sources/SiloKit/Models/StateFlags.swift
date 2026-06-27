@@ -19,5 +19,4 @@ public struct StateFlags: OptionSet, Codable, Sendable, Hashable {
     public static let downloading    = StateFlags(rawValue: 1_048_576)
 
     public var isFullyInstalled: Bool { contains(.fullyInstalled) }
-    public var needsUpdate: Bool { contains(.updateRequired) }
 }
