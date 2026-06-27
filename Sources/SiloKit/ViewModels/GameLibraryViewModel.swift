@@ -23,7 +23,9 @@ public final class GameLibraryViewModel {
     /// Hide games that also have a native macOS build (run those in the Steam app instead). On by
     /// default — Silo is for the games that *need* Wine/GPTK.
     public var showWindowsOnly: Bool = true
-    public var statusMessage: String?
+    /// Transient one-line status (auto-clears after a few seconds via `setStatus`).
+    public private(set) var statusMessage: String?
+    private var statusDismiss: Task<Void, Never>?
 
     private let steamCMD: SteamCMDClient
     private let discovery: DiscoveryEngine
@@ -61,6 +63,21 @@ public final class GameLibraryViewModel {
 
     public var canLaunch: Bool { backend.isWineConfigured }
     public var isLoggedIn: Bool { !(username ?? "").isEmpty }
+    /// The signed-in Steam account driving the library (for display), or nil.
+    public var account: String? { (username?.isEmpty == false) ? username : nil }
+
+    /// Post a transient status message that auto-clears after a few seconds (so the bottom bar doesn't
+    /// show e.g. "Cancelled download" forever).
+    private func setStatus(_ message: String?) {
+        statusMessage = message
+        statusDismiss?.cancel()
+        guard message != nil else { return }
+        statusDismiss = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            self?.statusMessage = nil
+        }
+    }
     public var installedCount: Int { owned.filter { isInstalled($0) }.count }
 
     /// Search + Windows-only filter. `owned` is already name-sorted (from `merge`) and the UI groups by
@@ -219,7 +236,7 @@ public final class GameLibraryViewModel {
             downloadingIDs.insert(info.appID)   // the status bar tracks progress + speed from here
             observeDownload(appID: info.appID, pid: pid)
         } catch {
-            statusMessage = "\(info.name): \((error as NSError).localizedDescription)"
+            setStatus("\(info.name): \((error as NSError).localizedDescription)")
         }
     }
 
@@ -268,7 +285,7 @@ public final class GameLibraryViewModel {
         await steamCMD.pauseDownload(appID: info.appID, pid: downloadPIDs[info.appID])
         clearDownloadState(info.appID)
         await refreshInstalled()
-        statusMessage = "Paused \(info.name)."
+        setStatus("Paused \(info.name).")
     }
 
     /// Cancel a download and discard the partial files.
@@ -276,7 +293,7 @@ public final class GameLibraryViewModel {
         await steamCMD.cancelDownload(appID: info.appID, pid: downloadPIDs[info.appID])
         clearDownloadState(info.appID)
         await refreshInstalled()
-        statusMessage = "Cancelled \(info.name)."
+        setStatus("Cancelled \(info.name).")
     }
 
     /// Stop tracking a download (cancel its observers + drop transient progress state).
@@ -295,8 +312,8 @@ public final class GameLibraryViewModel {
     private func endDownload(_ id: Int, installed: Bool) {
         let gameName = name(forAppID: id)
         clearDownloadState(id)
-        statusMessage = installed ? "\(gameName) finished downloading."
-                                  : "\(gameName) download stopped — Resume to continue."
+        setStatus(installed ? "\(gameName) finished downloading."
+                            : "\(gameName) download stopped — Resume to continue.")
     }
 
     /// Read + parse a SteamCMD log tail (progress + completion). `nonisolated` so observer handlers can
@@ -334,9 +351,9 @@ public final class GameLibraryViewModel {
             _ = try? await configStore.saveGame(stamped)
             runningPIDs[info.appID] = pid
             observeRun(appID: info.appID, pid: pid)
-            statusMessage = "Launched \(info.name)."
+            setStatus("Launched \(info.name).")
         } catch {
-            statusMessage = "\(info.name): \((error as NSError).localizedDescription)"
+            setStatus("\(info.name): \((error as NSError).localizedDescription)")
         }
     }
 
@@ -347,7 +364,7 @@ public final class GameLibraryViewModel {
     }
 
     public func openWinecfg(_ info: SteamAppInfo) async {
-        guard backend.isWineConfigured else { statusMessage = "No Wine configured."; return }
+        guard backend.isWineConfigured else { setStatus("No Wine configured."); return }
         await orchestrator.runWineTool("winecfg", appID: info.appID, backend: backend)
     }
 

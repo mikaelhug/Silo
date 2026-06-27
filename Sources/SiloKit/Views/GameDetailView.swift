@@ -11,6 +11,7 @@ struct GameDetailView: View {
     let onSettings: () -> Void
     @State private var details: SteamStoreDetails?
     @State private var loading = true
+    @State private var showRequirements = false
 
     var body: some View {
         let lib = env.gameLibrary
@@ -36,9 +37,7 @@ struct GameDetailView: View {
                             Text(desc).font(.callout).foregroundStyle(.secondary)
                         }
                         metadata(d)
-                    }
-                    if let size = lib.sizeString(game) {
-                        LabeledContent("Installed size", value: size)
+                        requirements(d)
                     }
                 }
                 .padding(20)
@@ -98,13 +97,34 @@ struct GameDetailView: View {
     }
 
     @ViewBuilder private func metadata(_ d: SteamStoreDetails) -> some View {
+        let lib = env.gameLibrary
         VStack(alignment: .leading, spacing: 4) {
             if !d.developers.isEmpty { LabeledContent("Developer", value: d.developers.joined(separator: ", ")) }
             if !d.publishers.isEmpty { LabeledContent("Publisher", value: d.publishers.joined(separator: ", ")) }
             if let date = d.releaseDate, !date.isEmpty { LabeledContent("Released", value: date) }
             LabeledContent("Platforms", value: game.oslist.isEmpty ? "—" : game.oslist.joined(separator: ", "))
+            // Storage: the on-disk size once installed, otherwise the store's minimum-spec requirement.
+            if let installed = lib.sizeString(game) {
+                LabeledContent("Disk size", value: installed)
+            } else if let space = d.diskSpace {
+                LabeledContent("Disk size", value: space)
+            }
+            if let metacritic = d.metacritic {
+                LabeledContent("Metacritic", value: "\(metacritic)")
+            }
         }
         .font(.callout)
+    }
+
+    /// Collapsible minimum system requirements (the full spec, incl. storage), shown only when present.
+    @ViewBuilder private func requirements(_ d: SteamStoreDetails) -> some View {
+        if let req = d.minimumRequirements, !req.isEmpty {
+            DisclosureGroup("Minimum requirements", isExpanded: $showRequirements) {
+                Text(req).font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+            }
+            .font(.callout)
+        }
     }
 
     private var headerArtURL: URL? {

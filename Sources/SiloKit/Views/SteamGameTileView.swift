@@ -29,8 +29,6 @@ struct SteamGameTileView: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92).clipped()
-            .contentShape(Rectangle())
-            .onTapGesture { onDetails() }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -73,7 +71,11 @@ struct SteamGameTileView: View {
         .shadow(color: .black.opacity(hovering ? 0.22 : 0), radius: 9, y: 4)
         .scaleEffect(hovering ? 1.015 : 1)
         .animation(.easeOut(duration: 0.12), value: hovering)
+        // The whole card opens details; the inner Buttons/Menu win hit-testing, so they still work.
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onTapGesture { onDetails() }
         .onHover { hovering = $0 }
+        .help("Show details")
         .contextMenu { menuItems(installed: installed) }
     }
 
