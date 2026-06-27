@@ -3,6 +3,18 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **M58–M60 COMPLETE — spring cleaning.** 150 tests / 30 suites green; clean build (no warnings).
+  Three parallel audits (dead code / duplication / post-pivot vestigial) → verified findings → acted.
+  - **M58:** Uninstall also removes the game's isolated Wine prefix (full reclaim).
+  - **M59 (dedup):** SteamAppInfo.headerArtURL/storePageURL (views stop hand-rolling URLs); one
+    GameArtworkPlaceholder; one URL.tailString; shared .uninstallConfirmation modifier; LogTarget.windowID
+    + AppEnvironment.logTarget(for:).
+  - **M60 (removals):** deleted zero-ref dead symbols + post-pivot vestigial code (masterBottlePath/
+    steamRoot/steamWineBinaryPath/isMasterBottleConfigured/steamWine, DiscoveryEngine.steamRoot(inBottle:),
+    Silo.steamInstallerURL/steamLaunchArgs, AppPaths.masterBottleDefault, WineRuntime.wineserverBinary,
+    PrefixLayout.syswow64/dosDevices, StateFlags.isDownloading, SteamApp URL helpers, requiresUserStub),
+    removed CrashLoopGuard + orphaned ProcessRunning.processCount, hid the inert .sharedSteamClient from
+    the picker, reworded stale Master-bottle docs. Net −156 lines (5045→4940 LOC) despite adding helpers.
 - **M51–M57 COMPLETE — perf + reliability + UX pass.** 153 tests / 31 suites green; clean build (no
   warnings); .app assembles; verified running at **0.0% idle CPU** (was pinned at 100%).
   - **M51 (the energy bug):** sampled the live app → main thread pinned in SwiftUI layout driven by a
