@@ -3,7 +3,24 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M33 COMPLETE.** 127 tests / 26 suites green; CI green.
+- **M0–M36 COMPLETE.** 131 tests / 28 suites green; CI green.
+- **>>> ARCHITECTURE PIVOT (2026-06-27, user decision) <<<** The Wine **Steam-client GUI** does not
+  render under our self-built wine on macOS 26 (CEF black window; verified that -no-cef-sandbox fixes the
+  crash-loop but neither GPU-on nor GPU-off nor RetinaMode nor virtual-desktop renders it — this is the
+  industry-wide problem that got Whisky archived). New model **"Native Steam library → SteamCMD → GPTK
+  buckets"**: (1) DROP the Wine Steam bottle entirely (SteamBottleInstaller/openSteam/CEF flags/shared-
+  client presence); (2) library = the user's owned games filtered to **Windows-only** (no native mac
+  build); (3) download via **native macOS SteamCMD** `@sSteamCmdForcePlatformType windows` (no Wine/CEF);
+  (4) launch each in a per-game **GPTK bucket** configured from the game's Steam metadata (DirectX→backend)
+  else sensible default. Owned-list + metadata via SteamCMD itself (licenses_print / app_info_print) — no
+  Web API key needed.
+  - P0 DONE: native macOS SteamCMD **verified on macOS 26** (bootstraps, accepts force-windows, returns
+    app_info platforms for appID 70).
+  - M36 / P1-foundation DONE: `SteamCMD` pure command builders (download / app_info / licenses) + tests.
+  - TODO: P1 `SteamCMDClient` (install steamcmd + run download/login via ProcessRunning); P2 owned
+    Windows-only library + metadata; P3 metadata-driven GPTK bucket; P4 rip out old Steam-bottle code + UI rework.
+- M35 = bundler no longer bundles glib/gstreamer/ffmpeg media stack (killed the "implemented in both" +
+  glib-type dup warnings); 44→21 libs; clean wineboot = 0 freetype + 0 dup. RetinaMode reverted (broke windowing).
 - M33 (user UX/bug fixes): (1) Steam card now has a right-click context menu + always-visible ellipsis
   (Open Steam, Reinstall, View Log…, Wine Config…, Reveal Bottle, Settings…). (2) Log viewer opens as a
   STANDALONE WINDOW (WindowGroup id "silo-log" + openWindow), not a modal sheet, so it live-tails while
