@@ -63,6 +63,14 @@ struct SteamBottleTests {
         // Idempotent: a second call doesn't clobber the preserved real binary.
         try bottle.installWebHelperWrapper(wine: wine)
         #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")
+
+        // A NEW wrapper version (changed CEF flags) replaces the stale wrapper but keeps the real `_orig`
+        // — must NOT move the stale wrapper over the genuine preserved binary.
+        try "WRAPPER_V2".write(to: wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe"), atomically: true, encoding: .utf8)
+        try bottle.installWebHelperWrapper(wine: wine)
+        #expect(try String(contentsOf: helper, encoding: .utf8) == "WRAPPER_V2")   // new wrapper in place
+        #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")           // real one still intact
     }
 
 }
