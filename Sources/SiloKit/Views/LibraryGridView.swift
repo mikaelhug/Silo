@@ -46,20 +46,28 @@ struct LibraryGridView: View {
     private func grid(_ lib: GameLibraryViewModel) -> some View {
         ScrollView {
             if lib.loadState == .loading {
-                ProgressView("Loading your Steam library…").padding()
+                VStack(spacing: 6) {
+                    ProgressView()
+                    Text("Setting up your library…").font(.headline)
+                    Text("Fetching your games from Steam — this is cached, so the next launch is instant.")
+                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }.padding(40)
+            } else if lib.isRefreshing && !lib.owned.isEmpty {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Updating library…").font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity).padding(.top, 10)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 16)], spacing: 16) {
-                ForEach(lib.filtered) { game in
-                    SteamGameTileView(game: game, onSettings: { settingsTarget = game })
-                }
+
+            ForEach(sections(lib), id: \.title) { sec in
+                if !sec.games.isEmpty { section(sec.title, sec.games) }
             }
-            .padding()
 
             switch lib.loadState {
             case .empty:
-                ContentUnavailableView("No Windows-only games", systemImage: "tray",
-                    description: Text("Games with a native macOS version run in the Steam app directly. "
-                                      + "Only your Windows-only titles appear here."))
+                ContentUnavailableView("No games yet", systemImage: "tray",
+                    description: Text("Sign in shows your owned Windows games here. "
+                                      + "Games with a native macOS version are hidden (toggle in Filter)."))
                     .padding()
             case .error(let message):
                 ContentUnavailableView("Couldn't load your library", systemImage: "exclamationmark.triangle",
@@ -68,6 +76,35 @@ struct LibraryGridView: View {
                 EmptyView()
             }
         }
+    }
+
+    private let columns = [GridItem(.adaptive(minimum: 250), spacing: 16)]
+
+    /// Partition the (already searched/sorted) list into Downloading / Installed / Library sections.
+    private func sections(_ lib: GameLibraryViewModel) -> [(title: String, games: [SteamAppInfo])] {
+        let f = lib.filtered
+        return [
+            ("Downloading", f.filter { lib.isDownloading($0) || lib.isPaused($0) }),
+            ("Installed", f.filter { lib.isInstalled($0) }),
+            ("Library", f.filter { !lib.isInstalled($0) && !lib.isDownloading($0) && !lib.isPaused($0) }),
+        ]
+    }
+
+    @ViewBuilder
+    private func section(_ title: String, _ games: [SteamAppInfo]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text(title).font(.title3.bold())
+                Text("\(games.count)").font(.title3).foregroundStyle(.secondary)
+                Spacer()
+            }
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(games) { game in
+                    SteamGameTileView(game: game, onSettings: { settingsTarget = game })
+                }
+            }
+        }
+        .padding(.horizontal).padding(.top, 10)
     }
 }
 

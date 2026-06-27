@@ -8,6 +8,7 @@ struct SteamGameTileView: View {
     @Environment(\.openWindow) private var openWindow
     let game: SteamAppInfo
     let onSettings: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         let lib = env.gameLibrary
@@ -60,6 +61,11 @@ struct SteamGameTileView: View {
         }
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.tint.opacity(hovering ? 0.5 : 0), lineWidth: 1))
+        .shadow(color: .black.opacity(hovering ? 0.22 : 0), radius: 9, y: 4)
+        .scaleEffect(hovering ? 1.015 : 1)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .onHover { hovering = $0 }
         .contextMenu { menuItems(installed: installed) }
     }
 
