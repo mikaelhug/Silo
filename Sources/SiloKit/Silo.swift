@@ -36,7 +36,9 @@ public enum Silo {
     /// initializer pops an `NSAlert` off the main thread → "NSWindow should only be instantiated on the
     /// main thread" → the process aborts before Steam (or a game) ever draws. `winexinput.sys` rides on the
     /// same path. Disabling them costs in-Wine controller support but lets Steam/games actually launch.
-    public static let crashyDriverOverrides = "winebus,winexinput=d"
+    /// The trailing `=` is the DISABLED disposition (like `mscoree,mshtml=`); `=d` is NOT valid Wine syntax
+    /// (only `n`/`b`/empty) and silently leaves the driver enabled.
+    public static let crashyDriverOverrides = "winebus,winexinput="
 
     /// The single source of truth for a wine invocation's base environment: the isolated `WINEPREFIX`,
     /// quiet logging, and the bundled-dylib fallback path (so freetype/etc. resolve). Every wine launch

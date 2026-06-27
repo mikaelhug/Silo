@@ -90,9 +90,7 @@ public struct SteamBottle: Sendable {
     public func installWebHelperWrapper(wine: URL) throws {
         let wrapper = wine.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe")
-        let helper = paths.steamBottleWebHelper
-        guard fileManager.fileExists(atPath: wrapper.path),
-              fileManager.fileExists(atPath: helper.path) else { return }
+        guard fileManager.fileExists(atPath: wrapper.path), let helper = locateWebHelper() else { return }
         if fileManager.contentsEqual(atPath: helper.path, andPath: wrapper.path) { return }   // already current
         let real = helper.deletingLastPathComponent().appendingPathComponent("steamwebhelper_orig.exe")
         if fileManager.fileExists(atPath: real.path) {
@@ -104,6 +102,19 @@ public struct SteamBottle: Sendable {
             try fileManager.moveItem(at: helper, to: real)
         }
         try fileManager.copyItem(at: wrapper, to: helper)
+    }
+
+    /// Locate Steam's `steamwebhelper.exe` (or our wrapper already in its place). Steam's CEF dir leaf name
+    /// is version-dependent (e.g. `cef.win7x64`, historically `cef.win64`), so glob `bin/cef/*/` rather
+    /// than hardcode it — getting this wrong silently no-ops the wrapper and leaves a black window.
+    func locateWebHelper() -> URL? {
+        guard let dirs = try? fileManager.contentsOfDirectory(
+            at: paths.steamBottleCEFDir, includingPropertiesForKeys: nil) else { return nil }
+        for dir in dirs {
+            let candidate = dir.appendingPathComponent("steamwebhelper.exe")
+            if fileManager.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
     }
 
     // MARK: - Launch
@@ -163,7 +174,7 @@ public struct SteamBottle: Sendable {
         env["GALLIUM_DRIVER"] = "llvmpipe"
         env["DOTNET_EnableWriteXorExecute"] = "0"
         env["WINEDLLOVERRIDES"] =
-            "\(Silo.crashyDriverOverrides);gameoverlayrenderer,gameoverlayrenderer64=d"
+            "\(Silo.crashyDriverOverrides);gameoverlayrenderer,gameoverlayrenderer64="
         return env
     }
 
