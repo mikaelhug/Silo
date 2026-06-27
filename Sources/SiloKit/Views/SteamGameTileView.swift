@@ -8,6 +8,7 @@ struct SteamGameTileView: View {
     @Environment(\.openWindow) private var openWindow
     let game: SteamAppInfo
     let onSettings: () -> Void
+    let onDetails: () -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -27,6 +28,8 @@ struct SteamGameTileView: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92).clipped()
+            .contentShape(Rectangle())
+            .onTapGesture { onDetails() }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -117,6 +120,7 @@ struct SteamGameTileView: View {
     }
 
     @ViewBuilder private func menuItems(installed: Bool) -> some View {
+        Button("Details…", action: onDetails)
         Button("Settings…", action: onSettings)
         Button("View Download/Run Log…") {
             openWindow(id: "silo-log", value: LogTarget(title: "\(game.name) — Log", url: env.logURL(forAppID: game.appID)))

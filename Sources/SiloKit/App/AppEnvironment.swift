@@ -20,6 +20,7 @@ public final class AppEnvironment {
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
     let steamCMD: SteamCMDClient
+    public let steamStore = SteamStoreClient()
     private let updater: Updater
     public private(set) var updateCheck: Updater.UpdateCheck?
     public private(set) var didBootstrap = false

@@ -5,6 +5,7 @@ import SwiftUI
 struct LibraryGridView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var settingsTarget: SteamAppInfo?
+    @State private var detailTarget: SteamAppInfo?
     @State private var showAdvanced = false
     @State private var showLogin = false
 
@@ -37,6 +38,9 @@ struct LibraryGridView: View {
         .sheet(isPresented: $showAdvanced) { AdvancedSettingsSheet() }
         .sheet(isPresented: $showLogin) { SteamLoginView() }
         .sheet(item: $settingsTarget) { GameSettingsSheet(appID: $0.appID, name: $0.name) }
+        .sheet(item: $detailTarget) { game in
+            GameDetailView(game: game, onSettings: { detailTarget = nil; settingsTarget = game })
+        }
         .navigationSubtitle(env.setupComplete ? "\(lib.filtered.count) games" : "")
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
         .safeAreaInset(edge: .bottom) { DownloadStatusBar() }
@@ -100,7 +104,9 @@ struct LibraryGridView: View {
             }
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(games) { game in
-                    SteamGameTileView(game: game, onSettings: { settingsTarget = game })
+                    SteamGameTileView(game: game,
+                                      onSettings: { settingsTarget = game },
+                                      onDetails: { detailTarget = game })
                 }
             }
         }
