@@ -82,7 +82,7 @@ struct GameLibraryViewModelTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, _, paths) = make(tmp)
         try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "SizeOnDisk" "12000000" }"#, appID: 220)
-        try writeManifest(paths, #""AppState" { "appid" "70" "name" "HL" "StateFlags" "1026" "installdir" "HL" "SizeOnDisk" "0" "BytesDownloaded" "50" "BytesToDownload" "100" }"#, appID: 70)
+        try writeManifest(paths, #""AppState" { "appid" "70" "name" "HL" "StateFlags" "1048578" "installdir" "HL" "SizeOnDisk" "0" "BytesDownloaded" "50" "BytesToDownload" "100" }"#, appID: 70)
         await vm.load()   // username nil → just refreshes install state
 
         let hl2 = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])
@@ -105,6 +105,37 @@ struct GameLibraryViewModelTests {
         #expect(call.arguments.contains("+app_update"))
         #expect(call.arguments.contains("220"))
         #expect(call.arguments.contains("windows"))
+    }
+
+    @Test("interrupted download → paused (resumable); active appmanifest flag → re-attached on launch")
+    func pauseAndReattach() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        // 220: partial + no active flag (e.g. network dropped / app closed mid-download) → resumable.
+        try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "2" "installdir" "HL2" "BytesDownloaded" "30" "BytesToDownload" "100" }"#, appID: 220)
+        // 70: appmanifest has the downloading flag (1048576) → a SteamCMD is still running; re-attach.
+        try writeManifest(paths, #""AppState" { "appid" "70" "name" "HL" "StateFlags" "1048578" "installdir" "HL" "BytesDownloaded" "50" "BytesToDownload" "100" }"#, appID: 70)
+        await vm.load()
+
+        let hl2 = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])
+        let hl = SteamAppInfo(appID: 70, name: "HL", oslist: ["windows"])
+        #expect(vm.isPaused(hl2));      #expect(!vm.isDownloading(hl2))   // resumable
+        #expect(vm.isDownloading(hl));  #expect(!vm.isPaused(hl))         // re-attached, live
+    }
+
+    @Test("cancel stops tracking and removes the partial bucket")
+    func cancelDownload() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        vm.setAccount(username: "alice")
+        let info = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"], type: "game")
+        await vm.download(info)
+        #expect(vm.isDownloading(info))
+        #expect(FileManager.default.fileExists(atPath: paths.gameInstallDir(forAppID: 220).path))
+
+        await vm.cancel(info)
+        #expect(!vm.isDownloading(info))
+        #expect(!FileManager.default.fileExists(atPath: paths.gameInstallDir(forAppID: 220).path))
     }
 
     @Test("play is a no-op without a configured Wine backend")

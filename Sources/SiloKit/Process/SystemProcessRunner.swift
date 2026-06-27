@@ -61,6 +61,11 @@ public struct SystemProcessRunner: ProcessRunning {
         return errno == EPERM
     }
 
+    public func terminate(pid: Int32) {
+        guard pid > 0 else { return }
+        kill(pid, SIGTERM)
+    }
+
     public func processCount(matching pattern: String) async -> Int {
         // `pgrep -fc <pattern>`: -f matches the full command line, -c prints the count.
         let result = try? await run(
