@@ -30,6 +30,20 @@ struct GraphicsLinkerTests {
         }
     }
 
+    @Test("Only graphics DLLs are linked — non-d3d/dxgi files in the source are left alone")
+    func scopedToGraphicsDLLs() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // A GPTK wine-DLL dir can hold non-graphics DLLs; those must NOT clobber the shared bottle.
+        let gptk = try makeSource(tmp, named: "gptk", files: ["d3d11.dll", "kernel32.dll", "winegstreamer.dll"])
+        let prefix = try tmp.makeDir("prefix")
+        try linker.link(backend: .gptk, into: prefix, gptkLibDir: gptk, dxvkDLLDir: nil)
+
+        let system32 = PrefixLayout(prefix: prefix).system32
+        #expect(FileManager.default.fileExists(atPath: system32.appendingPathComponent("d3d11.dll").path))
+        #expect(!FileManager.default.fileExists(atPath: system32.appendingPathComponent("kernel32.dll").path))
+        #expect(!FileManager.default.fileExists(atPath: system32.appendingPathComponent("winegstreamer.dll").path))
+    }
+
     @Test("Copies DXVK DLLs for the crossover backend")
     func crossoverCopy() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

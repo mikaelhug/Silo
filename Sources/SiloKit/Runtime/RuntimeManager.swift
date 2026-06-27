@@ -86,9 +86,9 @@ public actor RuntimeManager {
             ?? candidates.first
     }
 
-    /// Download an asset and extract it into `Runtimes/<name>`.
-    @discardableResult
-    public func install(name: String, from downloadURL: URL) async throws -> WineRuntime {
+    /// Download an asset and extract it into `Runtimes/<name>` (the shared download+extract engine;
+    /// `installWine` wraps it and locates the binary).
+    public func install(name: String, from downloadURL: URL) async throws {
         try fileManager.createDirectory(at: paths.runtimesDir, withIntermediateDirectories: true)
 
         let (tempFile, response) = try await session.download(from: downloadURL)
@@ -126,7 +126,6 @@ public actor RuntimeManager {
         // Downloaded Wine is unsigned and may be quarantined → Gatekeeper blocks it. Strip quarantine
         // and ad-hoc re-sign so it launches on a clean Mac.
         await harden(dest, reSign: true)
-        return WineRuntime(name: name, installPath: dest, kind: .vanilla)
     }
 
     public func remove(name: String) throws {

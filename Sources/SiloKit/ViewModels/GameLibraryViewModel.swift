@@ -111,25 +111,29 @@ public final class GameLibraryViewModel {
         if coldStartGraceSeconds > 0 { try? await Task.sleep(for: .seconds(coldStartGraceSeconds)) }
     }
 
-    /// Launch the bottle's Steam (re-applying the steamwebhelper wrapper first); returns the PID.
-    @discardableResult
-    private func launchSteamProcess(extra: [String] = []) async -> Int32? {
+    /// Launch the bottle's Steam client (re-applying the steamwebhelper wrapper first); returns the PID.
+    private func launchSteamProcess() async -> Int32? {
         do {
             if let wine = backend.wineBinaryPath { try bottle.installWebHelperWrapper(wine: wine) }
-            return try await bottle.launchSteam(wine: backend.wineBinaryPath,
-                                                extraArgs: SteamBottle.cefRenderArgs + extra)
+            return try await bottle.launchSteam(wine: backend.wineBinaryPath)
         } catch {
             setStatus("Couldn't launch Steam: \((error as NSError).localizedDescription)")
             return nil
         }
     }
 
+    /// Route a `steam://…` URL to the bottle's Steam, bringing it up first if needed.
+    private func sendSteamURL(_ url: String) async {
+        await ensureSteamRunning()
+        do { try await bottle.sendURL(url, wine: backend.wineBinaryPath) }
+        catch { setStatus("Couldn't reach Steam: \((error as NSError).localizedDescription)") }
+    }
+
     // MARK: - Install / uninstall (delegated to the bottle's Steam)
 
     /// Open the bottle's Steam to a game's install dialog (Steam handles the download + DRM).
     public func install(appID: Int) async {
-        await ensureSteamRunning()
-        _ = await launchSteamProcess(extra: ["steam://install/\(appID)"])
+        await sendSteamURL("steam://install/\(appID)")
         setStatus("Opening Steam to install… install it there, then Refresh.")
     }
 
@@ -139,8 +143,7 @@ public final class GameLibraryViewModel {
     /// Ask the bottle's Steam to uninstall a game, then refresh.
     public func uninstall(_ game: SteamApp) async {
         guard !isRunning(game) else { return }
-        await ensureSteamRunning()
-        _ = await launchSteamProcess(extra: ["steam://uninstall/\(game.appID)"])
+        await sendSteamURL("steam://uninstall/\(game.appID)")
         setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
     }
 

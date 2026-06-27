@@ -82,6 +82,20 @@ struct GameLibraryViewModelTests {
         #expect(!vm.isRunning(game))
     }
 
+    @Test("a game exiting on its own clears the running state")
+    func gameExitClearsState() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        await vm.play(game)
+        #expect(vm.isRunning(game))
+
+        fake.setAlive(4242, false)   // simulate the game process exiting
+        for _ in 0..<20 where vm.isRunning(game) { await Task.yield() }   // let the @MainActor handler run
+        #expect(!vm.isRunning(game))
+    }
+
     @Test("play is a no-op without a configured Wine backend")
     func playNeedsWine() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
