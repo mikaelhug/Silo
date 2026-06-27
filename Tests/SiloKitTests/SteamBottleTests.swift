@@ -26,15 +26,16 @@ struct SteamBottleTests {
         #expect(install.arguments.first?.hasSuffix("SteamSetup.exe") == true)
     }
 
-    @Test("launchSteam runs steam.exe rootless with the verified software-GL CEF flags + env")
+    @Test("launchSteam runs steam.exe in a Wine virtual desktop with the software-GL CEF flags + env")
     func launchSteam() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (bottle, fake, paths) = make(tmp)
         _ = try await bottle.launchSteam(wine: URL(fileURLWithPath: "/w/wine64"))
         let call = try #require(fake.lastInvocation)
         #expect(call.detached)
-        #expect(call.arguments.first == paths.steamBottleExe.path)        // rootless — NOT explorer /desktop
-        #expect(!call.arguments.contains { $0.hasPrefix("/desktop=") })
+        #expect(call.arguments.first == "explorer")                       // virtual desktop (CEF presents)
+        #expect(call.arguments.contains { $0.hasPrefix("/desktop=") })
+        #expect(call.arguments.contains(paths.steamBottleExe.path))
         #expect(call.arguments.contains("-cef-in-process-gpu"))           // NOT --single-process
         #expect(call.environment["WINEPREFIX"] == paths.steamBottle.path)
         #expect(call.environment["WINEMSYNC"] == "1")                     // co-residency with games

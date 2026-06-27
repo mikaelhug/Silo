@@ -113,9 +113,9 @@ struct GameLibraryViewModelTests {
         async let pb: Void = vm.play(b)
         _ = await (pa, pb)
 
-        // The Steam client launch is steam.exe + the CEF flags — there must be exactly ONE, not one per game.
+        // The Steam client launch is the virtual desktop + CEF flags — there must be exactly ONE, not one per game.
         let steamLaunches = fake.invocations.filter {
-            $0.arguments.first == paths.steamBottleExe.path && $0.arguments.contains("-cef-in-process-gpu")
+            $0.arguments.first == "explorer" && $0.arguments.contains("-cef-in-process-gpu")
         }
         #expect(steamLaunches.count == 1)
     }
