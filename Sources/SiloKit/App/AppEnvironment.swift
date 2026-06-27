@@ -20,6 +20,7 @@ public final class AppEnvironment {
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
     let steamCMD: SteamCMDClient
+    public let steamBottleVM: SteamBottleViewModel
     public let steamStore = SteamStoreClient()
     private let updater: Updater
     public private(set) var updateCheck: Updater.UpdateCheck?
@@ -65,9 +66,12 @@ public final class AppEnvironment {
             paths: paths, backend: initialBackend)
         self.gameLibrary = gameLibrary
         self.steamLogin = SteamLoginViewModel(steamCMD: steamCMD)
+        let steamBottleVM = SteamBottleViewModel(bottle: SteamBottle(runner: runner, paths: paths))
+        self.steamBottleVM = steamBottleVM
 
-        backendSettings.onChange = { [weak gameLibrary] config in
+        backendSettings.onChange = { [weak gameLibrary, weak steamBottleVM] config in
             gameLibrary?.updateBackend(config)
+            steamBottleVM?.updateWine(config.wineBinaryPath)
         }
         steamLogin.onLoggedIn = { [weak self] username in
             guard let self else { return }
@@ -96,6 +100,7 @@ public final class AppEnvironment {
         let state = await configStore.load()
         backendSettings.config = state.backend
         gameLibrary.updateBackend(state.backend)
+        steamBottleVM.updateWine(state.backend.wineBinaryPath)
         gptkManager.defaultName = state.backend.gptkRuntimeName
         gptkManager.refresh()
         runtime.defaultName = state.backend.wineRuntimeName
