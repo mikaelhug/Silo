@@ -10,12 +10,13 @@ struct LogTarget: Identifiable, Hashable, Codable {
 
 /// Live, trailing viewer for any log file (per-game launch log or the master Steam log). Opens as a
 /// standalone window (not a modal sheet) so it stays up while you drive the main app.
-/// Re-reads the file's tail once a second; autoscrolls to the bottom unless the user pauses it.
+/// Updates **reactively** when the file is written (a kqueue file-watcher, no polling); autoscrolls to
+/// the bottom unless the user pauses it.
 struct LogViewerView: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
     let url: URL
-    @State private var contents = ""
+    @State private var tailer = LogTailer()
     @State private var autoscroll = true
 
     var body: some View {
@@ -23,7 +24,7 @@ struct LogViewerView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(contents.isEmpty ? "No log yet." : contents)
+                        Text(tailer.contents.isEmpty ? "No log yet." : tailer.contents)
                             .font(.system(.caption, design: .monospaced))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
@@ -31,7 +32,7 @@ struct LogViewerView: View {
                     }
                     .padding()
                 }
-                .onChange(of: contents) { _, _ in
+                .onChange(of: tailer.contents) { _, _ in
                     if autoscroll { proxy.scrollTo("logBottom", anchor: .bottom) }
                 }
                 .onChange(of: autoscroll) { _, on in
@@ -50,17 +51,13 @@ struct LogViewerView: View {
             }
         }
         .frame(width: 680, height: 460)
-        .task(id: url) {
-            // Live tail while open (cancels on dismiss / url change).
-            while !Task.isCancelled {
-                contents = Self.tail(of: url)
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-        }
+        .onChange(of: url, initial: true) { _, newURL in tailer.start(url: newURL) }
+        .onDisappear { tailer.stop() }
     }
 
     /// Read the last `maxBytes` of the file so a huge log doesn't blow memory. "" if missing.
-    static func tail(of url: URL, maxBytes: Int = 256 * 1024) -> String {
+    /// `nonisolated` so the file-watcher can read it off the main actor.
+    nonisolated static func tail(of url: URL, maxBytes: Int = 256 * 1024) -> String {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
         defer { try? handle.close() }
         let end = (try? handle.seekToEnd()) ?? 0
@@ -69,4 +66,48 @@ struct LogViewerView: View {
         let data = (try? handle.readToEnd()) ?? Data()
         return String(decoding: data, as: UTF8.self)
     }
+}
+
+/// Watches a log file and republishes its tail whenever it's written — kqueue-based, no polling.
+@MainActor
+@Observable
+final class LogTailer {
+    private(set) var contents = ""
+    private var watch: FileWatch?
+
+    /// Begin watching `url` (reads the current tail immediately, then updates on each write).
+    func start(url: URL) {
+        stop()
+        // Ensure the file exists so it can be watched — logs are created at launch, but the user may open
+        // the viewer for a game that hasn't run yet.
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        contents = LogViewerView.tail(of: url)
+        watch = FileWatch(url: url) { text in
+            Task { @MainActor [weak self] in self?.contents = text }
+        }
+    }
+
+    /// Stops watching (also happens automatically when this tailer is deallocated, via `FileWatch`).
+    func stop() { watch = nil }
+}
+
+/// A self-contained kqueue file-watcher: fires `onChange` with the file's tail on each write, and tears
+/// down its source + descriptor on deinit (so it's safe to own from a `@MainActor` type).
+private final class FileWatch {
+    private let source: any DispatchSourceProtocol
+
+    init?(url: URL, onChange: @escaping @Sendable (String) -> Void) {
+        let fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else { return nil }
+        let src = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write, .extend], queue: .global())
+        src.setEventHandler { onChange(LogViewerView.tail(of: url)) }   // read off the main actor
+        src.setCancelHandler { close(fd) }
+        source = src
+        src.resume()
+    }
+
+    deinit { source.cancel() }
 }
