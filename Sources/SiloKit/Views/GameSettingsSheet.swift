@@ -105,7 +105,7 @@ struct GameSettingsSheet: View {
 
             Section {
                 Picker("Strategy", selection: $vm.config.presence) {
-                    ForEach(SteamPresenceStrategy.userSelectable) { Text($0.displayName).tag($0) }
+                    ForEach(SteamPresenceStrategy.allCases) { Text($0.displayName).tag($0) }
                 }
             } header: {
                 Text("Steam presence")
