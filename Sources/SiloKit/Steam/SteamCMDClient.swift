@@ -106,10 +106,14 @@ public struct SteamCMDClient: Sendable {
         return result.stdoutString
     }
 
-    /// The logged-in account's owned **games that can run on Windows** (the Silo library), sorted by
-    /// name. Three batched SteamCMD sessions: licenses → packages → app metadata. (Mac-capable games are
-    /// included; the UI filters them out if the user wants strictly Windows-only.)
-    public func ownedGames(username: String) async throws -> [SteamAppInfo] {
+    /// The logged-in account's owned-app catalog (metadata for every owned app), sorted by name. Two fast
+    /// SteamCMD sessions establish the owned set (licenses → packages); the slow per-app `app_info` step
+    /// runs **only for apps not already in `known`**. Steam metadata (name/oslist/type) is stable, so a
+    /// warm cache turns a refresh into just the two queries — no `app_info` over the whole library.
+    ///
+    /// Returns *all* owned apps (the caller filters to Windows-playable for display and persists the rest
+    /// as next refresh's `known`).
+    public func ownedGames(username: String, known: [Int: SteamAppInfo] = [:]) async throws -> [SteamAppInfo] {
         let packageIDs = SteamCMD.parseLicensePackageIDs(
             try await capture(SteamCMD.licensesArguments(username: username)))
         guard !packageIDs.isEmpty else { return [] }
@@ -120,9 +124,15 @@ public struct SteamCMDClient: Sendable {
         for pkg in packageIDs { appIDs.formUnion(SteamCMD.parsePackageAppIDs(packageOutput, packageID: pkg)) }
         guard !appIDs.isEmpty else { return [] }
 
-        let infoOutput = try await capture(SteamCMD.appInfoArguments(appIDs: Array(appIDs)))
-        return SteamAppInfo.parseAll(appInfoOutput: infoOutput, appIDs: Array(appIDs))
-            .filter(\.windowsPlayable)
+        let missing = appIDs.filter { known[$0] == nil }
+        var fetched: [Int: SteamAppInfo] = [:]
+        if !missing.isEmpty {
+            let infoOutput = try await capture(SteamCMD.appInfoArguments(appIDs: Array(missing)))
+            for info in SteamAppInfo.parseAll(appInfoOutput: infoOutput, appIDs: Array(missing)) {
+                fetched[info.appID] = info
+            }
+        }
+        return appIDs.compactMap { fetched[$0] ?? known[$0] }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }

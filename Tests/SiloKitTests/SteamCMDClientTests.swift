@@ -59,8 +59,8 @@ struct SteamCMDClientTests {
         #expect(FileManager.default.fileExists(atPath: paths.gameInstallDir(forAppID: 220).path))
     }
 
-    @Test("ownedWindowsGames orchestrates licenses → packages → app-info, keeping Windows-only games")
-    func ownedWindowsGames() async throws {
+    @Test("ownedGames orchestrates licenses → packages → app-info, returning the full owned catalog")
+    func ownedGamesCatalog() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = makePaths(tmp)
         try FileManager.default.createDirectory(at: paths.steamCMDDir, withIntermediateDirectories: true)
@@ -78,9 +78,31 @@ struct SteamCMDClientTests {
         let client = SteamCMDClient(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
 
         let games = try await client.ownedGames(username: "alice")
-        // Proton (Tool) and 205 (un-typed) are excluded; only real games remain.
-        #expect(games.map(\.appID) == [70, 220])
-        #expect(games.first?.name == "Half-Life")
+        // The full owned catalog (sorted by name) — caching all of it lets the next refresh skip app_info.
+        #expect(games.map(\.appID) == [205, 70, 220, 1493710])
+        // The displayed subset (the VM's filter) keeps only real games that run on Windows.
+        #expect(games.filter(\.windowsPlayable).map(\.appID) == [70, 220])
+    }
+
+    @Test("ownedGames skips app_info for already-known apps (fast warm refresh)")
+    func ownedGamesUsesKnownCache() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = makePaths(tmp)
+        try FileManager.default.createDirectory(at: paths.steamCMDDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamCMDScript.path, contents: Data())
+        let fake = FakeProcessRunner()
+        // Only licenses + packages are queued — NOT app_info, because both apps are already known.
+        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data("License packageID 54321 :\n".utf8)))
+        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data(#""54321" { "appids" { "0" "220" "1" "70" } }"#.utf8)))
+        let client = SteamCMDClient(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+
+        let known = [
+            70: SteamAppInfo(appID: 70, name: "Half-Life", oslist: ["windows"], type: "game"),
+            220: SteamAppInfo(appID: 220, name: "Half-Life 2", oslist: ["windows"], type: "game"),
+        ]
+        let games = try await client.ownedGames(username: "alice", known: known)
+        #expect(games.map(\.appID).sorted() == [70, 220])
+        #expect(fake.invocations.count == 2)   // licenses + packages only — no per-app app_info
     }
 
     @Test("capture returns SteamCMD stdout for metadata parsing")

@@ -197,26 +197,30 @@ public final class GameLibraryViewModel {
     }
 
     /// Enumerate from SteamCMD and merge into the catalog (awaitable; `startRefresh` wraps it in a Task).
+    /// The previously-cached catalog is passed as `known` so SteamCMD only fetches metadata for new apps.
     func performRefresh(username: String) async {
-        if let fresh = try? await steamCMD.ownedGames(username: username) {
-            let snapshot = merge(fresh)
-            await cache.save(username: username, games: snapshot, at: Date())
+        let known = Dictionary((await cache.load())?.games.map { ($0.appID, $0) } ?? [],
+                               uniquingKeysWith: { _, new in new })
+        if let fresh = try? await steamCMD.ownedGames(username: username, known: known) {
+            let catalog = merge(fresh)
+            await cache.save(username: username, games: catalog, at: Date())
         } else if owned.isEmpty {
             loadState = .error("Couldn't reach Steam — try Refresh.")
         }
     }
 
     /// Union the fresh catalog into what we have (newer metadata wins; cached-but-missing games are kept,
-    /// guarding against a partial cold-cache enumeration). Returns the merged snapshot to persist.
+    /// guarding a partial enumeration). Persists the **full** owned-app catalog (the next refresh's
+    /// `known`), but displays only the Windows-playable subset.
     @discardableResult
     private func merge(_ fresh: [SteamAppInfo]) -> [SteamAppInfo] {
         var byID = Dictionary(owned.map { ($0.appID, $0) }, uniquingKeysWith: { _, new in new })
         for game in fresh { byID[game.appID] = game }
-        owned = byID.values
-            .filter(\.windowsPlayable)   // drop stale non-games (e.g. cached Proton/un-typed apps)
+        let catalog = byID.values
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        owned = catalog.filter(\.windowsPlayable)   // hide non-games / Mac titles from the displayed list
         loadState = owned.isEmpty ? .empty : .loaded
-        return owned
+        return catalog
     }
 
     // MARK: - Download
