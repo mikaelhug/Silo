@@ -48,6 +48,21 @@ struct RuntimeManagerTests {
         #expect(await manager.installedWines().isEmpty)
     }
 
+    @Test("stripBundledSDL removes the crashy libSDL2 dylibs from a runtime")
+    func stripsSDL() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let rt = try tmp.makeDir("wine-cx")
+        for f in ["libSDL2-2.0.0.dylib", "libSDL2.dylib", "libfreetype.6.dylib"] {
+            try tmp.write("wine-cx/lib/silo-bundled/\(f)", "x")
+        }
+        let removed = RuntimeManager.stripBundledSDL(in: rt)
+        #expect(removed == 2)
+        let bundled = rt.appendingPathComponent("lib/silo-bundled")
+        #expect(!FileManager.default.fileExists(atPath: bundled.appendingPathComponent("libSDL2.dylib").path))
+        #expect(FileManager.default.fileExists(atPath: bundled.appendingPathComponent("libfreetype.6.dylib").path))
+        #expect(RuntimeManager.stripBundledSDL(in: rt) == 0)   // idempotent
+    }
+
     @Test("Lists the latest N releases and picks the archive asset")
     func releases() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
