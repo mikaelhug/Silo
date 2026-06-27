@@ -131,13 +131,21 @@ public struct SteamBottle: Sendable {
         "-cef-disable-sandbox", "-no-cef-sandbox", "-noverifyfiles", "-norepairfiles",
     ]
 
-    /// Launch the bottle's Steam client detached, **rootless** (no Wine virtual desktop — Vineport runs
-    /// rootless, and a virtual desktop broke mouse input here), with the CEF software-render flags + env.
+    /// Wine virtual-desktop geometry for the Steam client. On CrossOver's `winemac.drv`, the virtual-desktop
+    /// ROOT window presents reliably, whereas a rootless CEF surface (SwiftShader-rendered but composited as
+    /// a layered/child window) does NOT paint — it stays black even though rendering succeeds. So Steam is
+    /// launched inside `explorer /desktop=` to get a presentable window. (Vineport runs rootless because
+    /// Gcenx's winemac.drv handles it; CrossOver's doesn't.) Games still launch rootless under GPTK.
+    public static let desktopGeometry = "1440x900"
+
+    /// Launch the bottle's Steam client detached, inside a Wine virtual desktop (so CEF presents on
+    /// CrossOver — see `desktopGeometry`), with the CEF software-render flags + env.
     @discardableResult
     public func launchSteam(wine: URL?, extraArgs: [String] = SteamBottle.cefRenderArgs) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }
+        let args = ["explorer", "/desktop=Silo,\(Self.desktopGeometry)", paths.steamBottleExe.path] + extraArgs
         return try await runner.spawnDetached(
-            executable: wine, arguments: [paths.steamBottleExe.path] + extraArgs,
+            executable: wine, arguments: args,
             environment: steamEnvironment(wine: wine),
             currentDirectory: paths.steamBottleClientDir, logURL: paths.steamBottleLog)
     }
