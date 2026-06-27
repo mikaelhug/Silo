@@ -1,6 +1,6 @@
 import Foundation
 
-/// Graphics translation backend used to launch a game in its isolated prefix.
+/// Graphics translation backend used to launch a game in the Steam bottle prefix.
 public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiable {
     /// Apple Game Porting Toolkit / D3DMetal — the primary backend.
     case gptk

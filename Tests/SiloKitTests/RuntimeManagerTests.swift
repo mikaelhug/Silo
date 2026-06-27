@@ -32,17 +32,17 @@ struct RuntimeManagerTests {
             }
         }
 
-        let runtime = try await manager.install(name: "GPTK-Test", from: URL(string: downloadURL)!)
-        #expect(runtime.name == "GPTK-Test")
-        #expect(FileManager.default.fileExists(atPath: runtime.wineBinary.path))
+        try await manager.install(name: "GPTK-Test", from: URL(string: downloadURL)!)
 
         // tar was invoked with extract flags into the runtime dir.
         let tarCall = try #require(fake.invocations.first { $0.executable.lastPathComponent == "tar" })
         #expect(tarCall.arguments.contains("-xf"))
 
-        // Archive is cleaned up; installed list now includes the runtime.
+        // Archive is cleaned up; the extracted runtime (with its wine binary) is now listed.
         #expect(!FileManager.default.fileExists(atPath: runtimesDir.appendingPathComponent("GPTK-Test.archive").path))
-        #expect(await manager.installedWines().map(\.name) == ["GPTK-Test"])
+        let wines = await manager.installedWines()
+        #expect(wines.map(\.name) == ["GPTK-Test"])
+        #expect(FileManager.default.fileExists(atPath: wines.first?.wineBinary?.path ?? ""))
 
         try await manager.remove(name: "GPTK-Test")
         #expect(await manager.installedWines().isEmpty)

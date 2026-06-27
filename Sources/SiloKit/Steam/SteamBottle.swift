@@ -116,6 +116,18 @@ public struct SteamBottle: Sendable {
             currentDirectory: paths.steamBottleClientDir, logURL: paths.steamBottleLog)
     }
 
+    /// Hand a `steam://…` URL to the (already-running) bottle Steam. A plain `steam.exe <url>` — no virtual
+    /// desktop, no CEF flags — so Steam's single-instance forwarder routes the URL to the running client
+    /// and the transient process exits, rather than standing up a second client in its own desktop.
+    @discardableResult
+    public func sendURL(_ url: String, wine: URL?) async throws -> Int32 {
+        guard let wine else { throw BottleError.wineNotConfigured }
+        return try await runner.spawnDetached(
+            executable: wine, arguments: [paths.steamBottleExe.path, url],
+            environment: steamEnvironment(wine: wine),
+            currentDirectory: paths.steamBottleClientDir, logURL: paths.steamBottleLog)
+    }
+
     // MARK: - Helpers
 
     /// Environment for launching the Steam client. `WINEMSYNC=1` matches the per-game launch env (default

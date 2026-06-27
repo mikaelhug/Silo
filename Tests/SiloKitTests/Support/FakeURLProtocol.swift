@@ -12,8 +12,6 @@ final class FakeURLProtocol: URLProtocol {
         lock.withLock { stubs[url] = Stub(statusCode: statusCode, data: data) }
     }
 
-    static func reset() { lock.withLock { stubs.removeAll() } }
-
     private static func stub(for url: URL) -> Stub? {
         lock.withLock { stubs[url.absoluteString] }
     }

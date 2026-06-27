@@ -18,7 +18,7 @@ struct MakePlanTests {
         return b
     }
 
-    @Test("GPTK plan: isolated WINEPREFIX, sync flags, no DXVK overrides, custom args, cwd")
+    @Test("GPTK plan: bottle WINEPREFIX, sync flags, no DXVK overrides, custom args, cwd")
     func gptkPlan() throws {
         var cfg = GameConfig(appID: 220)
         cfg.backend = .gptk
@@ -29,13 +29,25 @@ struct MakePlanTests {
 
         #expect(plan.executable.path == "/w/wine64")
         #expect(plan.arguments == [gameExe.path, "-dev", "-w", "1920"])
-        #expect(plan.environment["WINEPREFIX"] == "/p/220")        // isolated, NOT the master
+        #expect(plan.environment["WINEPREFIX"] == "/p/220")        // the shared Steam-bottle prefix
         #expect(plan.environment["WINEMSYNC"] == "1")          // MSync default on Apple Silicon
         #expect(plan.environment["WINEESYNC"] == nil)          // mutually exclusive — not both
         #expect(plan.environment["WINEDLLOVERRIDES"] == nil)        // GPTK injects D3DMetal, no DXVK
         #expect(plan.environment["WINEDEBUG"] == "-all")           // quiet default
         #expect(plan.currentDirectory.path == "/lib/steamapps/common/Half-Life 2")
         #expect(plan.logURL == log)
+    }
+
+    @Test("Bottle launch forces msync even if the game is configured for esync (one shared wineserver)")
+    func forcesMsyncForCoResidency() throws {
+        var cfg = GameConfig(appID: 220)
+        cfg.backend = .gptk
+        cfg.envFlags = EnvFlags(syncMode: .esync)   // user picked ESync…
+        let plan = try LaunchOrchestrator.makePlan(
+            app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+        // …but a bottle game MUST match Steam's msync or it gets its own wineserver and loses Steamworks.
+        #expect(plan.environment["WINEMSYNC"] == "1")
+        #expect(plan.environment["WINEESYNC"] == nil)
     }
 
     @Test("GPTK plan with GPTK configured: D3DMetal on DYLD fallbacks + builtin d3d via WINEDLLPATH")
@@ -91,7 +103,7 @@ struct MakePlanTests {
 @Suite("LaunchOrchestrator.launch (pipeline)")
 struct LaunchPipelineTests {
 
-    @Test("Provisions, links graphics, prepares log, and spawns detached with the isolated prefix")
+    @Test("Links graphics + spawns the game detached into the shared bottle prefix")
     func fullPipeline() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))

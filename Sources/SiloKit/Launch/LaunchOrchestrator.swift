@@ -46,6 +46,12 @@ public struct LaunchOrchestrator: Sendable {
             environment[key] = value
         }
         environment["WINEPREFIX"] = prefix.path
+        // The game shares ONE wineserver with the co-resident Steam client — and Wine starts a SEPARATE
+        // wineserver per (prefix, sync-mode). Steam runs with msync (SteamBottle.steamEnvironment), so force
+        // the game to msync too: an esync/none per-game override would split the wineserver and silently
+        // break Steamworks IPC (the exact failure the shared bottle exists to avoid).
+        environment["WINEMSYNC"] = "1"
+        environment["WINEESYNC"] = nil
 
         switch config.backend {
         case .gptk:
