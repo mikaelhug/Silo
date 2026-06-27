@@ -52,6 +52,8 @@ struct BackendSettingsView: View {
                 .disabled(!bottle.canSetUp)
             Button("Launch Steam") { Task { await bottle.launchSteam() } }
                 .disabled(bottle.busy || !bottle.steamInstalled)
+            Button("Reset Steam login") { Task { await bottle.resetLogin() } }
+                .disabled(bottle.busy || !bottle.steamInstalled)
             Button("Open bottle log") {
                 openWindow(id: LogTarget.windowID,
                            value: LogTarget(title: "Steam Bottle — Log", url: env.paths.steamBottleLog))

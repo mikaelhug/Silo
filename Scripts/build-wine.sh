@@ -46,7 +46,7 @@ $ARCH env CFLAGS="-fvisibility=default -O2" CROSSCFLAGS="-fvisibility=default -O
 $ARCH make -j"$(sysctl -n hw.ncpu)"
 $ARCH make install
 
-echo "==> Build the steamwebhelper wrapper (forces CEF --single-process so Steam's UI paints)"
+echo "==> Build the steamwebhelper wrapper (forces CEF --in-process-gpu + software GL so Steam's UI paints)"
 mkdir -p "$WORK/install/share/silo"
 "$($ARCH "$BREW" --prefix mingw-w64)/bin/x86_64-w64-mingw32-gcc" -O2 -municode -mwindows \
   -o "$WORK/install/share/silo/steamwebhelper-wrapper.exe" "$ROOT/Scripts/steamwebhelper-wrapper.c"
