@@ -28,21 +28,11 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     var onRun: (@Sendable (Invocation) -> Void)?
 
     private var _alivePIDs: Set<Int32> = []
-    private var _matching: Set<String> = []
     private var _exitHandlers: [Int32: [(id: Int, run: @Sendable () -> Void)]] = [:]
     private var _nextObservationID = 0
 
     var invocations: [Invocation] { lock.withLock { _invocations } }
     var lastInvocation: Invocation? { lock.withLock { _invocations.last } }
-
-    /// Exact patterns considered "running" (e.g. "app_update 70") — `firstPID` returns `spawnPID` for them.
-    var matchingProcesses: Set<String> {
-        get { lock.withLock { _matching } }
-        set { lock.withLock { _matching = newValue } }
-    }
-    func firstPID(matching pattern: String) async -> Int32? {
-        lock.withLock { _matching.contains(pattern) ? spawnPID : nil }
-    }
 
     /// Simulate a process exiting (or coming alive). When marked dead, fires any `observeExit` handlers.
     func setAlive(_ pid: Int32, _ alive: Bool) {
@@ -66,9 +56,6 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
         return FakeObservation { [weak self] in
             self?.lock.withLock { self?._exitHandlers[pid]?.removeAll { $0.id == id } }
         }
-    }
-    func observeWrites(at url: URL, onWrite: @escaping @Sendable () -> Void) -> any ProcessObservation {
-        FakeObservation {}   // tests drive progress via the manifest, not live log writes
     }
 
     /// Queue a result to be returned by the next `run` call (FIFO).

@@ -86,20 +86,19 @@ public struct LaunchOrchestrator: Sendable {
 
     // MARK: - Full pipeline
 
-    /// Provision → link graphics → prepare log → spawn detached. Returns the child PID.
+    /// Launch a game **co-resident in a shared prefix** (the Steam bottle) under GPTK, where a running
+    /// Steam client serves Steamworks. Links graphics into the shared prefix, writes `steam_appid.txt`,
+    /// and spawns with `WINEPREFIX` forced to `prefix`. The prefix must already be provisioned (by
+    /// `SteamBottle`). Returns the child PID.
     @discardableResult
-    public func launch(app: SteamApp, config: GameConfig, backend: BackendConfig) async throws -> Int32 {
-        guard let wine = backend.wineBinary(for: config.backend) else {
-            throw LaunchError.wineNotConfigured
-        }
+    public func launchInBottle(
+        app: SteamApp, config: GameConfig, backend: BackendConfig, prefix: URL, logURL: URL
+    ) async throws -> Int32 {
+        guard backend.wineBinary(for: config.backend) != nil else { throw LaunchError.wineNotConfigured }
         let gameExe = try resolveExecutable(app: app, config: config)
-
-        let prefix = try await provisioner.provision(appID: app.appID, wineBinary: wine)
         try linkGraphics(backend: config.backend, prefix: prefix, backendConfig: backend)
         try presenceInstaller.apply(
             strategy: config.presence, appID: app.appID, gameExe: gameExe, prefix: prefix)
-        let logURL = try await logStore.prepare(appID: app.appID)
-
         let plan = try Self.makePlan(
             app: app, config: config, backend: backend, gameExe: gameExe, prefix: prefix, logURL: logURL
         )
@@ -110,31 +109,20 @@ public struct LaunchOrchestrator: Sendable {
     }
 
     public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
+    public func terminate(pid: Int32) { runner.terminate(pid: pid) }
 
     /// Observe a launched game's exit **without polling** (kqueue). Retain the token to keep observing.
     public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
         runner.observeExit(pid: pid, onExit: onExit)
     }
 
-    /// Run a built-in wine tool (e.g. `winecfg`, `regedit`) against a game's prefix, detached.
-    public func runWineTool(_ tool: String, appID: Int, backend: BackendConfig) async {
+    /// Run a built-in wine tool (e.g. `winecfg`) against `prefix`, detached.
+    public func runWineTool(_ tool: String, prefix: URL, backend: BackendConfig) async {
         guard let wine = backend.wineBinary(for: .gptk) else { return }
-        let prefix = provisioner.prefixURL(forAppID: appID)
-        let log = (try? await logStore.prepare(appID: appID)) ?? logStore.logURL(forAppID: appID)
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: [tool],
             environment: Silo.wineEnvironment(prefix: prefix, wine: wine),
-            currentDirectory: nil, logURL: log)
-    }
-
-    /// Stop a game by killing every wine process in its isolated prefix (`wineserver -k`).
-    public func stop(appID: Int, backend: BackendConfig) async {
-        guard let wine = backend.wineBinary(for: .gptk) else { return }
-        let wineserver = wine.deletingLastPathComponent().appendingPathComponent("wineserver")
-        let prefix = provisioner.prefixURL(forAppID: appID)
-        _ = try? await runner.run(
-            executable: wineserver, arguments: ["-k"],
-            environment: ["WINEPREFIX": prefix.path], currentDirectory: nil)
+            currentDirectory: nil, logURL: prefix.appendingPathComponent("winetool.log"))
     }
 
     // MARK: - Helpers

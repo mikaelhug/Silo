@@ -18,16 +18,6 @@ struct BackendSettingsView: View {
             }
 
             Section {
-                LabeledContent("Steam account", value: vm.config.steamUsername ?? "not signed in")
-            } header: {
-                Text("Steam")
-            } footer: {
-                Text("Games are downloaded headlessly via SteamCMD (native, no Wine). Sign in from the "
-                     + "Library toolbar. Only your Windows-only games are listed.")
-                    .font(.caption)
-            }
-
-            Section {
                 DisclosureGroup("Advanced (manual paths)", isExpanded: $showAdvanced) {
                     Button("Auto-detect installed backend (Whisky / CrossOver)") { vm.autodetect() }
                     LabeledContent("Detected source", value: vm.config.detectedSource.rawValue)

@@ -34,19 +34,12 @@ public protocol ProcessRunning: Sendable {
     /// Whether a process with this PID is currently alive (for tracking a launched game).
     func isRunning(pid: Int32) -> Bool
 
-    /// First PID whose full command line contains `pattern` (e.g. re-attaching to an orphaned download).
-    func firstPID(matching pattern: String) async -> Int32?
-
-    /// Terminate a process by PID (SIGTERM). Used to cancel a SteamCMD download. No-op default.
+    /// Terminate a process by PID (SIGTERM). Used to stop a running game. No-op default.
     func terminate(pid: Int32)
 
     /// Observe a process's exit **without polling** (kqueue): `onExit` fires once when `pid` dies.
     /// The returned token must be retained to keep observing; cancelling/dropping it stops.
     func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation
-
-    /// Observe appends to a file **without polling** (kqueue): `onWrite` fires when the file grows.
-    /// Used to read SteamCMD download progress reactively from its log.
-    func observeWrites(at url: URL, onWrite: @escaping @Sendable () -> Void) -> any ProcessObservation
 }
 
 /// A token that observes nothing — for conformers (and platforms) without event support.
@@ -56,12 +49,8 @@ public final class NoopObservation: ProcessObservation {
 }
 
 extension ProcessRunning {
-    public func firstPID(matching pattern: String) async -> Int32? { nil }
     public func terminate(pid: Int32) {}
     public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
-        NoopObservation()
-    }
-    public func observeWrites(at url: URL, onWrite: @escaping @Sendable () -> Void) -> any ProcessObservation {
         NoopObservation()
     }
 }

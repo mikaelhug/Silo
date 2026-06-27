@@ -1,12 +1,12 @@
 import SwiftUI
 import AppKit
 
-/// A library tile for an owned Windows-only game (`SteamAppInfo`). Not installed → Download; installed
-/// → Play/Stop. Right-click + ellipsis expose Settings, Log, prefix tools.
+/// A library tile for a game installed in the Steam bottle (`SteamApp`). Play launches it co-resident
+/// with the bottle's Steam client; the menu exposes Settings, Log, Wine config, Finder, Uninstall.
 struct SteamGameTileView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
-    let game: SteamAppInfo
+    let game: SteamApp
     let onSettings: () -> Void
     let onDetails: () -> Void
     @State private var hovering = false
@@ -14,53 +14,27 @@ struct SteamGameTileView: View {
 
     var body: some View {
         let lib = env.gameLibrary
-        let installed = lib.isInstalled(game)
-        let downloading = lib.isDownloading(game)
-        let paused = lib.isPaused(game)
-        let busy = lib.isBusy(game)
         let running = lib.isRunning(game)
+        let busy = lib.isBusy(game)
 
         VStack(alignment: .leading, spacing: 0) {
             AsyncImage(url: game.headerArtURL) { phase in
                 switch phase {
                 case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
-                // No spinner here: an animating ProgressView inside the grid drives a per-frame
-                // CADisplayLink that re-lays out the whole grid (the gradient placeholder is enough).
                 default: GameArtworkPlaceholder()
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92).clipped()
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(game.name).font(.headline).lineLimit(1)
-                    Spacer()
-                    badge(installed: installed, downloading: downloading)
-                }
-                if let size = lib.sizeString(game), installed {
+                Text(game.name).font(.headline).lineLimit(1)
+                if let size = lib.sizeString(game) {
                     Text(size).font(.caption).foregroundStyle(.secondary)
                 }
-                if downloading {
-                    ProgressView(value: lib.downloadProgress(game) ?? 0) {
-                        Text(downloadLine).font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                    }
-                } else if paused {
-                    Text("Download paused — \(Int((lib.downloadProgress(game) ?? 0) * 100))% done")
-                        .font(.caption).foregroundStyle(.orange)
-                }
                 HStack(spacing: 8) {
-                    primaryButton(running: running, busy: busy, installed: installed,
-                                  downloading: downloading, paused: paused)
-                    if downloading {
-                        Button { Task { await lib.pause(game) } } label: { Image(systemName: "pause.circle.fill") }
-                            .buttonStyle(.borderless).help("Pause download")
-                    }
-                    if downloading || paused {
-                        Button { Task { await lib.cancel(game) } } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Cancel download")
-                    }
+                    primaryButton(running: running, busy: busy)
                     Spacer()
-                    Menu { menuItems(installed: installed) } label: { Image(systemName: "ellipsis.circle") }
+                    Menu { menuItems() } label: { Image(systemName: "ellipsis.circle") }
                         .menuStyle(.borderlessButton).fixedSize()
                 }
             }
@@ -72,82 +46,46 @@ struct SteamGameTileView: View {
         .shadow(color: .black.opacity(hovering ? 0.22 : 0), radius: 9, y: 4)
         .scaleEffect(hovering ? 1.015 : 1)
         .animation(.easeOut(duration: 0.12), value: hovering)
-        // The whole card opens details; the inner Buttons/Menu win hit-testing, so they still work.
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture { onDetails() }
         .onHover { hovering = $0 }
         .help("Show details")
-        .contextMenu { menuItems(installed: installed) }
+        .contextMenu { menuItems() }
         .uninstallConfirmation(game: game, isPresented: $confirmingUninstall, library: env.gameLibrary)
     }
 
-    /// Progress · speed · ETA line shown while downloading.
-    private var downloadLine: String {
-        let lib = env.gameLibrary
-        var parts: [String] = []
-        parts.append(lib.downloadProgress(game).map { "\(Int($0 * 100))%" } ?? "Starting…")
-        if let speed = lib.speedString(game) { parts.append(speed) }
-        if let eta = lib.etaString(game) { parts.append("\(eta) left") }
-        return parts.joined(separator: " · ")
-    }
-
-    /// The main action button — context-aware so Play never looks frozen while a game is launching.
     @ViewBuilder
-    private func primaryButton(running: Bool, busy: Bool, installed: Bool, downloading: Bool, paused: Bool) -> some View {
+    private func primaryButton(running: Bool, busy: Bool) -> some View {
         let lib = env.gameLibrary
         if running {
             Button(role: .destructive) { Task { await lib.stop(game) } } label: {
                 Label("Stop", systemImage: "stop.fill")
             }.buttonStyle(.borderedProminent).tint(.red)
-        } else if downloading {
-            Button {} label: { Label("Downloading…", systemImage: "arrow.down.circle") }
-                .buttonStyle(.bordered).disabled(true)
         } else if busy {
             Button {} label: {
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Launching…") }
             }.buttonStyle(.borderedProminent).disabled(true)
-        } else if installed {
+        } else {
             Button { Task { await lib.play(game) } } label: { Label("Play", systemImage: "play.fill") }
                 .buttonStyle(.borderedProminent).disabled(!lib.canLaunch)
-        } else if paused {
-            Button { Task { await lib.download(game) } } label: { Label("Resume", systemImage: "play.circle") }
-                .buttonStyle(.borderedProminent)
-        } else {
-            Button { Task { await lib.download(game) } } label: { Label("Download", systemImage: "arrow.down.circle") }
-                .buttonStyle(.borderedProminent)
         }
     }
 
-    @ViewBuilder private func badge(installed: Bool, downloading: Bool) -> some View {
-        let (text, color): (String, Color) =
-            downloading ? ("Downloading", .blue) : installed ? ("Installed", .green) : ("Owned", .gray)
-        Text(text)
-            .font(.caption2.weight(.medium))
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(color.opacity(0.2), in: Capsule())
-            .foregroundStyle(color)
-    }
-
-    @ViewBuilder private func menuItems(installed: Bool) -> some View {
+    @ViewBuilder private func menuItems() -> some View {
         Button("Details…", action: onDetails)
         Button("Settings…", action: onSettings)
         Button("View Log") {
             openWindow(id: LogTarget.windowID, value: env.logTarget(for: game))
         }
-        if installed {
-            Button("Update") { Task { await env.gameLibrary.download(game) } }
-            Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg(game) } }
-                .disabled(!env.gameLibrary.canLaunch)
-            Button("View in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([env.paths.gameInstallDir(forAppID: game.appID)])
-            }
+        Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg(game) } }
+            .disabled(!env.gameLibrary.canLaunch)
+        Button("View in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([game.installURL])
         }
         if let store = game.storePageURL {
             Button("View on Steam Store") { NSWorkspace.shared.open(store) }
         }
-        if installed {
-            Divider()
-            Button("Uninstall…", role: .destructive) { confirmingUninstall = true }
-        }
+        Divider()
+        Button("Uninstall…", role: .destructive) { confirmingUninstall = true }
     }
 }

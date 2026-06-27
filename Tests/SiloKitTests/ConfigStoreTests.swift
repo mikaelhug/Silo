@@ -28,7 +28,7 @@ struct ConfigStoreTests {
 
         var backend = BackendConfig(detectedSource: .whisky)
         backend.wineBinaryPath = URL(fileURLWithPath: "/runtimes/gptk/bin/wine64")
-        backend.steamUsername = "alice"
+        backend.crossoverWinePath = URL(fileURLWithPath: "/cx/wine")
         try await store.saveBackend(backend)
 
         var game = GameConfig(appID: 220)
@@ -43,7 +43,7 @@ struct ConfigStoreTests {
         let reloaded = await store.load()
         #expect(reloaded.backend.detectedSource == .whisky)
         #expect(reloaded.backend.wineBinaryPath?.path == "/runtimes/gptk/bin/wine64")
-        #expect(reloaded.backend.steamUsername == "alice")
+        #expect(reloaded.backend.crossoverWinePath?.path == "/cx/wine")
         let g = reloaded.config(for: 220)
         #expect(g.backend == .crossover)
         #expect(g.envFlags.syncMode == .msync && g.envFlags.metalHUD)

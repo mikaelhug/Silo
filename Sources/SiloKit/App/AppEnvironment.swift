@@ -15,11 +15,9 @@ public final class AppEnvironment {
     let runtimeManager: RuntimeManager
 
     public let gameLibrary: GameLibraryViewModel
-    public let steamLogin: SteamLoginViewModel
     public let backendSettings: BackendSettingsViewModel
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
-    let steamCMD: SteamCMDClient
     public let steamBottleVM: SteamBottleViewModel
     public let steamStore = SteamStoreClient()
     private let updater: Updater
@@ -58,26 +56,17 @@ public final class AppEnvironment {
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
-        let steamCMD = SteamCMDClient(runner: runner, paths: paths)
-        self.steamCMD = steamCMD
+        let bottle = SteamBottle(runner: runner, paths: paths)
         let gameLibrary = GameLibraryViewModel(
-            steamCMD: steamCMD, discovery: discovery, orchestrator: orchestrator,
-            configStore: configStore, cache: LibraryCacheStore(paths: paths),
-            paths: paths, backend: initialBackend)
+            bottle: bottle, discovery: discovery, orchestrator: orchestrator,
+            configStore: configStore, paths: paths, backend: initialBackend)
         self.gameLibrary = gameLibrary
-        self.steamLogin = SteamLoginViewModel(steamCMD: steamCMD)
-        let steamBottleVM = SteamBottleViewModel(bottle: SteamBottle(runner: runner, paths: paths))
+        let steamBottleVM = SteamBottleViewModel(bottle: bottle)
         self.steamBottleVM = steamBottleVM
 
         backendSettings.onChange = { [weak gameLibrary, weak steamBottleVM] config in
             gameLibrary?.updateBackend(config)
             steamBottleVM?.updateWine(config.wineBinaryPath)
-        }
-        steamLogin.onLoggedIn = { [weak self] username in
-            guard let self else { return }
-            self.backendSettings.config.steamUsername = username
-            self.gameLibrary.setAccount(username: username)
-            Task { await self.backendSettings.save(); await self.gameLibrary.load() }
         }
         gptkManager.onDefaultChanged = { [weak self] install in
             guard let self else { return }
@@ -105,15 +94,14 @@ public final class AppEnvironment {
         gptkManager.refresh()
         runtime.defaultName = state.backend.wineRuntimeName
         await runtime.refresh()
-        // Pivoted library: load the owned Windows-only catalog if a Steam account is remembered.
-        gameLibrary.setAccount(username: state.backend.steamUsername)
+        // Library = games installed in the Steam bottle.
         await gameLibrary.load()
         updateCheck = try? await updater.checkForUpdate()   // best-effort; nil on failure/offline
     }
 
-    /// Reload the owned catalog (e.g. on app re-activation). Quiet no-op until signed in.
+    /// Reload the bottle's game library (e.g. on app re-activation).
     public func refreshLibraryIfReady() async {
-        guard didBootstrap, gameLibrary.isLoggedIn else { return }
+        guard didBootstrap, gameLibrary.steamReady else { return }
         await gameLibrary.load()
     }
 
@@ -121,8 +109,9 @@ public final class AppEnvironment {
 
     public var wineReady: Bool { backendSettings.config.wineBinaryPath != nil }
     public var gptkReady: Bool { backendSettings.config.gptkLibDirPath != nil }
-    public var steamLoggedIn: Bool { (backendSettings.config.steamUsername ?? "").isEmpty == false }
-    public var setupComplete: Bool { wineReady && gptkReady && steamLoggedIn }
+    /// The Windows Steam client is installed in the bottle (the user signs into it in-app).
+    public var steamReady: Bool { gameLibrary.steamReady }
+    public var setupComplete: Bool { wineReady && gptkReady && steamReady }
 
     /// Build a per-game settings view model with the game's persisted config.
     public func makeGameSettings(appID: Int, name: String) async -> GameSettingsViewModel {
@@ -130,18 +119,13 @@ public final class AppEnvironment {
         return GameSettingsViewModel(config: state.config(for: appID), appName: name, configStore: configStore)
     }
 
-    /// A game's launch/download log (per appID).
+    /// A game's launch log (per appID).
     public nonisolated func logURL(forAppID appID: Int) -> URL {
         logStore.logURL(forAppID: appID)
     }
 
     /// The log-window target for a game (title + its log URL), opened via `openWindow(id:)`.
-    func logTarget(for game: SteamAppInfo) -> LogTarget {
+    func logTarget(for game: SteamApp) -> LogTarget {
         LogTarget(title: "\(game.name) — Log", url: logURL(forAppID: game.appID))
-    }
-
-    /// Install dir for an owned game's bucket (for "Reveal in Finder").
-    public nonisolated func gameInstallDir(forAppID appID: Int) -> URL {
-        paths.gameInstallDir(forAppID: appID)
     }
 }
