@@ -4,6 +4,11 @@
 
 ## Now
 - **M0–M31 COMPLETE.** 125 tests / 25 suites green; CI green.
+- M32 (bug: "Open Steam" opens nothing): Steam WAS launching but its CEF UI renderer went
+  "unresponsive" and Steam killed+relaunched it every ~90s forever, so the window stayed 0x0/blank.
+  Root cause: the CEF sandbox under wine. Fix: `Silo.steamLaunchArgs` now passes `-no-cef-sandbox`
+  (+ `-cef-disable-gpu -allosarches`; dropped obsolete `-cef-force-32bit`). EMPIRICALLY VERIFIED on
+  the user's machine: 0 "unresponsive" events after relaunch and a real 705x440 Steam login window appeared.
 - M31 (bug: can't right-click library cards): GameCardView had only the ellipsis `Menu`, no
   `.contextMenu`. Added a right-click menu (Play/Stop, Isolate, Settings…, View Log…, Reveal Prefix,
   Wine Config…, View on Steam Store, Reset Prefix) via a shared `managementMenu()` builder reused by

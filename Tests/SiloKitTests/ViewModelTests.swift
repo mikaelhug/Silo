@@ -207,7 +207,7 @@ struct ViewModelTests {
         let call = try #require(fake.invocations.last { $0.detached })
         #expect(call.arguments.first?.hasSuffix("steam.exe") == true)
         #expect(call.arguments.contains("-cef-disable-gpu"))
-        #expect(call.arguments.contains("-cef-force-32bit"))
+        #expect(call.arguments.contains("-no-cef-sandbox"))   // fixes the CEF renderer-hang loop
         #expect(call.environment["WINEPREFIX"] == "/b")
     }
 
