@@ -28,6 +28,8 @@ public final class GameLibraryViewModel {
     /// The bottle's Steam client PID (so we launch it once and don't relaunch per game).
     private var steamPID: Int32?
     private var steamObserver: (any ProcessObservation)?
+    /// The in-flight Steam launch, so concurrent callers coalesce onto one instead of each starting Steam.
+    private var steamLaunch: Task<Void, Never>?
     /// Seconds to wait after cold-starting Steam before launching a game (lets it boot + auto-login).
     /// Overridden to 0 in tests.
     var coldStartGraceSeconds: Double = 10
@@ -100,9 +102,19 @@ public final class GameLibraryViewModel {
 
     /// Bring the bottle's Steam client up (and keep it tracked) if it isn't already running. On a cold
     /// start, waits briefly for Steam to boot, auto-login from cache, and connect before returning — so a
-    /// game launched right after can actually reach it via Steamworks.
+    /// game launched right after can actually reach it via Steamworks. Concurrent callers (two quick Play
+    /// clicks, or Play + Open Steam) coalesce onto ONE launch via `steamLaunch` — `steamPID` is only set
+    /// after an `await`, so without this they'd each start a second Steam in its own virtual desktop.
     private func ensureSteamRunning() async {
         if let pid = steamPID, orchestrator.isRunning(pid: pid) { return }   // already up
+        if let inFlight = steamLaunch { await inFlight.value; return }       // a launch is already running
+        let task = Task { @MainActor in await startSteam() }
+        steamLaunch = task
+        await task.value
+        steamLaunch = nil
+    }
+
+    private func startSteam() async {
         guard let pid = await launchSteamProcess() else { return }
         steamPID = pid
         steamObserver = orchestrator.observeExit(pid: pid) { [weak self] in

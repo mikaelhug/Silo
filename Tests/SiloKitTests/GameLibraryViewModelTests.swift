@@ -101,6 +101,23 @@ struct GameLibraryViewModelTests {
         #expect(!vm.isRunning(game))
     }
 
+    @Test("two games launched at once start the bottle Steam only once")
+    func concurrentPlayLaunchesSteamOnce() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let a = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        let b = try installedGame(paths, appID: 570, name: "Dota", dir: "Dota")
+
+        async let pa: Void = vm.play(a)
+        async let pb: Void = vm.play(b)
+        _ = await (pa, pb)
+
+        // Steam is launched via `explorer /desktop=` — there must be exactly ONE such launch, not one per game.
+        let steamLaunches = fake.invocations.filter { $0.arguments.first == "explorer" }
+        #expect(steamLaunches.count == 1)
+    }
+
     @Test("play is a no-op without a configured Wine backend")
     func playNeedsWine() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
