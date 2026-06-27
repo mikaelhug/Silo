@@ -15,9 +15,12 @@ public final class AppEnvironment {
     let runtimeManager: RuntimeManager
 
     public let library: LibraryViewModel
+    public let gameLibrary: GameLibraryViewModel
+    public let steamLogin: SteamLoginViewModel
     public let backendSettings: BackendSettingsViewModel
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
+    let steamCMD: SteamCMDClient
     private let updater: Updater
     public private(set) var updateCheck: Updater.UpdateCheck?
     public private(set) var didBootstrap = false
@@ -60,7 +63,24 @@ public final class AppEnvironment {
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
-        backendSettings.onChange = { [weak library] config in library?.updateBackend(config) }
+        let steamCMD = SteamCMDClient(runner: runner, paths: paths)
+        self.steamCMD = steamCMD
+        let gameLibrary = GameLibraryViewModel(
+            steamCMD: steamCMD, orchestrator: orchestrator, configStore: configStore,
+            paths: paths, backend: initialBackend)
+        self.gameLibrary = gameLibrary
+        self.steamLogin = SteamLoginViewModel(steamCMD: steamCMD)
+
+        backendSettings.onChange = { [weak library, weak gameLibrary] config in
+            library?.updateBackend(config)
+            gameLibrary?.updateBackend(config)
+        }
+        steamLogin.onLoggedIn = { [weak self] username in
+            guard let self else { return }
+            self.backendSettings.config.steamUsername = username
+            self.gameLibrary.setAccount(username: username)
+            Task { await self.backendSettings.save(); await self.gameLibrary.load() }
+        }
         gptkManager.onDefaultChanged = { [weak self] install in
             guard let self else { return }
             self.backendSettings.config.gptkLibDirPath = install.gptkLibDir
@@ -86,7 +106,9 @@ public final class AppEnvironment {
         gptkManager.refresh()
         runtime.defaultName = state.backend.wineRuntimeName
         await runtime.refresh()
-        await library.refresh()
+        // Pivoted library: load the owned Windows-only catalog if a Steam account is remembered.
+        gameLibrary.setAccount(username: state.backend.steamUsername)
+        await gameLibrary.load()
         updateCheck = try? await updater.checkForUpdate()   // best-effort; nil on failure/offline
     }
 
