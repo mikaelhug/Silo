@@ -46,8 +46,9 @@ struct GameSettingsSheet: View {
             }
 
             Section("Environment") {
-                Toggle("ESYNC", isOn: $vm.config.envFlags.esync)
-                Toggle("MSYNC (Apple Silicon)", isOn: $vm.config.envFlags.msync)
+                Picker("Sync", selection: $vm.config.envFlags.syncMode) {
+                    ForEach(SyncMode.allCases) { Text($0.displayName).tag($0) }
+                }
                 Toggle("Metal HUD", isOn: $vm.config.envFlags.metalHUD)
                 if vm.config.backend == .crossover {
                     TextField("DXVK HUD (e.g. fps,memory)", text: Binding(

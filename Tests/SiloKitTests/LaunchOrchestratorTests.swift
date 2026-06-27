@@ -22,7 +22,7 @@ struct MakePlanTests {
     func gptkPlan() throws {
         var cfg = GameConfig(appID: 220)
         cfg.backend = .gptk
-        cfg.envFlags = EnvFlags(esync: true, msync: true)
+        cfg.envFlags = EnvFlags(syncMode: .msync)
         cfg.customArgs = ["-dev", "-w", "1920"]
         let plan = try LaunchOrchestrator.makePlan(
             app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
@@ -30,8 +30,8 @@ struct MakePlanTests {
         #expect(plan.executable.path == "/w/wine64")
         #expect(plan.arguments == [gameExe.path, "-dev", "-w", "1920"])
         #expect(plan.environment["WINEPREFIX"] == "/p/220")        // isolated, NOT the master
-        #expect(plan.environment["WINEESYNC"] == "1")
-        #expect(plan.environment["WINEMSYNC"] == "1")
+        #expect(plan.environment["WINEMSYNC"] == "1")          // MSync default on Apple Silicon
+        #expect(plan.environment["WINEESYNC"] == nil)          // mutually exclusive — not both
         #expect(plan.environment["WINEDLLOVERRIDES"] == nil)        // GPTK injects D3DMetal, no DXVK
         #expect(plan.environment["WINEDEBUG"] == "-all")           // quiet default
         #expect(plan.currentDirectory.path == "/lib/steamapps/common/Half-Life 2")

@@ -33,7 +33,7 @@ struct ConfigStoreTests {
 
         var game = GameConfig(appID: 220)
         game.backend = .crossover
-        game.envFlags = EnvFlags(esync: false, msync: true, metalHUD: true, dxvkHUD: "fps")
+        game.envFlags = EnvFlags(syncMode: .msync, metalHUD: true, dxvkHUD: "fps")
         game.presence = .emulatorStub
         game.customArgs = ["-novid", "-high"]
         try await store.saveGame(game)
@@ -45,7 +45,7 @@ struct ConfigStoreTests {
         #expect(reloaded.backend.steamRoot?.path == "/bottles/master/drive_c/Program Files (x86)/Steam")
         let g = reloaded.config(for: 220)
         #expect(g.backend == .crossover)
-        #expect(g.envFlags.msync && !g.envFlags.esync && g.envFlags.metalHUD)
+        #expect(g.envFlags.syncMode == .msync && g.envFlags.metalHUD)
         #expect(g.presence == .emulatorStub)
         #expect(g.customArgs == ["-novid", "-high"])
     }
@@ -68,7 +68,7 @@ struct ConfigStoreTests {
         #expect(g.appID == 999)
         #expect(g.backend == .gptk)
         #expect(g.presence == .steamAppIDFile)
-        #expect(g.envFlags.esync)
+        #expect(g.envFlags.syncMode == .msync)   // Apple-Silicon default
     }
 
     @Test("AppPaths derives prefix / log / config locations")
@@ -82,17 +82,29 @@ struct ConfigStoreTests {
 
     @Test("EnvFlags produces backend-appropriate environment")
     func envFlags() {
-        let flags = EnvFlags(esync: true, msync: true, metalHUD: true, dxvkHUD: "fps,memory",
+        let flags = EnvFlags(syncMode: .msync, metalHUD: true, dxvkHUD: "fps,memory",
                              extra: ["WINEDEBUG": "+seh"])
         let gptk = flags.environment(for: .gptk)
-        #expect(gptk["WINEESYNC"] == "1")
         #expect(gptk["WINEMSYNC"] == "1")
+        #expect(gptk["WINEESYNC"] == nil)              // mutually exclusive
         #expect(gptk["MTL_HUD_ENABLED"] == "1")
         #expect(gptk["DXVK_HUD"] == nil)               // DXVK HUD only for crossover
         #expect(gptk["WINEDEBUG"] == "+seh")           // extra merged
 
         let cx = flags.environment(for: .crossover)
         #expect(cx["DXVK_HUD"] == "fps,memory")
+    }
+
+    @Test("EnvFlags migrates legacy esync/msync configs to SyncMode")
+    func migratesLegacySync() throws {
+        let msyncCfg = try JSONDecoder().decode(
+            EnvFlags.self, from: Data(#"{"esync": false, "msync": true, "metalHUD": true}"#.utf8))
+        #expect(msyncCfg.syncMode == .msync)
+        #expect(msyncCfg.metalHUD)
+
+        let esyncCfg = try JSONDecoder().decode(
+            EnvFlags.self, from: Data(#"{"esync": true, "msync": false}"#.utf8))
+        #expect(esyncCfg.syncMode == .esync)
     }
 
     @Test("BackendConfig wine fallback selection")
