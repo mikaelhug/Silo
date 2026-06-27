@@ -1,18 +1,13 @@
 import Foundation
 
-/// Global runtime configuration: where the Master Steam bottle and the wine/GPTK binaries live.
+/// Global runtime configuration: where the wine/GPTK binaries live and the signed-in Steam account.
 public struct BackendConfig: Codable, Sendable, Hashable {
-    /// Master Steam bottle root (the parent of `drive_c`) — the simple downloader bottle.
-    public var masterBottlePath: URL?
     /// Primary wine binary used to launch games (GPTK build).
     public var wineBinaryPath: URL?
     /// Name of the default Wine install (managed in the Wine Manager).
     public var wineRuntimeName: String?
     /// Fallback wine binary (CrossOver).
     public var crossoverWinePath: URL?
-    /// Wine binary used for the Master Steam bottle. Steam can be finicky under GPTK, so this may be
-    /// a vanilla wine; falls back to the game wine when unset.
-    public var steamWineBinaryPath: URL?
     /// Directory containing GPTK / D3DMetal libraries to inject into game prefixes.
     public var gptkLibDirPath: URL?
     /// Name of the default GPTK install (managed in the GPTK Manager).
@@ -30,22 +25,18 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     }
 
     public init(
-        masterBottlePath: URL? = nil,
         wineBinaryPath: URL? = nil,
         wineRuntimeName: String? = nil,
         crossoverWinePath: URL? = nil,
-        steamWineBinaryPath: URL? = nil,
         gptkLibDirPath: URL? = nil,
         gptkRuntimeName: String? = nil,
         dxvkDLLDirPath: URL? = nil,
         steamUsername: String? = nil,
         detectedSource: DetectedSource = .none
     ) {
-        self.masterBottlePath = masterBottlePath
         self.wineBinaryPath = wineBinaryPath
         self.wineRuntimeName = wineRuntimeName
         self.crossoverWinePath = crossoverWinePath
-        self.steamWineBinaryPath = steamWineBinaryPath
         self.gptkLibDirPath = gptkLibDirPath
         self.gptkRuntimeName = gptkRuntimeName
         self.dxvkDLLDirPath = dxvkDLLDirPath
@@ -53,19 +44,8 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         self.detectedSource = detectedSource
     }
 
-    /// Steam install root inside the Master bottle, if configured.
-    public var steamRoot: URL? {
-        masterBottlePath.map { DiscoveryEngine.steamRoot(inBottle: $0) }
-    }
-
-    /// Wine binary for the Master Steam bottle (vanilla preferred; falls back to game wine).
-    public var steamWine: URL? { steamWineBinaryPath ?? wineBinaryPath ?? crossoverWinePath }
-
     /// Whether games can be launched (a wine binary is set).
     public var isWineConfigured: Bool { wineBinaryPath != nil }
-
-    /// Whether the library can be discovered (a Master bottle is set).
-    public var isMasterBottleConfigured: Bool { masterBottlePath != nil }
 
     /// GPTK's `lib/external` dir (D3DMetal.framework + libd3dshared.dylib), derived from the injected
     /// DLL dir `<root>/lib/wine/x86_64-windows`. Must be on the launch DYLD fallback paths so GPTK's

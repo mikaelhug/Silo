@@ -28,7 +28,6 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     var onRun: (@Sendable (Invocation) -> Void)?
 
     private var _alivePIDs: Set<Int32> = []
-    private var _processCount = 0
     private var _matching: Set<String> = []
     private var _exitHandlers: [Int32: [(id: Int, run: @Sendable () -> Void)]] = [:]
     private var _nextObservationID = 0
@@ -36,18 +35,10 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     var invocations: [Invocation] { lock.withLock { _invocations } }
     var lastInvocation: Invocation? { lock.withLock { _invocations.last } }
 
-    /// Value returned by `processCount` (set high in tests to simulate a winedbg storm).
-    var processCountValue: Int {
-        get { lock.withLock { _processCount } }
-        set { lock.withLock { _processCount = newValue } }
-    }
-    /// Exact patterns considered "running" (e.g. "app_update 70") — returns 1 for those, else the default.
+    /// Exact patterns considered "running" (e.g. "app_update 70") — `firstPID` returns `spawnPID` for them.
     var matchingProcesses: Set<String> {
         get { lock.withLock { _matching } }
         set { lock.withLock { _matching = newValue } }
-    }
-    func processCount(matching pattern: String) async -> Int {
-        lock.withLock { _matching.contains(pattern) ? 1 : _processCount }
     }
     func firstPID(matching pattern: String) async -> Int32? {
         lock.withLock { _matching.contains(pattern) ? spawnPID : nil }

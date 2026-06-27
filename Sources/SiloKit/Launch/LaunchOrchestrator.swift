@@ -46,7 +46,7 @@ public struct LaunchOrchestrator: Sendable {
 
         var environment = config.envFlags.environment(for: config.backend)
         // Layer the base wine env (WINEDEBUG, DYLD bundled deps) under the user's flags, then force the
-        // isolated WINEPREFIX — never the master bottle, regardless of any user override.
+        // isolated per-game WINEPREFIX — never a shared one, regardless of any user override.
         for (key, value) in Silo.wineEnvironment(prefix: prefix, wine: wine) where environment[key] == nil {
             environment[key] = value
         }
@@ -98,7 +98,7 @@ public struct LaunchOrchestrator: Sendable {
         try linkGraphics(backend: config.backend, prefix: prefix, backendConfig: backend)
         try presenceInstaller.apply(
             strategy: config.presence, appID: app.appID, gameExe: gameExe,
-            stubSource: config.steamStubSourcePath, masterSteamRoot: backend.steamRoot, prefix: prefix)
+            stubSource: config.steamStubSourcePath, prefix: prefix)
         let logURL = try await logStore.prepare(appID: app.appID)
 
         let plan = try Self.makePlan(

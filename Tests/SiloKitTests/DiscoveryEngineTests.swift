@@ -61,11 +61,4 @@ struct DiscoveryEngineTests {
             try await DiscoveryEngine().discoverGames(steamRoot: steamRoot)
         }
     }
-
-    @Test("Derives the Steam root inside a bottle")
-    func steamRootInBottle() {
-        let bottle = URL(fileURLWithPath: "/bottles/master")
-        let root = DiscoveryEngine.steamRoot(inBottle: bottle)
-        #expect(root.path == "/bottles/master/drive_c/Program Files (x86)/Steam")
-    }
 }

@@ -32,11 +32,10 @@ public final class BackendSettingsViewModel {
         let detected = resolver.autodetect(
             homeDirectory: homeDirectory, applicationsDirectory: applicationsDirectory)
         if detected.detectedSource != .none {
-            // Autodetect only discovers *runtime* paths — never the Steam sign-in or a user-set master
-            // bottle. Carry those over so re-detecting a runtime doesn't sign the user out (the bug where
-            // the logged-in account "fell away" from the UI) or forget their bottle.
+            // Autodetect only discovers *runtime* paths — never the Steam sign-in. Carry the account over
+            // so re-detecting a runtime doesn't sign the user out (the bug where the logged-in account
+            // "fell away" from the UI).
             var merged = detected
-            if merged.masterBottlePath == nil { merged.masterBottlePath = config.masterBottlePath }
             merged.steamUsername = merged.steamUsername ?? config.steamUsername
             config = merged
             statusMessage = "Detected \(detected.detectedSource.rawValue)."

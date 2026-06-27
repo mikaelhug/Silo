@@ -20,7 +20,4 @@ public struct StateFlags: OptionSet, Codable, Sendable, Hashable {
 
     public var isFullyInstalled: Bool { contains(.fullyInstalled) }
     public var needsUpdate: Bool { contains(.updateRequired) }
-    public var isDownloading: Bool {
-        contains(.downloading) || contains(.updateRunning) || contains(.updateStarted)
-    }
 }
