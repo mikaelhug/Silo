@@ -2,52 +2,6 @@ import Foundation
 import Testing
 @testable import SiloKit
 
-@Suite("SteamLoginSeeder")
-struct SteamLoginSeederTests {
-
-    /// Build a fake macOS Steam data dir with a cached login.
-    private func makeMacSteam(_ tmp: TempDir) throws -> URL {
-        _ = try tmp.write("Steam/config/loginusers.vdf", "\"users\" { }")
-        _ = try tmp.write("Steam/config/config.vdf", "cfg")
-        _ = try tmp.write("Steam/registry.vdf", "reg")
-        _ = try tmp.write("Steam/ssfn1234567890", "sentry")
-        _ = try tmp.write("Steam/userdata/123/localconfig.vdf", "ud")
-        return tmp.url.appendingPathComponent("Steam")
-    }
-
-    @Test("seeds config, registry.vdf, ssfn* and userdata into the bottle")
-    func seeds() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let mac = try makeMacSteam(tmp)
-        let bottle = tmp.url.appendingPathComponent("BottleSteam")
-
-        let copied = try SteamLoginSeeder().seed(from: mac, into: bottle)
-        #expect(Set(copied) == ["config", "registry.vdf", "userdata", "ssfn1234567890"])
-        #expect(FileManager.default.fileExists(atPath: bottle.appendingPathComponent("config/loginusers.vdf").path))
-        #expect(FileManager.default.fileExists(atPath: bottle.appendingPathComponent("ssfn1234567890").path))
-        #expect(FileManager.default.fileExists(atPath: bottle.appendingPathComponent("userdata/123/localconfig.vdf").path))
-    }
-
-    @Test("throws notLoggedIn when macOS Steam has no cached login")
-    func notLoggedIn() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        _ = try tmp.makeDir("Steam")   // exists but no config/loginusers.vdf
-        #expect(throws: SteamLoginSeeder.SeedError.notLoggedIn) {
-            try SteamLoginSeeder().seed(from: tmp.url.appendingPathComponent("Steam"),
-                                        into: tmp.url.appendingPathComponent("Bottle"))
-        }
-    }
-
-    @Test("throws macSteamNotFound when macOS Steam is absent")
-    func macSteamMissing() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let mac = tmp.url.appendingPathComponent("Steam")
-        #expect(throws: SteamLoginSeeder.SeedError.macSteamNotFound(mac)) {
-            try SteamLoginSeeder().seed(from: mac, into: tmp.url.appendingPathComponent("Bottle"))
-        }
-    }
-}
-
 @Suite("SteamBottle")
 struct SteamBottleTests {
 

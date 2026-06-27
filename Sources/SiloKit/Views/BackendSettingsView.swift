@@ -60,9 +60,7 @@ struct BackendSettingsView: View {
         Section {
             Button("Set up Steam bottle") { Task { await bottle.setUp() } }
                 .disabled(!bottle.canSetUp)
-            Button("Re-seed login from macOS Steam") { Task { await bottle.reseedLogin() } }
-                .disabled(bottle.busy)
-            Button("Launch Steam (background)") { Task { await bottle.launchSteam() } }
+            Button("Launch Steam") { Task { await bottle.launchSteam() } }
                 .disabled(bottle.busy || !bottle.steamInstalled)
             Button("Open bottle log") {
                 openWindow(id: LogTarget.windowID,
@@ -75,9 +73,9 @@ struct BackendSettingsView: View {
         } header: {
             Text("Steam bottle (experimental)")
         } footer: {
-            Text("For Steamworks/DRM games that need a running Steam client. Sign in to the macOS Steam "
-                 + "app first; “Set up” installs Windows Steam into a shared prefix and copies that login "
-                 + "in (no second sign-in). Then Launch Steam, and run a DRM game — it shares this prefix.")
+            Text("For Steamworks/DRM games that need a running Steam client. “Set up” installs Windows "
+                 + "Steam into a shared prefix; “Launch Steam” starts it — sign in once (it caches the "
+                 + "login), then run a game and it shares this prefix. Requires a Steam-capable Wine build.")
                 .font(.caption)
         }
     }

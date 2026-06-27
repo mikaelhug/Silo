@@ -36,12 +36,6 @@ public struct AppPaths: Sendable, Hashable {
     /// `steam.exe` inside the bottle.
     public var steamBottleExe: URL { steamBottleClientDir.appendingPathComponent("steam.exe") }
 
-    /// The native **macOS** Steam client's data dir — the source for seeding a login into the bottle.
-    /// (`~/Library/Application Support/Steam`, a sibling of Silo's own support dir.)
-    public var macSteamDir: URL {
-        supportDir.deletingLastPathComponent().appendingPathComponent("Steam", isDirectory: true)
-    }
-
     /// The bottle's Steam log.
     public var steamBottleLog: URL { logsDir.appendingPathComponent("steam-bottle.log") }
 

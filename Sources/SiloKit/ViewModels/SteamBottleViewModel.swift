@@ -19,34 +19,20 @@ public final class SteamBottleViewModel {
     public var steamInstalled: Bool { bottle.isSteamInstalled }
     public var canSetUp: Bool { wineBinary != nil && !busy }
 
-    /// Install Windows Steam into the bottle (if needed) and seed the macOS login.
+    /// Install Windows Steam into the bottle (if needed).
     public func setUp() async {
         guard !busy else { return }
         busy = true; defer { busy = false }
         do {
             status = "Installing Windows Steam into the bottle… (first time downloads SteamSetup)"
             try await bottle.installSteam(wine: wineBinary)
-            status = "Seeding your macOS Steam login…"
-            let copied = try bottle.seedLogin()
-            status = "Ready. Seeded: \(copied.joined(separator: ", ")). Launch Steam, then a game, to verify."
+            status = "Steam installed. Launch it, sign in once (it caches the login), then run a game."
         } catch {
             status = "Setup failed: \(message(error))"
         }
     }
 
-    /// Re-copy the macOS login into the bottle (e.g. after re-logging-in to macOS Steam).
-    public func reseedLogin() async {
-        guard !busy else { return }
-        busy = true; defer { busy = false }
-        do {
-            let copied = try bottle.seedLogin()
-            status = "Re-seeded login: \(copied.joined(separator: ", "))."
-        } catch {
-            status = "Seeding failed: \(message(error)). Sign in to the macOS Steam app first."
-        }
-    }
-
-    /// Launch the bottle's Steam client in the background.
+    /// Launch the bottle's Steam client.
     public func launchSteam() async {
         guard !busy else { return }
         busy = true; defer { busy = false }
