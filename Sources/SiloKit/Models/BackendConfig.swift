@@ -19,6 +19,9 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var gptkRuntimeName: String?
     /// Directory containing DXVK DLLs (`dxgi.dll`, `d3d11.dll`) for the CrossOver/DXVK backend.
     public var dxvkDLLDirPath: URL?
+    /// Steam account name used by SteamCMD (the post-pivot downloader). Password is never stored —
+    /// SteamCMD caches a refresh token after the first login.
+    public var steamUsername: String?
     /// How this config was discovered.
     public var detectedSource: DetectedSource
 
@@ -35,6 +38,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         gptkLibDirPath: URL? = nil,
         gptkRuntimeName: String? = nil,
         dxvkDLLDirPath: URL? = nil,
+        steamUsername: String? = nil,
         detectedSource: DetectedSource = .none
     ) {
         self.masterBottlePath = masterBottlePath
@@ -45,6 +49,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         self.gptkLibDirPath = gptkLibDirPath
         self.gptkRuntimeName = gptkRuntimeName
         self.dxvkDLLDirPath = dxvkDLLDirPath
+        self.steamUsername = steamUsername
         self.detectedSource = detectedSource
     }
 
