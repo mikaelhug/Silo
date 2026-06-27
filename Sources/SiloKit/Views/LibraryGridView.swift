@@ -3,7 +3,6 @@ import SwiftUI
 struct LibraryGridView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var settingsTarget: SteamApp?
-    @State private var logTarget: SteamApp?
     @State private var showAdvanced = false
 
     var body: some View {
@@ -46,7 +45,6 @@ struct LibraryGridView: View {
         }
         .sheet(isPresented: $showAdvanced) { AdvancedSettingsSheet() }
         .sheet(item: $settingsTarget) { GameSettingsSheet(game: $0) }
-        .sheet(item: $logTarget) { LogViewerView(game: $0) }
         .searchable(text: $library.searchText, placement: .toolbar, prompt: "Search games")
         .safeAreaInset(edge: .bottom) {
             if let message = library.statusMessage {
@@ -67,10 +65,7 @@ struct LibraryGridView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 16)], spacing: 16) {
                 SteamCardView()
                 ForEach(library.filteredGames) { game in
-                    GameCardView(
-                        game: game,
-                        onSettings: { settingsTarget = game },
-                        onLog: { logTarget = game })
+                    GameCardView(game: game, onSettings: { settingsTarget = game })
                 }
             }
             .padding()

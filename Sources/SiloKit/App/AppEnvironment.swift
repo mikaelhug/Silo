@@ -103,14 +103,33 @@ public final class AppEnvironment {
     public var steamReady: Bool { backendSettings.config.masterBottlePath != nil }
     public var setupComplete: Bool { wineReady && gptkReady && steamReady }
 
+    /// The Master Steam client log (written by `openSteam`).
+    public nonisolated var steamLogURL: URL { paths.logsDir.appendingPathComponent("steam.log") }
+
     /// Launch the Steam client in the Master bottle (detached) so the user can browse/download games.
     public func openSteam() async {
         let config = backendSettings.config
         guard let bottle = config.masterBottlePath, let wine = config.steamWine else { return }
         let steamExe = DiscoveryEngine.steamRoot(inBottle: bottle).appendingPathComponent("steam.exe")
-        let log = paths.logsDir.appendingPathComponent("steam.log")
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: [steamExe.path] + Silo.steamLaunchArgs,
+            environment: ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all",
+                          "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback],
+            currentDirectory: nil, logURL: steamLogURL)
+        // Safety net: if Steam's CEF ever crash-loops again, kill the bottle before it floods the Mac.
+        let guardWine = wine, guardBottle = bottle
+        Task.detached { [runner] in
+            await CrashLoopGuard(runner: runner).monitor(wine: guardWine, bottle: guardBottle)
+        }
+    }
+
+    /// Open winecfg against the Master Steam bottle (detached).
+    public func openMasterWinecfg() async {
+        let config = backendSettings.config
+        guard let bottle = config.masterBottlePath, let wine = config.steamWine else { return }
+        let log = paths.logsDir.appendingPathComponent("winecfg.log")
+        _ = try? await runner.spawnDetached(
+            executable: wine, arguments: ["winecfg"],
             environment: ["WINEPREFIX": bottle.path, "WINEDEBUG": "-all",
                           "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback],
             currentDirectory: nil, logURL: log)

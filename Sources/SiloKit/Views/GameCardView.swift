@@ -3,9 +3,9 @@ import AppKit
 
 struct GameCardView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.openWindow) private var openWindow
     let game: SteamApp
     let onSettings: () -> Void
-    let onLog: () -> Void
 
     var body: some View {
         let busy = env.library.busyAppIDs.contains(game.appID)
@@ -94,7 +94,9 @@ struct GameCardView: View {
     @ViewBuilder
     private func managementMenu() -> some View {
         Button("Settings…", action: onSettings)
-        Button("View Log…", action: onLog)
+        Button("View Log…") {
+            openWindow(id: "silo-log", value: LogTarget(title: "\(game.name) — Log", url: env.logURL(for: game)))
+        }
         Divider()
         Button("Reveal Prefix in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([env.library.prefixURL(for: game)])
