@@ -349,9 +349,16 @@ public final class GameLibraryViewModel {
               runningPIDs[info.appID] == nil else { return }
         busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
         do {
-            let config = await configStore.load().config(for: info.appID)
-            let pid = try await orchestrator.launch(app: steamApp(for: info), config: config, backend: backend)
-            var stamped = config; stamped.lastPlayed = Date()
+            let saved = await configStore.load().config(for: info.appID)
+            // Honour the saved backend, but fall back to CrossOver for this launch if GPTK was chosen yet
+            // isn't installed — so the game still gets DirectX translation (the saved choice is untouched).
+            var launchConfig = saved
+            launchConfig.backend = BackendPolicy.effective(
+                requested: saved.backend,
+                gptkInstalled: backend.gptkLibDirPath != nil,
+                crossoverInstalled: backend.crossoverWinePath != nil)
+            let pid = try await orchestrator.launch(app: steamApp(for: info), config: launchConfig, backend: backend)
+            var stamped = saved; stamped.lastPlayed = Date()
             _ = try? await configStore.saveGame(stamped)
             runningPIDs[info.appID] = pid
             observeRun(appID: info.appID, pid: pid)

@@ -40,10 +40,17 @@ struct GameSettingsSheet: View {
     private func form(_ model: GameSettingsViewModel) -> some View {
         @Bindable var vm = model
         Form {
-            Section("Graphics backend") {
+            Section {
                 Picker("Backend", selection: $vm.config.backend) {
                     ForEach(GraphicsBackend.allCases) { Text($0.displayName).tag($0) }
                 }
+            } header: {
+                Text("Graphics backend")
+            } footer: {
+                Text("Game Porting Toolkit (D3DMetal) is the default — it translates DirectX 9–12 (incl. "
+                     + "ray tracing) and is the most capable on Apple Silicon. Switch to CrossOver (DXVK) "
+                     + "only if a game misbehaves under GPTK; Silo also falls back to it automatically when "
+                     + "GPTK isn't installed.")
             }
 
             Section {

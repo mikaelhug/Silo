@@ -19,6 +19,8 @@ public struct SteamStoreDetails: Sendable, Equatable {
     public let metacritic: Int?
     /// Store capabilities/categories, e.g. "Single-player", "Full controller support".
     public let categories: [String]
+    /// Major DirectX version parsed from the minimum requirements (e.g. 11, 12), for backend guidance.
+    public let directXVersion: Int?
 }
 
 /// Fetches `SteamStoreDetails` from the public `store.steampowered.com/api/appdetails` endpoint
@@ -55,7 +57,17 @@ public struct SteamStoreClient: Sendable {
             minimumRequirements: minText,
             diskSpace: minText.flatMap(diskSpace),
             metacritic: (d["metacritic"] as? [String: Any])?["score"] as? Int,
-            categories: categories)
+            categories: categories,
+            directXVersion: minText.flatMap(directXVersion))
+    }
+
+    /// Parse the major DirectX version from requirements text, e.g. "DirectX: Version 12" → 12,
+    /// "DirectX 9.0c" → 9. Returns nil when the requirements don't mention DirectX.
+    static func directXVersion(in requirements: String) -> Int? {
+        guard let r = requirements.range(of: #"directx[^0-9]*([0-9]+)"#,
+                                         options: [.regularExpression, .caseInsensitive]) else { return nil }
+        let digits = requirements[r].drop { !$0.isNumber }.prefix { $0.isNumber }
+        return Int(digits)
     }
 
     /// Pull the storage requirement out of the minimum-requirements text (the disk-size signal).
