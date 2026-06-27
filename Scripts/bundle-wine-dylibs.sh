@@ -24,6 +24,22 @@ trap 'rm -f "$QUEUE" "$DONE"' EXIT
 realpath_of() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
 has_arch() { lipo -archs "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$ARCH"; }
 
+# The glib/gstreamer/ffmpeg media stack is deliberately NOT bundled. It's only used by wine's optional
+# winegstreamer (video playback), needs its own plugin tree to work, and — fatally — registers ObjC
+# classes + glib types that clash when BOTH the bundled copy and a system (Homebrew) copy load into one
+# process ("Class GstCocoaApplicationDelegate is implemented in both …", "cannot register existing type").
+# Wine links these by absolute path, so where the system has them only one copy loads; where it doesn't,
+# winegstreamer simply stays unloaded (no media) — an acceptable trade for a stable, dup-free runtime.
+is_media() {
+  case "$1" in
+    libgst*|libglib-*|libgobject-*|libgio-*|libgmodule-*|libgthread-*|libgirepository*) return 0;;
+    libav*|libswscale*|libswresample*|libpostproc*|liborc-*) return 0;;
+    libx264*|libx265*|libvpx*|libdav1d*|libSvtAv1*|libaom*|librav1e*) return 0;;
+    libopus*|libtheora*|libvorbis*|libogg*|libmp3lame*|libspeex*|libFLAC*) return 0;;
+    *) return 1;;
+  esac
+}
+
 # Seed: every non-system dylib referenced by any Mach-O in the tree, plus libs wine dlopen's by name
 # (invisible to otool) resolved from Homebrew.
 {
@@ -41,6 +57,7 @@ while [ -s "$QUEUE" ]; do
   tail -n +2 "$QUEUE" > "$QUEUE.t" && mv "$QUEUE.t" "$QUEUE"
   leaf="$(basename "$path")"
   grep -qxF "$leaf" "$DONE" 2>/dev/null && continue
+  is_media "$leaf" && continue          # don't bundle (or recurse into) the media stack — see is_media
   real="$(realpath_of "$path")"
   [ -f "$real" ] || continue
   # Skip wrong-arch copies WITHOUT marking the leaf done, so a matching-arch sibling can still win.
