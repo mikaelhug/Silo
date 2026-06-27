@@ -45,7 +45,7 @@ public struct SteamBottle: Sendable {
         if isProvisioned { return }
         try fileManager.createDirectory(at: paths.steamBottle, withIntermediateDirectories: true)
         var environment = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
-        environment["WINEDLLOVERRIDES"] = Silo.winePrefixInitOverrides
+        environment["WINEDLLOVERRIDES"] = "\(Silo.winePrefixInitOverrides);\(Silo.crashyDriverOverrides)"
         let result = try await runner.run(
             executable: wine, arguments: ["wineboot", "--init"],
             environment: environment, currentDirectory: nil)
@@ -59,10 +59,11 @@ public struct SteamBottle: Sendable {
         if isSteamInstalled { return }
         try await provision(wine: wine)
         let installer = try await downloadInstaller()
+        var environment = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
+        environment["WINEDLLOVERRIDES"] = Silo.crashyDriverOverrides
         let result = try await runner.run(
             executable: wine, arguments: [installer.path, "/S"],
-            environment: Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine),
-            currentDirectory: paths.steamBottle)
+            environment: environment, currentDirectory: paths.steamBottle)
         guard result.succeeded else { throw BottleError.steamInstallFailed(result.exitCode) }
     }
 
@@ -133,11 +134,13 @@ public struct SteamBottle: Sendable {
     /// Environment for launching the Steam client. `WINEMSYNC=1` matches the per-game launch env (default
     /// `EnvFlags`) so Steam and the games it co-hosts agree on the wineserver sync mode and share one
     /// wineserver. The overrides disable Steam's in-game overlay injector (a known crash/black-window
-    /// source under Wine) and force builtin crypto.
+    /// source under Wine), force builtin crypto, and disable the SDL controller bus (see
+    /// `Silo.crashyDriverOverrides`).
     private func steamEnvironment(wine: URL) -> [String: String] {
         var env = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
         env["WINEMSYNC"] = "1"
-        env["WINEDLLOVERRIDES"] = "gameoverlayrenderer,gameoverlayrenderer64=d;bcrypt,ncrypt=b"
+        env["WINEDLLOVERRIDES"] =
+            "\(Silo.crashyDriverOverrides);gameoverlayrenderer,gameoverlayrenderer64=d;bcrypt,ncrypt=b"
         return env
     }
 

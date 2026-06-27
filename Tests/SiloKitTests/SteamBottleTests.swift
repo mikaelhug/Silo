@@ -40,6 +40,7 @@ struct SteamBottleTests {
         #expect(call.environment["WINEPREFIX"] == paths.steamBottle.path)
         #expect(call.environment["WINEMSYNC"] == "1")                    // co-residency with games
         #expect(call.environment["WINEDLLOVERRIDES"]?.contains("gameoverlayrenderer") == true)
+        #expect(call.environment["WINEDLLOVERRIDES"]?.contains("winebus") == true)   // SDL bus crash fix
     }
 
     @Test("installWebHelperWrapper preserves the real webhelper and drops the wrapper in its place")

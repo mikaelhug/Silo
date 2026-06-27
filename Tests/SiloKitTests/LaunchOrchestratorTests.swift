@@ -32,7 +32,8 @@ struct MakePlanTests {
         #expect(plan.environment["WINEPREFIX"] == "/p/220")        // the shared Steam-bottle prefix
         #expect(plan.environment["WINEMSYNC"] == "1")          // MSync default on Apple Silicon
         #expect(plan.environment["WINEESYNC"] == nil)          // mutually exclusive — not both
-        #expect(plan.environment["WINEDLLOVERRIDES"] == nil)        // GPTK injects D3DMetal, no DXVK
+        // GPTK injects D3DMetal (no DXVK), but the crashy SDL controller bus is always disabled.
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "winebus,winexinput=d")
         #expect(plan.environment["WINEDEBUG"] == "-all")           // quiet default
         #expect(plan.currentDirectory.path == "/lib/steamapps/common/Half-Life 2")
         #expect(plan.logURL == log)
