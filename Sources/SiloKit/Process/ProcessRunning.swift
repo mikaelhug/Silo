@@ -31,8 +31,12 @@ public protocol ProcessRunning: Sendable {
     /// Used by `CrashLoopGuard` to detect a `winedbg` storm. Defaults to 0 for conformers that don't
     /// implement it.
     func processCount(matching pattern: String) async -> Int
+
+    /// Terminate a process by PID (SIGTERM). Used to cancel a SteamCMD download. No-op default.
+    func terminate(pid: Int32)
 }
 
 extension ProcessRunning {
     public func processCount(matching pattern: String) async -> Int { 0 }
+    public func terminate(pid: Int32) {}
 }

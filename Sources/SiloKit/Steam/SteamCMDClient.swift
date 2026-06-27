@@ -60,6 +60,16 @@ public struct SteamCMDClient: Sendable {
             environment: [:], currentDirectory: paths.steamCMDDir, logURL: logURL)
     }
 
+    /// Cancel a download: terminate the SteamCMD process (if known) and delete the partial bucket so any
+    /// still-running/orphaned instance errors out and stops. (Pausing isn't cancelling — to *pause*,
+    /// just don't cancel: SteamCMD's app_update resumes from the kept partial on the next download.)
+    public func cancelDownload(appID: Int, pid: Int32?) {
+        if let pid { runner.terminate(pid: pid) }
+        try? FileManager.default.removeItem(at: paths.gameInstallDir(forAppID: appID))
+        let manifest = paths.gameLibraryDir.appendingPathComponent("steamapps/appmanifest_\(appID).acf")
+        try? FileManager.default.removeItem(at: manifest)
+    }
+
     /// Run a short SteamCMD query to completion and return its stdout (for app_info / licenses parsing).
     public func capture(_ arguments: [String]) async throws -> String {
         let script = try await ensureInstalled()

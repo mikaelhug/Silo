@@ -13,6 +13,7 @@ struct SteamGameTileView: View {
         let lib = env.gameLibrary
         let installed = lib.isInstalled(game)
         let downloading = lib.isDownloading(game)
+        let paused = lib.isPaused(game)
         let busy = lib.isBusy(game)
         let running = lib.isRunning(game)
 
@@ -39,9 +40,17 @@ struct SteamGameTileView: View {
                     ProgressView(value: lib.downloadProgress(game) ?? 0) {
                         Text(downloadLine).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     }
+                } else if paused {
+                    Text("Download paused — \(Int((lib.downloadProgress(game) ?? 0) * 100))% done")
+                        .font(.caption).foregroundStyle(.orange)
                 }
-                HStack {
-                    primaryButton(running: running, busy: busy, installed: installed, downloading: downloading)
+                HStack(spacing: 8) {
+                    primaryButton(running: running, busy: busy, installed: installed,
+                                  downloading: downloading, paused: paused)
+                    if downloading || paused {
+                        Button { Task { await lib.cancel(game) } } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Cancel download")
+                    }
                     Spacer()
                     Menu { menuItems(installed: installed) } label: { Image(systemName: "ellipsis.circle") }
                         .menuStyle(.borderlessButton).fixedSize()
@@ -66,7 +75,7 @@ struct SteamGameTileView: View {
 
     /// The main action button — context-aware so Play never looks frozen while a game is launching.
     @ViewBuilder
-    private func primaryButton(running: Bool, busy: Bool, installed: Bool, downloading: Bool) -> some View {
+    private func primaryButton(running: Bool, busy: Bool, installed: Bool, downloading: Bool, paused: Bool) -> some View {
         let lib = env.gameLibrary
         if running {
             Button(role: .destructive) { Task { await lib.stop(game) } } label: {
@@ -82,6 +91,9 @@ struct SteamGameTileView: View {
         } else if installed {
             Button { Task { await lib.play(game) } } label: { Label("Play", systemImage: "play.fill") }
                 .buttonStyle(.borderedProminent).disabled(!lib.canLaunch)
+        } else if paused {
+            Button { Task { await lib.download(game) } } label: { Label("Resume", systemImage: "play.circle") }
+                .buttonStyle(.borderedProminent)
         } else {
             Button { Task { await lib.download(game) } } label: { Label("Download", systemImage: "arrow.down.circle") }
                 .buttonStyle(.borderedProminent)

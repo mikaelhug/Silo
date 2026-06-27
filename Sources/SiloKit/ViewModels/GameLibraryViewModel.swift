@@ -16,6 +16,7 @@ public final class GameLibraryViewModel {
     public private(set) var downloadingIDs: Set<Int> = []
     public private(set) var downloadSpeeds: [Int: Double] = [:]   // appID → bytes/sec
     public private(set) var runningPIDs: [Int: Int32] = [:]   // appID → launched wine PID
+    private var downloadPIDs: [Int: Int32] = [:]             // appID → SteamCMD PID (this session)
     private var lastBytes: [Int: (bytes: Int64, at: Date)] = [:]
     public var searchText: String = ""
     /// Hide games that also have a native macOS build (run those in the Steam app instead). On by
@@ -78,10 +79,16 @@ public final class GameLibraryViewModel {
 
     public func isInstalled(_ info: SteamAppInfo) -> Bool { installedByID[info.appID]?.isFullyInstalled == true }
     public func isDownloading(_ info: SteamAppInfo) -> Bool {
-        downloadingIDs.contains(info.appID) || (installedByID[info.appID].map { !$0.isFullyInstalled } ?? false)
+        downloadingIDs.contains(info.appID) || installedByID[info.appID]?.stateFlags.isDownloading == true
     }
     public func isRunning(_ info: SteamAppInfo) -> Bool { runningPIDs[info.appID] != nil }
     public func isBusy(_ info: SteamAppInfo) -> Bool { busyAppIDs.contains(info.appID) }
+    /// Partially downloaded but not actively running (e.g. interrupted by a closed app or lost network).
+    /// SteamCMD's app_update resumes from here — surfaced as a "Resume" action.
+    public func isPaused(_ info: SteamAppInfo) -> Bool {
+        guard let app = installedByID[info.appID] else { return false }
+        return !app.isFullyInstalled && !isDownloading(info)
+    }
 
     /// `0...1` download progress for a game being fetched, else nil.
     public func downloadProgress(_ info: SteamAppInfo) -> Double? { installedByID[info.appID]?.downloadProgress }
@@ -112,6 +119,13 @@ public final class GameLibraryViewModel {
     private func refreshInstalled() async {
         let found = (try? await discovery.discoverGames(steamRoot: paths.gameLibraryDir)) ?? []
         installedByID = Dictionary(found.map { ($0.appID, $0) }, uniquingKeysWith: { first, _ in first })
+        // Re-attach to a download already in progress — e.g. a SteamCMD orphaned when the app was closed
+        // mid-download keeps running and updating its appmanifest; pick its progress back up.
+        var reattached = false
+        for app in found where app.stateFlags.isDownloading && !downloadingIDs.contains(app.appID) {
+            downloadingIDs.insert(app.appID); reattached = true
+        }
+        if reattached { startDownloadMonitor() }
     }
 
     // MARK: - Catalog
@@ -177,13 +191,26 @@ public final class GameLibraryViewModel {
         guard let username, !busyAppIDs.contains(info.appID), !downloadingIDs.contains(info.appID) else { return }
         busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
         do {
-            _ = try await steamCMD.download(appID: info.appID, username: username,
-                                            logURL: paths.log(forAppID: info.appID))
+            // app_update resumes from any kept partial — this same call is "Download" and "Resume".
+            let pid = try await steamCMD.download(appID: info.appID, username: username,
+                                                  logURL: paths.log(forAppID: info.appID))
+            downloadPIDs[info.appID] = pid
             downloadingIDs.insert(info.appID)   // the status bar tracks progress + speed from here
             startDownloadMonitor()
         } catch {
             statusMessage = "\(info.name): \((error as NSError).localizedDescription)"
         }
+    }
+
+    /// Cancel a download and discard the partial files.
+    public func cancel(_ info: SteamAppInfo) async {
+        steamCMD.cancelDownload(appID: info.appID, pid: downloadPIDs[info.appID])
+        downloadingIDs.remove(info.appID)
+        downloadSpeeds[info.appID] = nil
+        lastBytes[info.appID] = nil
+        downloadPIDs[info.appID] = nil
+        await refreshInstalled()
+        statusMessage = "Cancelled \(info.name)."
     }
 
     private func startDownloadMonitor() {
