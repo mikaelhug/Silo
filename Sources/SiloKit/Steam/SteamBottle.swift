@@ -66,6 +66,26 @@ public struct SteamBottle: Sendable {
         guard result.succeeded else { throw BottleError.steamInstallFailed(result.exitCode) }
     }
 
+    // MARK: - steamwebhelper wrapper
+
+    /// Replace the bottle's `steamwebhelper.exe` with Silo's wrapper so the CEF UI paints (`--single-process`
+    /// — no steam.exe flag injects it). Idempotent and safe to call before every launch: Steam updates can
+    /// restore the stock binary, in which case the current real one is re-preserved as `…_orig.exe`. No-op
+    /// if the wine runtime doesn't ship the wrapper (older build) or Steam isn't installed yet.
+    public func installWebHelperWrapper(wine: URL) throws {
+        let wrapper = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe")
+        let helper = paths.steamBottleWebHelper
+        guard fileManager.fileExists(atPath: wrapper.path),
+              fileManager.fileExists(atPath: helper.path) else { return }
+        if fileManager.contentsEqual(atPath: helper.path, andPath: wrapper.path) { return }   // already wrapped
+        // `helper` is the real webhelper (fresh install or a Steam update): preserve it, then drop the wrapper.
+        let real = helper.deletingLastPathComponent().appendingPathComponent("steamwebhelper_orig.exe")
+        if fileManager.fileExists(atPath: real.path) { try fileManager.removeItem(at: real) }
+        try fileManager.moveItem(at: helper, to: real)
+        try fileManager.copyItem(at: wrapper, to: helper)
+    }
+
     // MARK: - Launch
 
     /// Steam flags aimed at getting `steamwebhelper`'s Chromium UI to paint under Wine (without them it's

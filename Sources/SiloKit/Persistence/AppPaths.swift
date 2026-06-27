@@ -36,6 +36,11 @@ public struct AppPaths: Sendable, Hashable {
     /// `steam.exe` inside the bottle.
     public var steamBottleExe: URL { steamBottleClientDir.appendingPathComponent("steam.exe") }
 
+    /// Steam's CEF helper inside the bottle (the process whose black window we wrap to fix).
+    public var steamBottleWebHelper: URL {
+        steamBottleClientDir.appendingPathComponent("bin/cef/cef.win64/steamwebhelper.exe")
+    }
+
     /// The bottle's Steam log.
     public var steamBottleLog: URL { logsDir.appendingPathComponent("steam-bottle.log") }
 
