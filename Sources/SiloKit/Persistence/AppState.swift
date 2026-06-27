@@ -23,4 +23,9 @@ public struct AppState: Codable, Sendable, Hashable {
             games.append(config)
         }
     }
+
+    /// Drop a game's config (e.g. on uninstall, so a reinstall starts from fresh defaults).
+    public mutating func removeGame(appID: Int) {
+        games.removeAll { $0.appID == appID }
+    }
 }

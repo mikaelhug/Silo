@@ -203,6 +203,35 @@ struct GameLibraryViewModelTests {
         #expect(!FileManager.default.fileExists(atPath: paths.prefix(forAppID: 220).path))   // prefix nuked too
     }
 
+    @Test("uninstall clears the game's saved settings so a reinstall starts fresh")
+    func uninstallClearsConfig() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        let store = ConfigStore(paths: paths)
+        var cfg = GameConfig(appID: 220); cfg.backend = .crossover; cfg.customArgs = ["-foo"]
+        try await store.saveGame(cfg)
+        try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "SizeOnDisk" "12000000" }"#, appID: 220)
+        await vm.load()
+
+        await vm.uninstall(SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"]))
+        let reloaded = await store.load().config(for: 220)
+        #expect(reloaded.backend == .gptk)        // back to the default backend
+        #expect(reloaded.customArgs.isEmpty)      // saved launch options gone
+    }
+
+    @Test("addManualGame adds an off-catalog game to the library and installs it")
+    func addManualGame() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, _) = make(tmp)
+        vm.setAccount(username: "alice")
+        await vm.addManualGame(appID: 99999, name: "My Game")
+
+        let info = SteamAppInfo(appID: 99999, name: "My Game", oslist: ["windows"])
+        #expect(vm.owned.contains { $0.appID == 99999 })   // now in the displayed library
+        #expect(vm.isDownloading(info))                    // and a download was kicked off
+        #expect(fake.invocations.contains { $0.detached && $0.arguments.contains("99999") })
+    }
+
     @Test("play is a no-op without a configured Wine backend")
     func playNeedsWine() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

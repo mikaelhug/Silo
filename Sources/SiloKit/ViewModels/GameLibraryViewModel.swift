@@ -186,6 +186,26 @@ public final class GameLibraryViewModel {
         startRefresh(username: username)
     }
 
+    /// Add a game that isn't in the Steam-owned enumeration by its App ID, then install it. The entry is
+    /// persisted in the library cache so it survives refreshes/relaunch; after install, the user points
+    /// Silo at the right `.exe` in the game's Settings. Requires being signed in (SteamCMD downloads it).
+    public func addManualGame(appID: Int, name: String) async {
+        guard appID > 0 else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let info = SteamAppInfo(appID: appID, name: trimmed.isEmpty ? "App \(appID)" : trimmed,
+                                oslist: ["windows"], type: "game")
+        if !owned.contains(where: { $0.appID == appID }) {
+            owned.append(info)
+            owned.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+        if loadState == .empty { loadState = .loaded }
+        // Persist into the cached catalog (union with what's there) so the manual entry isn't lost.
+        var catalog = (await cache.load())?.games ?? []
+        if let i = catalog.firstIndex(where: { $0.appID == appID }) { catalog[i] = info } else { catalog.append(info) }
+        await cache.save(username: username ?? "", games: catalog, at: Date())
+        await download(info)
+    }
+
     private func startRefresh(username: String) {
         guard refreshTask == nil else { return }
         isRefreshing = true
@@ -263,7 +283,9 @@ public final class GameLibraryViewModel {
 
     private func applyProgress(appID id: Int, _ snapshot: (progress: SteamCMD.Progress?, finished: Bool)) {
         guard downloadingIDs.contains(id) else { return }   // a late write after we already finished
-        if snapshot.finished { endDownload(id, installed: true); Task { await refreshInstalled() }; return }
+        // Completion goes through the same manifest-authoritative path as a process exit (refresh →
+        // check fully-installed → finish), so the install state flips immediately and correctly.
+        if snapshot.finished { Task { await downloadDidExit(appID: id) }; return }
         guard let p = snapshot.progress else { return }
         if downloadProgressByID[id] != p.fraction { downloadProgressByID[id] = p.fraction }
         let now = Date()
@@ -370,8 +392,9 @@ public final class GameLibraryViewModel {
         await orchestrator.runWineTool("winecfg", appID: info.appID, backend: backend)
     }
 
-    /// Fully remove an installed game: delete both its downloaded files (the bucket) **and** its isolated
-    /// wine prefix, reclaiming all of its disk. No-op while the game is running or downloading.
+    /// Fully remove an installed game: delete its downloaded files (the bucket), its isolated wine prefix,
+    /// **and** its saved per-game settings — so a later reinstall starts from fresh defaults. No-op while
+    /// the game is running or downloading.
     public func uninstall(_ info: SteamAppInfo) async {
         guard !isRunning(info), !isDownloading(info), !busyAppIDs.contains(info.appID) else { return }
         busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
@@ -381,6 +404,7 @@ public final class GameLibraryViewModel {
             try? FileManager.default.removeItem(at: bucket)
             try? FileManager.default.removeItem(at: prefix)
         }.value
+        _ = try? await configStore.removeGame(appID: info.appID)   // reinstall gets fresh settings
         await refreshInstalled()
         setStatus("Uninstalled \(info.name).")
     }
