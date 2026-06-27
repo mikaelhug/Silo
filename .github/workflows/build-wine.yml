@@ -90,12 +90,12 @@ jobs:
           # Single wow64 tree (32+64-bit PE) — adjust flags per CrossOver version as CI reveals.
           # ccache (PATH-shimmed above) caches object files across runs to speed repeat builds.
           #
-          # CFLAGS="-fvisibility=default": build Wine's UNIX side with all symbols visible so winemac.drv
-          # ('macdrv') exposes its Metal/window-surface helpers via dlsym. Without this the macOS surface
-          # presentation path is broken for layered windows, and Steam's CEF UI (and D3D→Metal games)
-          # paint to a BLACK/transparent window even with software compositing. This is the verified fix
-          # for running the Windows Steam client on Apple-Silicon macOS (per notpop/steam-on-m1-wine).
-          # -O2 restores the optimization that an explicit CFLAGS would otherwise drop.
+          # -fvisibility=default: build Wine with all symbols visible so winemac.drv ('macdrv') exposes its
+          # Metal/window-surface helpers via dlsym — this is what lets GPTK/D3DMetal GAMES present (without
+          # it D3D→Metal output is black for layered windows). It is NOT what fixes the Steam *client* CEF
+          # UI: that black window is fixed at RUNTIME by forcing CEF onto its SwiftShader software-GL
+          # renderer (STEAM_CEF_COMMAND_LINE + the --in-process-gpu wrapper, see SteamBottle). Set on BOTH
+          # CFLAGS and CROSSCFLAGS. -O2 restores the optimization an explicit CFLAGS would otherwise drop.
           $ARCH_PREFIX env CFLAGS="-fvisibility=default -O2" CROSSCFLAGS="-fvisibility=default -O2" \
             "$GITHUB_WORKSPACE/$WINE_SRC/configure" \
             --prefix="$GITHUB_WORKSPACE/wine-install" \
@@ -107,9 +107,20 @@ jobs:
           test -x "$GITHUB_WORKSPACE/wine-install/bin/wine64" || test -x "$GITHUB_WORKSPACE/wine-install/bin/wine"
           # steamwebhelper wrapper (forces CEF --in-process-gpu + software GL so Steam's UI paints) — shipped in the runtime.
           mkdir -p "$GITHUB_WORKSPACE/wine-install/share/silo"
+          WRAPPER="$GITHUB_WORKSPACE/wine-install/share/silo/steamwebhelper-wrapper.exe"
           "$($ARCH_PREFIX $BREW --prefix mingw-w64)/bin/x86_64-w64-mingw32-gcc" -O2 -municode -mwindows \
-            -o "$GITHUB_WORKSPACE/wine-install/share/silo/steamwebhelper-wrapper.exe" \
-            "$GITHUB_WORKSPACE/Scripts/steamwebhelper-wrapper.c"
+            -o "$WRAPPER" "$GITHUB_WORKSPACE/Scripts/steamwebhelper-wrapper.c"
+          # Fail the build if the compiled wrapper carries the wrong CEF flags (UTF-16LE in the PE): it must
+          # have --in-process-gpu and NOT --single-process (which breaks Chromium's network → login error).
+          python3 - "$WRAPPER" <<'PY'
+          import sys
+          data = open(sys.argv[1], "rb").read()
+          ok  = "--in-process-gpu".encode("utf-16-le") in data
+          bad = "--single-process".encode("utf-16-le") in data
+          if not ok or bad:
+              sys.exit(f"ERROR: wrapper has wrong CEF flags (in-process-gpu={ok}, single-process={bad})")
+          print("wrapper CEF flags OK (--in-process-gpu)")
+          PY
 
       - name: Bundle dependency dylibs (self-contained runtime)
         run: ./Scripts/bundle-wine-dylibs.sh "$GITHUB_WORKSPACE/wine-install"
