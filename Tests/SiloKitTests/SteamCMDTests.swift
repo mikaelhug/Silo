@@ -35,4 +35,40 @@ struct SteamCMDTests {
     func licenses() {
         #expect(SteamCMD.licensesArguments(username: "bob") == ["+login", "bob", "+licenses_print", "+quit"])
     }
+
+    @Test("Parses package IDs from licenses_print output")
+    func parseLicenses() {
+        let out = """
+        Licenses:
+        License packageID 0 :
+        	State : Active
+        License packageID 54321 :
+        	State : Active
+        """
+        #expect(SteamCMD.parseLicensePackageIDs(out) == [0, 54321])
+    }
+
+    @Test("Parses owned app IDs from a package_info_print block")
+    func parsePackage() {
+        let out = """
+        "54321"
+        {
+        	"packageid"	"54321"
+        	"appids"
+        	{
+        		"0"	"220"
+        		"1"	"320"
+        	}
+        }
+        """
+        #expect(SteamCMD.parsePackageAppIDs(out, packageID: 54321) == [220, 320])
+    }
+
+    @Test("Batch app-info builder forces Windows + updates + prints each app")
+    func batchAppInfo() {
+        let args = SteamCMD.appInfoArguments(appIDs: [220, 320])
+        #expect(args.contains("windows"))
+        #expect(args.contains("+app_info_update"))
+        #expect(args.filter { $0 == "+app_info_print" }.count == 2)
+    }
 }

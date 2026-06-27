@@ -59,6 +59,27 @@ struct SteamCMDClientTests {
         #expect(FileManager.default.fileExists(atPath: paths.gameInstallDir(forAppID: 220).path))
     }
 
+    @Test("ownedWindowsGames orchestrates licenses → packages → app-info, keeping Windows-only games")
+    func ownedWindowsGames() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = makePaths(tmp)
+        try FileManager.default.createDirectory(at: paths.steamCMDDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamCMDScript.path, contents: Data())
+        let fake = FakeProcessRunner()
+        // Three captures in order: licenses_print, package_info_print, app_info_print.
+        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data("License packageID 54321 :\n".utf8)))
+        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data(#""54321" { "appids" { "0" "220" "1" "70" } }"#.utf8)))
+        fake.queueResult(ProcessResult(exitCode: 0, standardOutput: Data("""
+        "70"  { "common" { "name" "Half-Life" "type" "Game" "oslist" "windows,macos" } }
+        "220" { "common" { "name" "Half-Life 2" "type" "Game" "oslist" "windows" } }
+        """.utf8)))
+        let client = SteamCMDClient(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+
+        let games = try await client.ownedWindowsGames(username: "alice")
+        #expect(games.map(\.appID) == [220])          // 70 has a mac build → excluded; only HL2 kept
+        #expect(games.first?.name == "Half-Life 2")
+    }
+
     @Test("capture returns SteamCMD stdout for metadata parsing")
     func capture() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
