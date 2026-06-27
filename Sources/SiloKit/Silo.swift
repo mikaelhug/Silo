@@ -27,9 +27,12 @@ public enum Silo {
     public static let steamInstallerURL =
         URL(string: "https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe")!
 
-    /// Launch flags that keep the Steam client's CEF web helper from black-screening/crashing under
-    /// Wine (a well-known GPTK issue). Applied when opening Steam in the Master bottle.
-    public static let steamLaunchArgs = ["-allosarches", "-cef-force-32bit", "-cef-disable-gpu"]
+    /// Launch flags that keep the Steam client's CEF web helper from hanging/black-screening under
+    /// Wine. `-no-cef-sandbox` is the key one: without it the CEF renderer goes "unresponsive" and
+    /// Steam kills+relaunches it every ~90s forever, so the UI window never paints (verified). GPU is
+    /// disabled (no accel under wine). `-cef-force-32bit` was dropped — Steam is 64-bit-CEF-only now
+    /// and silently ignored it. Applied when opening Steam in the Master bottle.
+    public static let steamLaunchArgs = ["-no-cef-sandbox", "-cef-disable-gpu", "-allosarches"]
 
     /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
