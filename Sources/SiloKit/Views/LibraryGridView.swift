@@ -43,26 +43,32 @@ struct LibraryGridView: View {
         }
         .navigationSubtitle(env.setupComplete ? "\(lib.filtered.count) games" : "")
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
-        .safeAreaInset(edge: .bottom) { DownloadStatusBar() }
     }
 
     @ViewBuilder
     private func grid(_ lib: GameLibraryViewModel) -> some View {
-        ScrollView {
-            if lib.loadState == .loading {
+        VStack(spacing: 0) {
+            if lib.owned.isEmpty && lib.loadState == .loading {
+                // The loading SPINNER must live OUTSIDE the ScrollView: an indeterminate ProgressView
+                // inside the scrollable grid drives a CADisplayLink that re-lays out the whole grid every
+                // frame → 100% CPU. (The toolbar already shows the background-refresh spinner.)
                 VStack(spacing: 6) {
                     ProgressView()
                     Text("Setting up your library…").font(.headline)
-                    Text("Fetching your games from Steam — this is cached, so the next launch is instant.")
+                    Text("Fetching your games from Steam — cached after, so the next launch is instant.")
                         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                }.padding(40)
-            } else if lib.isRefreshing && !lib.owned.isEmpty {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Updating library…").font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity).padding(.top, 10)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                scrollContent(lib)
             }
+            DownloadStatusBar()   // a sibling, NOT a safeAreaInset — its updates can't re-layout the grid
+        }
+    }
 
+    @ViewBuilder
+    private func scrollContent(_ lib: GameLibraryViewModel) -> some View {
+        ScrollView {
             ForEach(sections(lib), id: \.title) { sec in
                 if !sec.games.isEmpty { section(sec.title, sec.games) }
             }
