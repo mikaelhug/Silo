@@ -14,7 +14,6 @@ public final class AppEnvironment {
     let discovery: DiscoveryEngine
     let runtimeManager: RuntimeManager
 
-    public let library: LibraryViewModel
     public let gameLibrary: GameLibraryViewModel
     public let steamLogin: SteamLoginViewModel
     public let backendSettings: BackendSettingsViewModel
@@ -52,14 +51,8 @@ public final class AppEnvironment {
         self.runtimeManager = runtimeManager
 
         let initialBackend = BackendConfig()
-        let library = LibraryViewModel(
-            discovery: discovery, orchestrator: orchestrator,
-            configStore: configStore, provisioner: provisioner,
-            libraryInstaller: SteamLibraryInstaller(runner: runner), backend: initialBackend)
-        self.library = library
         self.backendSettings = BackendSettingsViewModel(
-            config: initialBackend, resolver: BackendResolver(), configStore: configStore,
-            steamInstaller: SteamBottleInstaller(runner: runner), paths: paths)
+            config: initialBackend, resolver: BackendResolver(), configStore: configStore, paths: paths)
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
@@ -71,8 +64,7 @@ public final class AppEnvironment {
         self.gameLibrary = gameLibrary
         self.steamLogin = SteamLoginViewModel(steamCMD: steamCMD)
 
-        backendSettings.onChange = { [weak library, weak gameLibrary] config in
-            library?.updateBackend(config)
+        backendSettings.onChange = { [weak gameLibrary] config in
             gameLibrary?.updateBackend(config)
         }
         steamLogin.onLoggedIn = { [weak self] username in
@@ -101,7 +93,7 @@ public final class AppEnvironment {
         didBootstrap = true
         let state = await configStore.load()
         backendSettings.config = state.backend
-        library.updateBackend(state.backend)
+        gameLibrary.updateBackend(state.backend)
         gptkManager.defaultName = state.backend.gptkRuntimeName
         gptkManager.refresh()
         runtime.defaultName = state.backend.wineRuntimeName
@@ -112,63 +104,32 @@ public final class AppEnvironment {
         updateCheck = try? await updater.checkForUpdate()   // best-effort; nil on failure/offline
     }
 
-    /// Re-scan the library (e.g. after returning from Steam). Quiet no-op if not set up.
+    /// Reload the owned catalog (e.g. on app re-activation). Quiet no-op until signed in.
     public func refreshLibraryIfReady() async {
-        guard didBootstrap, setupComplete else { return }
-        await library.refresh()
+        guard didBootstrap, gameLibrary.isLoggedIn else { return }
+        await gameLibrary.load()
     }
 
     // MARK: - Setup readiness (drives the Library onboarding)
 
     public var wineReady: Bool { backendSettings.config.wineBinaryPath != nil }
     public var gptkReady: Bool { backendSettings.config.gptkLibDirPath != nil }
-    public var steamReady: Bool { backendSettings.config.masterBottlePath != nil }
-    public var setupComplete: Bool { wineReady && gptkReady && steamReady }
-
-    /// The Master Steam client log (written by `openSteam`).
-    public nonisolated var steamLogURL: URL { paths.logsDir.appendingPathComponent("steam.log") }
-
-    /// Launch the Steam client in the Master bottle (detached) so the user can browse/download games.
-    public func openSteam() async {
-        guard let bottle = backendSettings.config.masterBottlePath else { return }
-        let steamExe = DiscoveryEngine.steamRoot(inBottle: bottle).appendingPathComponent("steam.exe")
-        guard let wine = await spawnInMasterBottle([steamExe.path] + Silo.steamLaunchArgs, logName: "steam.log")
-        else { return }
-        // Safety net: if Steam's CEF ever crash-loops again, kill the bottle before it floods the Mac.
-        Task.detached { [runner] in
-            await CrashLoopGuard(runner: runner).monitor(wine: wine, bottle: bottle)
-        }
-    }
-
-    /// Open winecfg against the Master Steam bottle (detached).
-    public func openMasterWinecfg() async {
-        await spawnInMasterBottle(["winecfg"], logName: "winecfg.log")
-    }
-
-    /// Spawn a command detached in the Master Steam bottle. Returns the wine binary used (for follow-up
-    /// like the crash-loop guard), or nil if the bottle/wine isn't configured.
-    @discardableResult
-    private func spawnInMasterBottle(_ arguments: [String], logName: String) async -> URL? {
-        let config = backendSettings.config
-        guard let bottle = config.masterBottlePath, let wine = config.steamWine else { return nil }
-        _ = try? await runner.spawnDetached(
-            executable: wine, arguments: arguments,
-            environment: Silo.wineEnvironment(prefix: bottle, wine: wine),
-            currentDirectory: nil, logURL: paths.logsDir.appendingPathComponent(logName))
-        return wine
-    }
+    public var steamLoggedIn: Bool { (backendSettings.config.steamUsername ?? "").isEmpty == false }
+    public var setupComplete: Bool { wineReady && gptkReady && steamLoggedIn }
 
     /// Build a per-game settings view model with the game's persisted config.
-    public func makeGameSettings(for app: SteamApp) async -> GameSettingsViewModel {
+    public func makeGameSettings(appID: Int, name: String) async -> GameSettingsViewModel {
         let state = await configStore.load()
-        return GameSettingsViewModel(config: state.config(for: app.appID), appName: app.name, configStore: configStore)
+        return GameSettingsViewModel(config: state.config(for: appID), appName: name, configStore: configStore)
     }
 
-    public func readLog(for app: SteamApp) async -> String {
-        await logStore.read(appID: app.appID)
+    /// A game's launch/download log (per appID).
+    public nonisolated func logURL(forAppID appID: Int) -> URL {
+        logStore.logURL(forAppID: appID)
     }
 
-    public nonisolated func logURL(for app: SteamApp) -> URL {
-        logStore.logURL(forAppID: app.appID)
+    /// Install dir for an owned game's bucket (for "Reveal in Finder").
+    public nonisolated func gameInstallDir(forAppID appID: Int) -> URL {
+        paths.gameInstallDir(forAppID: appID)
     }
 }

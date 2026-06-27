@@ -79,4 +79,27 @@ struct GameLibraryViewModelTests {
         #expect(!vm.isRunning(SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])))
         #expect(!fake.invocations.contains { $0.detached })   // never launched
     }
+
+    @Test("play launches an installed game in its bucket; stop clears it")
+    func playStop() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        let bucket = paths.gameInstallDir(forAppID: 220)
+        try FileManager.default.createDirectory(at: bucket, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: bucket.appendingPathComponent("game.exe").path, contents: Data("MZ".utf8))
+        let prefix = paths.prefix(forAppID: 220)
+        fake.onRun = { _ in   // simulate wineboot creating the prefix so provisioning succeeds
+            let layout = PrefixLayout(prefix: prefix)
+            try? FileManager.default.createDirectory(at: layout.driveC, withIntermediateDirectories: true)
+            try? "reg".write(to: layout.systemReg, atomically: true, encoding: .utf8)
+        }
+        let info = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])
+
+        await vm.play(info)
+        #expect(vm.isRunning(info))
+        #expect(vm.runningPIDs[220] == 4242)
+
+        await vm.stop(info)
+        #expect(!vm.isRunning(info))
+    }
 }

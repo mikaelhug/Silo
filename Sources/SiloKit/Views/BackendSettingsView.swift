@@ -17,20 +17,12 @@ struct BackendSettingsView: View {
             }
 
             Section {
-                PathPickerRow(title: "Master Steam bottle folder",
-                              url: $vm.config.masterBottlePath, chooseDirectories: true)
-                Button {
-                    Task { await vm.installSteamBottle() }
-                } label: {
-                    Label("Create Master Steam Bottle (1-click)", systemImage: "shippingbox")
-                }
-                .disabled(vm.isInstallingBottle)
-                if vm.isInstallingBottle { ProgressView().controlSize(.small) }
+                LabeledContent("Steam account", value: vm.config.steamUsername ?? "not signed in")
             } header: {
                 Text("Steam")
             } footer: {
-                Text("Boots a simple Wine bottle and installs the Steam client. Then open Steam, log in, "
-                     + "and download games (or use “Install entire library” in Library).")
+                Text("Games are downloaded headlessly via SteamCMD (native, no Wine). Sign in from the "
+                     + "Library toolbar. Only your Windows-only games are listed.")
                     .font(.caption)
             }
 
