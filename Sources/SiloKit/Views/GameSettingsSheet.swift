@@ -101,7 +101,7 @@ struct GameSettingsSheet: View {
 
             Section("Steam presence") {
                 Picker("Strategy", selection: $vm.config.presence) {
-                    ForEach(SteamPresenceStrategy.allCases) { Text($0.displayName).tag($0) }
+                    ForEach(SteamPresenceStrategy.userSelectable) { Text($0.displayName).tag($0) }
                 }
                 if vm.config.presence == .emulatorStub {
                     PathPickerRow(title: "Emulator stub (e.g. steam_api64.dll)",

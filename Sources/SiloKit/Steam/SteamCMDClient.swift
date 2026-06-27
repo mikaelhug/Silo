@@ -4,7 +4,7 @@ import Foundation
 /// (app_info / licenses) run to completion and return captured output; a game download is spawned
 /// detached and its progress tailed from the log, like a game launch.
 ///
-/// `struct` + injected deps (matches `SteamBottleInstaller`/`Updater`): all I/O goes through the
+/// `struct` + injected deps (like `Updater`): all I/O goes through the
 /// `ProcessRunning` seam and `URLSession`, so it tests with no SteamCMD present.
 public struct SteamCMDClient: Sendable {
     private let runner: ProcessRunning

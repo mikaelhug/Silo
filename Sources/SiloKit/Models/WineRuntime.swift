@@ -21,5 +21,4 @@ public struct WineRuntime: Codable, Sendable, Hashable, Identifiable {
     }
 
     public var wineBinary: URL { installPath.appendingPathComponent("bin/wine64") }
-    public var wineserverBinary: URL { installPath.appendingPathComponent("bin/wineserver") }
 }

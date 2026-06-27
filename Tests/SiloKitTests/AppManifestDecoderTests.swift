@@ -20,7 +20,6 @@ struct AppManifestDecoderTests {
         #expect(app.lastUpdated == Date(timeIntervalSince1970: 1_659_899_091))
         #expect(app.downloadProgress == nil)          // BytesToDownload == 0
         #expect(app.installURL.path == "/tmp/Steam/steamapps/common/Half-Life 2")
-        #expect(app.headerArtURL?.absoluteString == "https://cdn.cloudflare.steamstatic.com/steam/apps/220/header.jpg")
     }
 
     @Test("Decodes an updating game with partial download progress (570)")

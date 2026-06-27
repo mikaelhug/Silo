@@ -34,11 +34,6 @@ public protocol ProcessRunning: Sendable {
     /// Whether a process with this PID is currently alive (for tracking a launched game).
     func isRunning(pid: Int32) -> Bool
 
-    /// Best-effort count of running processes whose full command line contains `pattern`.
-    /// Used by `CrashLoopGuard` to detect a `winedbg` storm. Defaults to 0 for conformers that don't
-    /// implement it.
-    func processCount(matching pattern: String) async -> Int
-
     /// First PID whose full command line contains `pattern` (e.g. re-attaching to an orphaned download).
     func firstPID(matching pattern: String) async -> Int32?
 
@@ -61,7 +56,6 @@ public final class NoopObservation: ProcessObservation {
 }
 
 extension ProcessRunning {
-    public func processCount(matching pattern: String) async -> Int { 0 }
     public func firstPID(matching pattern: String) async -> Int32? { nil }
     public func terminate(pid: Int32) {}
     public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {

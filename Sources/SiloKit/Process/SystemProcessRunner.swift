@@ -66,15 +66,6 @@ public struct SystemProcessRunner: ProcessRunning {
         kill(pid, SIGTERM)
     }
 
-    public func processCount(matching pattern: String) async -> Int {
-        // `pgrep -fc <pattern>`: -f matches the full command line, -c prints the count.
-        let result = try? await run(
-            executable: URL(fileURLWithPath: "/usr/bin/pgrep"),
-            arguments: ["-fc", pattern], environment: [:], currentDirectory: nil)
-        let text = result?.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) ?? "0"
-        return Int(text) ?? 0
-    }
-
     public func firstPID(matching pattern: String) async -> Int32? {
         let result = try? await run(
             executable: URL(fileURLWithPath: "/usr/bin/pgrep"),

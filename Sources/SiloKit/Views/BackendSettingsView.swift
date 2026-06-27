@@ -34,8 +34,6 @@ struct BackendSettingsView: View {
                                   url: $vm.config.wineBinaryPath, chooseDirectories: false)
                     PathPickerRow(title: "CrossOver wine (fallback)",
                                   url: $vm.config.crossoverWinePath, chooseDirectories: false)
-                    PathPickerRow(title: "Steam-bottle wine (vanilla; optional)",
-                                  url: $vm.config.steamWineBinaryPath, chooseDirectories: false)
                     PathPickerRow(title: "GPTK / D3DMetal lib dir (overrides Wine Manager default)",
                                   url: $vm.config.gptkLibDirPath, chooseDirectories: true)
                     PathPickerRow(title: "DXVK DLL dir",

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Scans a Master Steam bottle for downloaded games.
+/// Parses a Steam library root (post-pivot: a SteamCMD game "bucket") for installed games.
 ///
 /// Reads the primary `steamapps` directory plus any additional libraries listed in
 /// `libraryfolders.vdf`, parses every `appmanifest_*.acf`, and returns the games sorted by name.
@@ -16,14 +16,6 @@ public actor DiscoveryEngine {
 
     public enum DiscoveryError: Error, Sendable, Equatable {
         case steamDirNotFound(URL)
-    }
-
-    /// The Steam install directory inside a Wine bottle (the dir containing `steamapps/`).
-    public nonisolated static func steamRoot(inBottle bottle: URL) -> URL {
-        bottle
-            .appendingPathComponent("drive_c", isDirectory: true)
-            .appendingPathComponent("Program Files (x86)", isDirectory: true)
-            .appendingPathComponent("Steam", isDirectory: true)
     }
 
     /// Discover all games reachable from `steamRoot` (the primary Steam install directory).
