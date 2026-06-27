@@ -47,6 +47,26 @@ struct SteamPresenceInstallerTests {
         #expect(!FileManager.default.fileExists(atPath: appid.path))             // created file removed
     }
 
+    @Test(".emulatorStub replaces the game's Steam DLL wherever it ships (e.g. an Electron subdir)")
+    func emulatorStubNestedDLL() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let exe = try makeGame(tmp)   // install/game.exe — the real DLL is NOT next to it
+        let nestedRel = "install/resources/app.asar.unpacked/redistributable_bin/win64/steam_api64.dll"
+        try tmp.write(nestedRel, "ORIGINAL")
+        let stub = try tmp.write("stub/steam_api64.dll", "GOLDBERG")
+
+        let receipt = try installer.apply(strategy: .emulatorStub, appID: 220, gameExe: exe, stubSource: stub)
+        let nested = exe.deletingLastPathComponent()
+            .appendingPathComponent("resources/app.asar.unpacked/redistributable_bin/win64/steam_api64.dll")
+        #expect(try String(contentsOf: nested, encoding: .utf8) == "GOLDBERG")   // replaced in place
+        #expect(receipt.backups.count == 1)
+        // No stray copy next to the exe (the game ships its own; we only replace that).
+        #expect(!FileManager.default.fileExists(atPath: exe.deletingLastPathComponent().appendingPathComponent("steam_api64.dll").path))
+
+        try installer.revert(receipt)
+        #expect(try String(contentsOf: nested, encoding: .utf8) == "ORIGINAL")   // restored
+    }
+
     @Test(".emulatorStub re-apply preserves the real original DLL backup (no data loss)")
     func emulatorStubReapply() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
