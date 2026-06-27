@@ -92,8 +92,7 @@ public struct LaunchOrchestrator: Sendable {
         guard backend.wineBinary(for: config.backend) != nil else { throw LaunchError.wineNotConfigured }
         let gameExe = try resolveExecutable(app: app, config: config)
         try linkGraphics(backend: config.backend, prefix: prefix, backendConfig: backend)
-        try presenceInstaller.apply(
-            strategy: config.presence, appID: app.appID, gameExe: gameExe, prefix: prefix)
+        try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)
         let plan = try Self.makePlan(
             app: app, config: config, backend: backend, gameExe: gameExe, prefix: prefix, logURL: logURL
         )

@@ -7,7 +7,7 @@ import Foundation
 @MainActor
 @Observable
 public final class GameLibraryViewModel {
-    public enum LoadState: Equatable { case idle, notReady, loading, loaded, empty, error(String) }
+    public enum LoadState: Equatable { case idle, notReady, loaded, empty, error(String) }
 
     /// Games installed in the Steam bottle (parsed from its `appmanifest_*.acf`).
     public private(set) var games: [SteamApp] = []
@@ -83,9 +83,15 @@ public final class GameLibraryViewModel {
     /// Re-scan the bottle's Steam library for installed games.
     public func load() async {
         guard bottle.isSteamInstalled else { loadState = .notReady; return }
-        let found = (try? await discovery.discoverGames(steamRoot: paths.steamBottleClientDir)) ?? []
-        games = found
-        loadState = found.isEmpty ? .empty : .loaded
+        do {
+            let found = try await discovery.discoverGames(steamRoot: paths.steamBottleClientDir)
+            games = found
+            loadState = found.isEmpty ? .empty : .loaded
+        } catch DiscoveryEngine.DiscoveryError.steamDirNotFound {
+            games = []; loadState = .empty   // Steam installed but its library dir doesn't exist yet
+        } catch {
+            games = []; loadState = .error((error as NSError).localizedDescription)
+        }
     }
 
     public func refresh() async { await load() }
