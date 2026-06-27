@@ -37,13 +37,9 @@ struct LibraryGridView: View {
         .sheet(isPresented: $showAdvanced) { AdvancedSettingsSheet() }
         .sheet(isPresented: $showLogin) { SteamLoginView() }
         .sheet(item: $settingsTarget) { GameSettingsSheet(appID: $0.appID, name: $0.name) }
+        .navigationSubtitle(env.setupComplete ? "\(lib.filtered.count) games" : "")
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
-        .safeAreaInset(edge: .bottom) {
-            if let message = lib.statusMessage {
-                Text(message).font(.callout).foregroundStyle(.secondary)
-                    .padding(8).frame(maxWidth: .infinity).background(.bar)
-            }
-        }
+        .safeAreaInset(edge: .bottom) { DownloadStatusBar() }
     }
 
     @ViewBuilder
@@ -71,6 +67,41 @@ struct LibraryGridView: View {
             default:
                 EmptyView()
             }
+        }
+    }
+}
+
+/// Bottom status bar listing **every** active download (not just the latest) with progress + speed,
+/// plus any transient status message.
+struct DownloadStatusBar: View {
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        let lib = env.gameLibrary
+        let active = lib.activeDownloads
+        if !active.isEmpty || lib.statusMessage != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(active.prefix(4)) { game in
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.down.circle").foregroundStyle(.blue).font(.caption)
+                        Text(game.name).font(.caption).lineLimit(1)
+                            .frame(width: 170, alignment: .leading)
+                        ProgressView(value: lib.downloadProgress(game) ?? 0)
+                        Text([lib.downloadProgress(game).map { "\(Int($0 * 100))%" }, lib.speedString(game)]
+                                .compactMap { $0 }.joined(separator: "  ·  "))
+                            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                            .frame(width: 150, alignment: .trailing)
+                    }
+                }
+                if active.count > 4 {
+                    Text("…and \(active.count - 4) more downloading")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if let message = lib.statusMessage {
+                    Text(message).font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(.bar)
         }
     }
 }
