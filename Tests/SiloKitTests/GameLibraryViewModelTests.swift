@@ -80,6 +80,11 @@ struct GameLibraryViewModelTests {
 
         await vm.stop(game)
         #expect(!vm.isRunning(game))
+        // Stop also taskkills the game's image (in the bottle's msync wineserver) so a child/relauncher
+        // isn't orphaned — without clobbering the co-resident Steam.
+        #expect(fake.invocations.contains {
+            $0.arguments == ["taskkill", "/F", "/IM", "HL2.exe"] && $0.environment["WINEMSYNC"] == "1"
+        })
     }
 
     @Test("a game exiting on its own clears the running state")

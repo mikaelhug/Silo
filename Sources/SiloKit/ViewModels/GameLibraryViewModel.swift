@@ -170,11 +170,13 @@ public final class GameLibraryViewModel {
         }
     }
 
-    /// Stop a running game. Terminates just the game process (the shared bottle keeps Steam alive — a
-    /// `wineserver -k` would kill the co-resident Steam client too).
+    /// Stop a running game. Terminates just the game (the shared bottle keeps Steam alive — a
+    /// `wineserver -k` would kill the co-resident Steam client too). See `LaunchOrchestrator.stopGame`.
     public func stop(_ game: SteamApp) async {
         guard let pid = runningPIDs[game.appID] else { return }
-        orchestrator.terminate(pid: pid)
+        let config = await configStore.load().config(for: game.appID)
+        let exeName = orchestrator.resolvedExecutableName(app: game, config: config)
+        await orchestrator.stopGame(pid: pid, exeName: exeName, prefix: paths.steamBottle, backend: backend)
         clearRunState(game.appID)
     }
 

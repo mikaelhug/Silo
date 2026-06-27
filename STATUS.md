@@ -3,6 +3,26 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **M68–M72 — REVERT to the Steam-bottle model + a 3-round agentic audit.** 115 tests / 26 suites green;
+  clean build (no warnings). SteamCMD + macOS credential-seeding were removed and the app reverted to a
+  single shared **Steam bottle**: one Wine prefix hosting a logged-in Windows Steam client; games install
+  there and launch **co-resident** under GPTK/D3DMetal so Steamworks/DRM works (IPC is prefix-scoped). Then
+  an agentic audit-fix loop (4 read-only audits → verify → apply → re-audit):
+  - **M68:** the revert itself (bottle foundation, discovery from the bottle's `appmanifest`, launchInBottle).
+  - **M69:** removed the dead isolated-prefix layer (PrefixProvisioner, GameLogStore, SteamBottle.launchGame,
+    AppPaths.prefix/prefixesDir, RuntimeManager.installedRuntimes/availableAssets, SteamApp.downloadProgress/
+    needsUpdate). Bottle now launches Steam in a Wine **virtual desktop** (`explorer /desktop=`) with
+    overlay-disable overrides + msync; `play()` brings Steam up ONCE (tracked PID) with a cold-start grace.
+    Wine build: add `CROSSCFLAGS=-fvisibility=default`; drop `/usr/local/lib` from the DYLD fallback (it
+    leaked Homebrew's duplicate gtk → the "implemented in both" crash seen launching bottle Steam).
+  - **M70:** removed the now-obsolete `.sharedSteamClient` strategy + unused `Receipt`/`revert` (the bottle
+    IS the in-prefix Steam); `load()` surfaces real discovery errors instead of swallowing them.
+  - **M71:** force msync for every bottle game launch (a per-game esync/none would fork a 2nd wineserver and
+    break Steamworks); `steam://` install/uninstall deliver via single-instance forwarding (no 2nd Steam in
+    a duplicate desktop); GraphicsLinker scoped to `d3d*`/`dxgi*` so it can't clobber the shared bottle;
+    removed the orphaned `WineRuntime` type.
+  - **M72:** `stop()` also `wine taskkill /F /IM <game exe>` in the bottle's msync wineserver so a
+    child/relauncher game isn't orphaned (Steam untouched — different image names).
 - **M58–M60 COMPLETE — spring cleaning.** 150 tests / 30 suites green; clean build (no warnings).
   Three parallel audits (dead code / duplication / post-pivot vestigial) → verified findings → acted.
   - **M58:** Uninstall also removes the game's isolated Wine prefix (full reclaim).
@@ -220,19 +240,34 @@
 - `.sharedSteamClient` presence symlinks the master Steam into the prefix but does not yet launch a background `steam.exe` inside the prefix; full live-client wiring is a launch-time follow-up (most DRM cases use `.emulatorStub`).
 
 ## BLOCKED
-- _(none — building continues; the items below are human-input for real E2E, not for the build)_
-- **GPTK E2E activation (M29):** the D3DMetal env wiring is in place + statically verified, but whether
-  CrossOver wine-cx-26.2.0 actually loads GPTK-4.0_beta_1's d3d modules via `WINEDLLPATH` (vs needing an
-  overlay copy into the wine's own `lib/wine`), and whether that GPTK↔CrossOver version pair is ABI-
-  compatible, can ONLY be confirmed by launching a real D3D game and reading its log. If wine ignores
-  WINEDLLPATH for the new PE builtin format, the fallback is to overlay GPTK's `lib/wine/*` into the
-  wine runtime's `lib/wine/*` (Whisky's method) — a small, well-scoped follow-up once a launch log exists.
-- Confirm the exact third-party Wine/GPTK runtime repo/release to pin as default (currently placeholder `Kegworks-App/Kegworks` in `Silo.defaultRuntimeRepo`; overridable in Settings). Non-blocking for build/test.
+- _(none for the build — the items below need a real Wine runtime + on-device launch, not code changes)_
+- **Bottle Steam CEF render (THE gate):** does the Windows Steam client's CEF UI actually paint (not a
+  black window) with the rebuilt wine (`-fvisibility=default` on CFLAGS **and** CROSSCFLAGS) + the
+  `explorer /desktop=` virtual desktop + the steamwebhelper `--single-process` wrapper? This is the
+  prerequisite for the whole bottle model and can only be confirmed by launching it. User is rebuilding
+  wine via `Scripts/build-wine.sh 26.2.0`.
+- **`explorer /desktop=` program-path form:** `launchSteam` passes the macOS **unix** path of `steam.exe`
+  as the program arg to `wine explorer /desktop=Silo,<geom>`. If wine's explorer needs a Windows path
+  (`C:\Program Files (x86)\Steam\steam.exe`) instead, Steam won't launch — verify on-device and switch if so.
+- **stop() under real Wine:** `stop()` SIGTERMs the loader PID **and** `wine taskkill /F /IM <exe>`. Confirm
+  a real game (esp. one with a separate launcher exe) actually exits and isn't orphaned; tune the image
+  name if a game's runtime process differs from the launched exe.
+- **Cold-start grace:** `play()` waits a flat 10s after cold-starting Steam before launching the game. If
+  Steam's first boot (self-update + login) is slower, the game can start before Steamworks is ready — may
+  need a readiness probe (Steam pipe/registry) instead of a fixed sleep.
+- **GPTK E2E activation:** whether CrossOver wine-cx-26.2.0 loads GPTK's d3d modules via `WINEDLLPATH` (vs
+  needing an overlay copy into the wine's own `lib/wine`, Whisky's method) can only be confirmed from a
+  real D3D game's launch log.
+- Confirm the exact third-party Wine/GPTK runtime repo/release to pin as default (currently placeholder
+  `Kegworks-App/Kegworks` in `Silo.defaultRuntimeRepo`; overridable in Settings). Non-blocking.
 
 ## Handoff checklist (for human, post-loop E2E)
-- [ ] Download a Wine/GPTK runtime via in-app RuntimeManager (or set the URL in Settings).
-- [ ] Create the simple Master Steam bottle; install Steam; log in; download ≥1 game.
-- [ ] Point Silo at the Master bottle; confirm discovery lists the game.
-- [ ] Isolate → seeds prefix; Play → launches in isolated `WINEPREFIX` with GPTK (CrossOver fallback).
-- [ ] (If DRM-gated) pick a Steam Presence Strategy; for `.emulatorStub` provide the stub path.
+- [ ] Build the patched wine: `Scripts/build-wine.sh 26.2.0` (adds `-fvisibility=default` + the
+      steamwebhelper wrapper). Download/point Silo at a GPTK runtime.
+- [ ] Advanced → Steam bottle → **Set up** (installs Windows Steam into the bottle) → **Launch Steam**.
+      Confirm the CEF login window actually PAINTS (the gate above); sign in once (Steam caches it).
+- [ ] Confirm the library lists games installed in the bottle; **Install** routes a `steam://` URL to the
+      running Steam.
+- [ ] **Play** → game launches co-resident in the bottle under GPTK (CrossOver fallback); Steamworks/online
+      works. **Stop** actually exits it.
 - [ ] (Distribution) provide Apple Developer ID + notarization secrets for signed releases.
