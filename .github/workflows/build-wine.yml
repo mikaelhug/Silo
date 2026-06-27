@@ -89,7 +89,15 @@ jobs:
           cd build
           # Single wow64 tree (32+64-bit PE) — adjust flags per CrossOver version as CI reveals.
           # ccache (PATH-shimmed above) caches object files across runs to speed repeat builds.
-          $ARCH_PREFIX "$GITHUB_WORKSPACE/$WINE_SRC/configure" \
+          #
+          # CFLAGS="-fvisibility=default": build Wine's UNIX side with all symbols visible so winemac.drv
+          # ('macdrv') exposes its Metal/window-surface helpers via dlsym. Without this the macOS surface
+          # presentation path is broken for layered windows, and Steam's CEF UI (and D3D→Metal games)
+          # paint to a BLACK/transparent window even with software compositing. This is the verified fix
+          # for running the Windows Steam client on Apple-Silicon macOS (per notpop/steam-on-m1-wine).
+          # -O2 restores the optimization that an explicit CFLAGS would otherwise drop.
+          $ARCH_PREFIX env CFLAGS="-fvisibility=default -O2" \
+            "$GITHUB_WORKSPACE/$WINE_SRC/configure" \
             --prefix="$GITHUB_WORKSPACE/wine-install" \
             --enable-archs=i386,x86_64 \
             --disable-tests --without-x \

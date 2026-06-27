@@ -4,27 +4,20 @@ import Foundation
 /// games that run co-resident with it. This is the post-revert model for Steamworks/DRM games —
 /// Steamworks IPC is prefix-scoped, so the game and its Steam client must share a prefix.
 ///
-/// Flow: `provision` (wineboot) → `installSteam` (silent SteamSetup.exe) → `seedLogin` (copy the macOS
-/// Steam session in, so it comes up authenticated with no second login) → `launchSteam` (background) →
-/// launch games in the same prefix. All process execution goes through the `ProcessRunning` seam, so the
-/// orchestration unit-tests with no Wine/Steam present; the runtime behaviour is validated on a real Mac.
+/// Flow: `provision` (wineboot) → `installSteam` (silent SteamSetup.exe) → `launchSteam` → the user signs
+/// in once (Steam caches it) → launch games in the same prefix. All process execution goes through the
+/// `ProcessRunning` seam, so the orchestration unit-tests with no Wine/Steam present; the runtime
+/// behaviour is validated on a real Mac.
 public struct SteamBottle: Sendable {
     private let runner: ProcessRunning
     private let session: URLSession
     private let paths: AppPaths
-    private let seeder: SteamLoginSeeder
     private var fileManager: FileManager { .default }
 
-    public init(
-        runner: ProcessRunning,
-        session: URLSession = .shared,
-        paths: AppPaths,
-        seeder: SteamLoginSeeder = SteamLoginSeeder()
-    ) {
+    public init(runner: ProcessRunning, session: URLSession = .shared, paths: AppPaths) {
         self.runner = runner
         self.session = session
         self.paths = paths
-        self.seeder = seeder
     }
 
     public enum BottleError: Error, Sendable, Equatable {
@@ -73,18 +66,17 @@ public struct SteamBottle: Sendable {
         guard result.succeeded else { throw BottleError.steamInstallFailed(result.exitCode) }
     }
 
-    /// Copy the macOS Steam login into the bottle so the client comes up authenticated (no second login).
-    @discardableResult
-    public func seedLogin() throws -> [String] {
-        try seeder.seed(from: paths.macSteamDir, into: paths.steamBottleClientDir)
-    }
-
     // MARK: - Launch
 
-    /// CEF flags that make Steam's `steamwebhelper` (Chromium) compositor actually paint under Wine —
-    /// without them the login/store/library panes render as a black window. `-cef-disable-gpu` +
-    /// `-cef-in-process-gpu` force software compositing; `-no-cef-sandbox` avoids the CEF crash-loop.
-    public static let cefRenderArgs = ["-cef-disable-gpu", "-cef-in-process-gpu", "-no-cef-sandbox"]
+    /// Steam flags aimed at getting `steamwebhelper`'s Chromium UI to paint under Wine (without them it's
+    /// a black window). `-cef-disable-gpu`/`-cef-disable-gpu-compositing` force software rendering;
+    /// `-no-cef-sandbox` avoids the CEF crash-loop; `-cef-disable-chrome-runtime` selects CEF's older
+    /// "alloy" runtime, which paints under Wine where the default chrome runtime doesn't. (The fully
+    /// proven fix is `--single-process` injected into steamwebhelper via a wrapper — no steam.exe flag
+    /// exists for it — which is what the patched-wine build adds.)
+    public static let cefRenderArgs = [
+        "-cef-disable-gpu", "-cef-disable-gpu-compositing", "-no-cef-sandbox", "-cef-disable-chrome-runtime",
+    ]
 
     /// Launch the bottle's Steam client detached. Defaults to the CEF-render flags so the (one-time)
     /// login window paints; pass `["-silent", …]` to start to tray once a login is cached.
