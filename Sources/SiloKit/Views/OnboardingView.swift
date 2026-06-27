@@ -3,6 +3,7 @@ import SwiftUI
 /// First-run guided setup shown in the Library when Silo isn't configured yet.
 struct OnboardingView: View {
     @Environment(AppEnvironment.self) private var env
+    @Binding var showLogin: Bool
 
     var body: some View {
         let runtime = env.runtime
@@ -34,11 +35,11 @@ struct OnboardingView: View {
                         action: { if let dmg = chooseDiskImage() { Task { await env.gptkManager.importGPTK(from: dmg) } } })
 
                     StepRow(
-                        number: 3, title: "Install Steam",
-                        subtitle: "Creates the Master Steam bottle and installs Steam.",
-                        done: env.steamReady, busy: backend.isInstallingBottle, locked: !env.wineReady,
-                        actionLabel: "Install Steam",
-                        action: { Task { await env.backendSettings.installSteamBottle() } })
+                        number: 3, title: "Sign in to Steam",
+                        subtitle: "One-time SteamCMD login to list + download the Windows games you own.",
+                        done: env.steamLoggedIn,
+                        actionLabel: "Sign In…",
+                        action: { showLogin = true })
                 }
                 .frame(maxWidth: 540)
 

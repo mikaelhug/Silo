@@ -3,7 +3,8 @@ import SwiftUI
 struct GameSettingsSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
-    let game: SteamApp
+    let appID: Int
+    let name: String
     @State private var vm: GameSettingsViewModel?
     @State private var executables: [String] = []
 
@@ -16,7 +17,7 @@ struct GameSettingsSheet: View {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .navigationTitle(game.name)
+            .navigationTitle(name)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -30,8 +31,8 @@ struct GameSettingsSheet: View {
         }
         .frame(width: 480, height: 540)
         .task {
-            vm = await env.makeGameSettings(for: game)
-            executables = ExecutableResolver.allExecutables(in: game.installURL)
+            vm = await env.makeGameSettings(appID: appID, name: name)
+            executables = ExecutableResolver.allExecutables(in: env.gameInstallDir(forAppID: appID))
         }
     }
 

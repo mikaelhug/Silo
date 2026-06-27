@@ -1,95 +1,80 @@
 import SwiftUI
 
+/// The Library: owned Windows-only games (downloaded via SteamCMD, launched in GPTK buckets), or the
+/// first-run onboarding until Wine + GPTK + Steam sign-in are done.
 struct LibraryGridView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var settingsTarget: SteamApp?
+    @State private var settingsTarget: SteamAppInfo?
     @State private var showAdvanced = false
+    @State private var showLogin = false
 
     var body: some View {
-        @Bindable var library = env.library
+        @Bindable var lib = env.gameLibrary
         Group {
             if env.setupComplete {
-                grid(library)
+                grid(lib)
             } else {
-                OnboardingView()
+                OnboardingView(showLogin: $showLogin)
             }
         }
         .navigationTitle("Library")
         .toolbar {
             if env.setupComplete {
-                Menu {
-                    Picker("Sort", selection: $library.sortOrder) {
-                        ForEach(LibraryViewModel.SortOrder.allCases) { Text($0.label).tag($0) }
-                    }
-                    Picker("Show", selection: $library.filter) {
-                        ForEach(LibraryViewModel.Filter.allCases) { Text($0.label).tag($0) }
-                    }
-                } label: {
-                    Label("Sort & Filter", systemImage: "line.3.horizontal.decrease.circle")
+                Button { showLogin = true } label: {
+                    Label(env.backendSettings.config.steamUsername ?? "Account", systemImage: "person.crop.circle")
                 }
-
-                Button {
-                    Task { await library.installEntireLibrary() }
-                } label: {
-                    Label("Install entire library", systemImage: "square.and.arrow.down.on.square")
-                }
-                .disabled(library.isQueueingInstalls || !library.canInstallLibrary)
-
-                Button {
-                    Task { await library.refresh() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
+                Button { Task { await lib.load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
             }
             Button { showAdvanced = true } label: { Label("Advanced", systemImage: "gearshape") }
         }
         .sheet(isPresented: $showAdvanced) { AdvancedSettingsSheet() }
-        .sheet(item: $settingsTarget) { GameSettingsSheet(game: $0) }
-        .searchable(text: $library.searchText, placement: .toolbar, prompt: "Search games")
+        .sheet(isPresented: $showLogin) { SteamLoginView() }
+        .sheet(item: $settingsTarget) { GameSettingsSheet(appID: $0.appID, name: $0.name) }
+        .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
         .safeAreaInset(edge: .bottom) {
-            if let message = library.statusMessage {
-                Text(message)
-                    .font(.callout).foregroundStyle(.secondary)
-                    .padding(8).frame(maxWidth: .infinity)
-                    .background(.bar)
+            if let message = lib.statusMessage {
+                Text(message).font(.callout).foregroundStyle(.secondary)
+                    .padding(8).frame(maxWidth: .infinity).background(.bar)
             }
         }
     }
 
     @ViewBuilder
-    private func grid(_ library: LibraryViewModel) -> some View {
+    private func grid(_ lib: GameLibraryViewModel) -> some View {
         ScrollView {
-            if library.loadState == .loading {
-                ProgressView("Scanning library…").padding()
+            if lib.loadState == .loading {
+                ProgressView("Loading your Steam library…").padding()
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 16)], spacing: 16) {
-                SteamCardView()
-                ForEach(library.filteredGames) { game in
-                    GameCardView(game: game, onSettings: { settingsTarget = game })
+                ForEach(lib.filtered) { game in
+                    SteamGameTileView(game: game, onSettings: { settingsTarget = game })
                 }
             }
             .padding()
 
-            if library.games.isEmpty && library.loadState != .loading {
-                ContentUnavailableView(
-                    "No games yet", systemImage: "tray",
-                    description: Text("Open Steam to download games, then Refresh — or use “Install entire library”."))
+            switch lib.loadState {
+            case .empty:
+                ContentUnavailableView("No Windows-only games", systemImage: "tray",
+                    description: Text("Games with a native macOS version run in the Steam app directly. "
+                                      + "Only your Windows-only titles appear here."))
                     .padding()
+            case .error(let message):
+                ContentUnavailableView("Couldn't load your library", systemImage: "exclamationmark.triangle",
+                    description: Text(message)).padding()
+            default:
+                EmptyView()
             }
         }
     }
 }
 
-/// Advanced settings presented as a sheet (the Setup pane was removed for simplicity).
+/// Advanced settings presented as a sheet (Wine/GPTK paths etc.).
 struct AdvancedSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
-
     var body: some View {
         NavigationStack {
             BackendSettingsView()
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-                }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .frame(minWidth: 580, minHeight: 560)
     }

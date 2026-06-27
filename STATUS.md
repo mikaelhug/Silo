@@ -3,7 +3,19 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M36 COMPLETE.** 131 tests / 28 suites green; CI green.
+- **M0–M41 COMPLETE — pivot DONE.** 137 tests / 29 suites green; clean build (no warnings); .app assembles.
+- **PIVOT COMPLETE (M36–M41):** Wine Steam-client GUI fully removed; replaced by native-macOS SteamCMD.
+  - M37–M38: SteamCMDClient (install + force-windows download + capture) + SteamAppInfo metadata +
+    ownedWindowsGames enumeration (licenses→packages→app_info, filtered to windows-only games).
+  - M39: SyncMode enum, MSync default (Apple-Silicon best practice).
+  - M40: GameLibraryViewModel + SteamLoginViewModel wired into AppEnvironment (account in BackendConfig).
+  - M41 (UI swap + rip-out): new SteamLoginView + SteamGameTileView; LibraryGridView lists owned
+    Windows-only games (Download→SteamCMD, Play→GPTK bucket); OnboardingView step 3 = "Sign in to Steam";
+    readiness = wineReady && gptkReady && steamLoggedIn. DELETED: SteamBottleInstaller, SteamCardView,
+    GameCardView, LibraryViewModel, SteamLibraryInstaller, OwnedAppsReader (+ their tests). ViewModelTests
+    pruned to the surviving VMs. CrashLoopGuard retained (available; no longer wired to Steam GUI).
+  - REMAINING (human-gated): real SteamCMD login + a real Windows-only game download → launch in a GPTK
+    bucket (needs the user's Steam credentials). All headless-testable logic is done + green.
 - **>>> ARCHITECTURE PIVOT (2026-06-27, user decision) <<<** The Wine **Steam-client GUI** does not
   render under our self-built wine on macOS 26 (CEF black window; verified that -no-cef-sandbox fixes the
   crash-loop but neither GPU-on nor GPU-off nor RetinaMode nor virtual-desktop renders it — this is the
