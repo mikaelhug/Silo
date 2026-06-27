@@ -25,10 +25,12 @@ struct GameLibraryViewModelTests {
         return (vm, fake, paths)
     }
 
+    /// Write a manifest where SteamCMD's force_install_dir actually puts it:
+    /// <gameLibrary>/steamapps/common/<appID>/steamapps/appmanifest_<appID>.acf
     private func writeManifest(_ paths: AppPaths, _ acf: String, appID: Int) throws {
-        let steamapps = paths.gameLibraryDir.appendingPathComponent("steamapps")
-        try FileManager.default.createDirectory(at: steamapps, withIntermediateDirectories: true)
-        try acf.write(to: steamapps.appendingPathComponent("appmanifest_\(appID).acf"),
+        let nested = paths.gameInstallDir(forAppID: appID).appendingPathComponent("steamapps")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try acf.write(to: nested.appendingPathComponent("appmanifest_\(appID).acf"),
                       atomically: true, encoding: .utf8)
     }
 
@@ -90,8 +92,7 @@ struct GameLibraryViewModelTests {
         #expect(vm.isInstalled(hl2))
         #expect(vm.sizeString(hl2) != nil)
         #expect(!vm.isInstalled(hl))
-        #expect(vm.isDownloading(hl))
-        #expect(vm.downloadProgress(hl) == 0.5)
+        #expect(vm.downloadProgress(hl) == 0.5)   // from the nested manifest's bytes
     }
 
     @Test("download delegates to SteamCMD app_update for the game's bucket")
@@ -110,11 +111,12 @@ struct GameLibraryViewModelTests {
     @Test("interrupted download → paused (resumable); active appmanifest flag → re-attached on launch")
     func pauseAndReattach() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, _, paths) = make(tmp)
+        let (vm, fake, paths) = make(tmp)
         // 220: partial + no active flag (e.g. network dropped / app closed mid-download) → resumable.
         try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "2" "installdir" "HL2" "BytesDownloaded" "30" "BytesToDownload" "100" }"#, appID: 220)
-        // 70: appmanifest has the downloading flag (1048576) → a SteamCMD is still running; re-attach.
-        try writeManifest(paths, #""AppState" { "appid" "70" "name" "HL" "StateFlags" "1048578" "installdir" "HL" "BytesDownloaded" "50" "BytesToDownload" "100" }"#, appID: 70)
+        // 70: a SteamCMD `app_update 70` is still running (e.g. orphaned) → re-attach to it.
+        try writeManifest(paths, #""AppState" { "appid" "70" "name" "HL" "StateFlags" "2" "installdir" "HL" "BytesDownloaded" "50" "BytesToDownload" "100" }"#, appID: 70)
+        fake.matchingProcesses = ["app_update 70"]
         await vm.load()
 
         let hl2 = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])

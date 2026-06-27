@@ -29,6 +29,7 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
 
     private var _alivePIDs: Set<Int32> = []
     private var _processCount = 0
+    private var _matching: Set<String> = []
 
     var invocations: [Invocation] { lock.withLock { _invocations } }
     var lastInvocation: Invocation? { lock.withLock { _invocations.last } }
@@ -38,7 +39,14 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
         get { lock.withLock { _processCount } }
         set { lock.withLock { _processCount = newValue } }
     }
-    func processCount(matching pattern: String) async -> Int { lock.withLock { _processCount } }
+    /// Exact patterns considered "running" (e.g. "app_update 70") — returns 1 for those, else the default.
+    var matchingProcesses: Set<String> {
+        get { lock.withLock { _matching } }
+        set { lock.withLock { _matching = newValue } }
+    }
+    func processCount(matching pattern: String) async -> Int {
+        lock.withLock { _matching.contains(pattern) ? 1 : _processCount }
+    }
 
     /// Simulate a process exiting (or coming alive) for `isRunning` checks.
     func setAlive(_ pid: Int32, _ alive: Bool) {

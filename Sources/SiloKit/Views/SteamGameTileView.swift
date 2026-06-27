@@ -51,6 +51,10 @@ struct SteamGameTileView: View {
                 HStack(spacing: 8) {
                     primaryButton(running: running, busy: busy, installed: installed,
                                   downloading: downloading, paused: paused)
+                    if downloading {
+                        Button { Task { await lib.pause(game) } } label: { Image(systemName: "pause.circle.fill") }
+                            .buttonStyle(.borderless).help("Pause download")
+                    }
                     if downloading || paused {
                         Button { Task { await lib.cancel(game) } } label: { Image(systemName: "xmark.circle.fill") }
                             .buttonStyle(.borderless).foregroundStyle(.secondary).help("Cancel download")

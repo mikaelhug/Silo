@@ -60,14 +60,30 @@ public struct SteamCMDClient: Sendable {
             environment: [:], currentDirectory: paths.steamCMDDir, logURL: logURL)
     }
 
-    /// Cancel a download: terminate the SteamCMD process (if known) and delete the partial bucket so any
-    /// still-running/orphaned instance errors out and stops. (Pausing isn't cancelling — to *pause*,
-    /// just don't cancel: SteamCMD's app_update resumes from the kept partial on the next download.)
-    public func cancelDownload(appID: Int, pid: Int32?) {
+    /// Is a SteamCMD `app_update <id>` currently running (e.g. orphaned after the app was closed)?
+    public func isDownloadProcessRunning(appID: Int) async -> Bool {
+        await runner.processCount(matching: "app_update \(appID)") > 0
+    }
+
+    /// Pause: stop the SteamCMD process but KEEP the partial files — `app_update` resumes from here.
+    /// Best-effort kills both a known PID and any orphaned `app_update <id>` instance.
+    public func pauseDownload(appID: Int, pid: Int32?) async {
         if let pid { runner.terminate(pid: pid) }
+        await terminateOrphan(appID: appID)
+    }
+
+    /// Cancel: stop the process AND delete the partial bucket (the running instance then errors out).
+    public func cancelDownload(appID: Int, pid: Int32?) async {
+        if let pid { runner.terminate(pid: pid) }
+        await terminateOrphan(appID: appID)
         try? FileManager.default.removeItem(at: paths.gameInstallDir(forAppID: appID))
-        let manifest = paths.gameLibraryDir.appendingPathComponent("steamapps/appmanifest_\(appID).acf")
-        try? FileManager.default.removeItem(at: manifest)
+    }
+
+    /// Kill an orphaned `app_update <id>` whose PID we don't track (e.g. survived an app restart).
+    private func terminateOrphan(appID: Int) async {
+        _ = try? await runner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/pkill"),
+            arguments: ["-f", "app_update \(appID)"], environment: [:], currentDirectory: nil)
     }
 
     /// Run a short SteamCMD query to completion and return its stdout (for app_info / licenses parsing).
