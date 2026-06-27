@@ -37,25 +37,12 @@ struct SteamGameTileView: View {
                 }
                 if downloading {
                     ProgressView(value: lib.downloadProgress(game) ?? 0) {
-                        Text(lib.downloadProgress(game).map { "Downloading \(Int($0 * 100))%" } ?? "Downloading…")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text(downloadLine).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     }
                 }
                 HStack {
-                    if running {
-                        Button(role: .destructive) { Task { await lib.stop(game) } } label: {
-                            Label("Stop", systemImage: "stop.fill")
-                        }.buttonStyle(.borderedProminent).tint(.red)
-                    } else if installed {
-                        Button { Task { await lib.play(game) } } label: { Label("Play", systemImage: "play.fill") }
-                            .buttonStyle(.borderedProminent).disabled(busy || !lib.canLaunch)
-                    } else {
-                        Button { Task { await lib.download(game) } } label: {
-                            Label(downloading ? "Downloading…" : "Download", systemImage: "arrow.down.circle")
-                        }.buttonStyle(.borderedProminent).disabled(busy || downloading)
-                    }
+                    primaryButton(running: running, busy: busy, installed: installed, downloading: downloading)
                     Spacer()
-                    if busy { ProgressView().controlSize(.small) }
                     Menu { menuItems(installed: installed) } label: { Image(systemName: "ellipsis.circle") }
                         .menuStyle(.borderlessButton).fixedSize()
                 }
@@ -65,6 +52,40 @@ struct SteamGameTileView: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .contextMenu { menuItems(installed: installed) }
+    }
+
+    /// Progress · speed · ETA line shown while downloading.
+    private var downloadLine: String {
+        let lib = env.gameLibrary
+        var parts: [String] = []
+        parts.append(lib.downloadProgress(game).map { "\(Int($0 * 100))%" } ?? "Starting…")
+        if let speed = lib.speedString(game) { parts.append(speed) }
+        if let eta = lib.etaString(game) { parts.append("\(eta) left") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The main action button — context-aware so Play never looks frozen while a game is launching.
+    @ViewBuilder
+    private func primaryButton(running: Bool, busy: Bool, installed: Bool, downloading: Bool) -> some View {
+        let lib = env.gameLibrary
+        if running {
+            Button(role: .destructive) { Task { await lib.stop(game) } } label: {
+                Label("Stop", systemImage: "stop.fill")
+            }.buttonStyle(.borderedProminent).tint(.red)
+        } else if downloading {
+            Button {} label: { Label("Downloading…", systemImage: "arrow.down.circle") }
+                .buttonStyle(.bordered).disabled(true)
+        } else if busy {
+            Button {} label: {
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Launching…") }
+            }.buttonStyle(.borderedProminent).disabled(true)
+        } else if installed {
+            Button { Task { await lib.play(game) } } label: { Label("Play", systemImage: "play.fill") }
+                .buttonStyle(.borderedProminent).disabled(!lib.canLaunch)
+        } else {
+            Button { Task { await lib.download(game) } } label: { Label("Download", systemImage: "arrow.down.circle") }
+                .buttonStyle(.borderedProminent)
+        }
     }
 
     @ViewBuilder private func badge(installed: Bool, downloading: Bool) -> some View {

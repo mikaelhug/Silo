@@ -14,7 +14,9 @@ public final class GameLibraryViewModel {
     public private(set) var isRefreshing = false
     public private(set) var busyAppIDs: Set<Int> = []
     public private(set) var downloadingIDs: Set<Int> = []
+    public private(set) var downloadSpeeds: [Int: Double] = [:]   // appID → bytes/sec
     public private(set) var runningPIDs: [Int: Int32] = [:]   // appID → launched wine PID
+    private var lastBytes: [Int: (bytes: Int64, at: Date)] = [:]
     public var searchText: String = ""
     /// Hide games that also have a native macOS build (run those in the Steam app instead). On by
     /// default — Silo is for the games that *need* Wine/GPTK.
@@ -88,6 +90,24 @@ public final class GameLibraryViewModel {
         guard let size = installedByID[info.appID]?.sizeOnDisk, size > 0 else { return nil }
         return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
     }
+    /// Current download speed (e.g. "12.3 MB/s") for an in-progress game, else nil.
+    public func speedString(_ info: SteamAppInfo) -> String? {
+        guard let bps = downloadSpeeds[info.appID], bps > 1 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: Int64(bps), countStyle: .file) + "/s"
+    }
+    /// Estimated time remaining (e.g. "4 min") for an in-progress game, else nil.
+    public func etaString(_ info: SteamAppInfo) -> String? {
+        guard let app = installedByID[info.appID], let total = app.bytesToDownload,
+              let done = app.bytesDownloaded, total > done,
+              let bps = downloadSpeeds[info.appID], bps > 1 else { return nil }
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute, .second]
+        formatter.unitsStyle = .abbreviated
+        formatter.maximumUnitCount = 2
+        return formatter.string(from: Double(total - done) / bps)
+    }
+    /// Owned games currently downloading (for the status bar).
+    public var activeDownloads: [SteamAppInfo] { owned.filter { isDownloading($0) } }
 
     private func refreshInstalled() async {
         let found = (try? await discovery.discoverGames(steamRoot: paths.gameLibraryDir)) ?? []
@@ -154,15 +174,13 @@ public final class GameLibraryViewModel {
     /// Download (or update) a game's Windows files into its bucket via SteamCMD (detached), then poll
     /// its appmanifest for live progress until it finishes.
     public func download(_ info: SteamAppInfo) async {
-        guard let username, !busyAppIDs.contains(info.appID) else { return }
+        guard let username, !busyAppIDs.contains(info.appID), !downloadingIDs.contains(info.appID) else { return }
         busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
-        statusMessage = "Starting download: \(info.name)…"
         do {
             _ = try await steamCMD.download(appID: info.appID, username: username,
                                             logURL: paths.log(forAppID: info.appID))
-            downloadingIDs.insert(info.appID)
+            downloadingIDs.insert(info.appID)   // the status bar tracks progress + speed from here
             startDownloadMonitor()
-            statusMessage = "Downloading \(info.name)…"
         } catch {
             statusMessage = "\(info.name): \((error as NSError).localizedDescription)"
         }
@@ -175,8 +193,20 @@ public final class GameLibraryViewModel {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard let self, !self.downloadingIDs.isEmpty else { break }
                 await self.refreshInstalled()
-                for id in self.downloadingIDs where self.installedByID[id]?.isFullyInstalled == true {
-                    self.downloadingIDs.remove(id)
+                let now = Date()
+                for id in self.downloadingIDs {
+                    if self.installedByID[id]?.isFullyInstalled == true {
+                        self.downloadingIDs.remove(id)
+                        self.downloadSpeeds[id] = nil; self.lastBytes[id] = nil
+                        self.statusMessage = "\(self.installedByID[id]?.name ?? "Game") finished downloading."
+                        continue
+                    }
+                    // Speed = Δbytes / Δtime between polls.
+                    guard let done = self.installedByID[id]?.bytesDownloaded else { continue }
+                    if let prev = self.lastBytes[id], now.timeIntervalSince(prev.at) > 0.5 {
+                        self.downloadSpeeds[id] = max(0, Double(done - prev.bytes) / now.timeIntervalSince(prev.at))
+                    }
+                    self.lastBytes[id] = (done, now)
                 }
                 if self.downloadingIDs.isEmpty { break }
             }
