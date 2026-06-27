@@ -1,32 +1,83 @@
 name: Release
 
+# Build + publish a Silo release when a v* tag is pushed (the ONLY thing that builds the app —
+# there is no per-push CI; verify locally with `Scripts/test.sh`). Wine builds separately and only
+# when a new CrossOver version appears (build-wine.yml / wine-autoupdate.yml).
+#
+#   1. bump `Silo.version` in Sources/SiloKit/Silo.swift
+#   2. git tag vX.Y.Z && git push origin vX.Y.Z
+#
+# The tag must match `Silo.version` (the verify step fails otherwise) — the in-app Updater reads
+# /releases/latest, so the published tag has to equal the version you ship.
+# A manual run (workflow_dispatch) builds + uploads an artifact for inspection but does NOT publish.
 on:
   push:
-    tags: [ 'v*' ]
+    tags: ['v*']
+  workflow_dispatch: {}
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  release:
+  app:
     runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      HAS_NOTARY: ${{ secrets.AC_API_KEY_ID }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build app bundle (ad-hoc signed)
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Verify tag matches Silo.version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION=$(grep -oE 'version = "[0-9]+\.[0-9]+\.[0-9]+"' Sources/SiloKit/Silo.swift | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} != v${VERSION} (Silo.version). Bump Silo.version to match the tag."
+            exit 1
+          fi
+
+      - name: Test (gate the release)
+        run: ./Scripts/test.sh
+
+      - name: Build + assemble Silo.app (ad-hoc signed)
         run: ./Scripts/build-app.sh
 
-      # Optional notarization (gated on secrets). Provide DEVELOPER_ID, AC_API_KEY_* secrets and
-      # replace the ad-hoc signing in sign.sh with a Developer ID identity to enable this.
-      # - name: Notarize
-      #   if: ${{ secrets.AC_API_KEY_ID != '' }}
-      #   run: ...
+      - name: Smoke-test the bundled binary
+        run: SILO_SMOKE=1 dist/Silo.app/Contents/MacOS/Silo
 
-      - name: Zip app
+      - name: Package Silo.zip
         run: ditto -c -k --keepParent dist/Silo.app dist/Silo.zip
 
+      # Optional notarization — gated on secrets (AC_API_KEY_ID, AC_API_ISSUER_ID, AC_API_KEY_BASE64).
+      - name: Notarize
+        if: ${{ env.HAS_NOTARY != '' }}
+        env:
+          KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          ISSUER: ${{ secrets.AC_API_ISSUER_ID }}
+          KEY_B64: ${{ secrets.AC_API_KEY_BASE64 }}
+        run: |
+          echo "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/ac.p8"
+          xcrun notarytool submit dist/Silo.zip --key "$RUNNER_TEMP/ac.p8" \
+            --key-id "$KEY_ID" --issuer "$ISSUER" --wait || true
+
+      - name: Upload build artifact (every run, for inspection)
+        uses: actions/upload-artifact@v4
+        with:
+          name: silo-app
+          path: dist/Silo.zip
+          retention-days: 7
+
       - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')   # tags publish a downloadable release; manual runs don't
         uses: softprops/action-gh-release@v2
         with:
           files: dist/Silo.zip
           generate_release_notes: true
+          fail_on_unmatched_files: true
