@@ -16,12 +16,20 @@ public enum SyncMode: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
-/// User-tunable environment toggles applied when launching a game.
+/// Per-game performance + environment tuning applied at launch. Defaults reflect the known-good GPTK
+/// configuration for Apple Silicon (MSync + advertise-AVX).
 public struct EnvFlags: Codable, Sendable, Hashable {
     /// Sync primitive (`WINEMSYNC`/`WINEESYNC`). Defaults to `.msync` on Apple Silicon.
     public var syncMode: SyncMode
-    /// `MTL_HUD_ENABLED` — Metal performance HUD overlay.
+    /// `ROSETTA_ADVERTISE_AVX=1` — make Rosetta advertise AVX so games that gate features on AVX run
+    /// (the whole x86 Wine runs under Rosetta, so this applies to every backend). Default on.
+    public var advertiseAVX: Bool
+    /// `MTL_HUD_ENABLED=1` — Apple's Metal performance HUD (FPS / frame time overlay). The perf metric.
     public var metalHUD: Bool
+    /// `D3DM_ENABLE_METALFX=1` — let D3DMetal use MetalFX upscaling where the game supports it (GPTK).
+    public var metalFX: Bool
+    /// `D3DM_SUPPORT_DXR=1` — expose DirectX Raytracing in D3DMetal's DX12 layer (GPTK; M3+).
+    public var dxr: Bool
     /// `DXVK_HUD` value (e.g. `"fps,memory"`); applied only with the CrossOver/DXVK backend. `nil` = off.
     public var dxvkHUD: String?
     /// Free-form extra environment variables (override the above; an escape hatch).
@@ -29,12 +37,18 @@ public struct EnvFlags: Codable, Sendable, Hashable {
 
     public init(
         syncMode: SyncMode = .msync,
+        advertiseAVX: Bool = true,
         metalHUD: Bool = false,
+        metalFX: Bool = false,
+        dxr: Bool = false,
         dxvkHUD: String? = nil,
         extra: [String: String] = [:]
     ) {
         self.syncMode = syncMode
+        self.advertiseAVX = advertiseAVX
         self.metalHUD = metalHUD
+        self.metalFX = metalFX
+        self.dxr = dxr
         self.dxvkHUD = dxvkHUD
         self.extra = extra
     }
@@ -48,16 +62,21 @@ public struct EnvFlags: Codable, Sendable, Hashable {
         case .esync: env["WINEESYNC"] = "1"
         case .none: break
         }
+        if advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }   // x86 Wine runs under Rosetta on all backends
         if metalHUD { env["MTL_HUD_ENABLED"] = "1" }
+        if backend == .gptk {
+            if metalFX { env["D3DM_ENABLE_METALFX"] = "1" }
+            if dxr { env["D3DM_SUPPORT_DXR"] = "1" }
+        }
         if let dxvkHUD, backend == .crossover { env["DXVK_HUD"] = dxvkHUD }
         for (key, value) in extra { env[key] = value }
         return env
     }
 
-    // MARK: - Codable (migrates legacy esync/msync bools)
+    // MARK: - Codable (migrates legacy esync/msync bools; tolerates missing perf fields)
 
     private enum CodingKeys: String, CodingKey {
-        case syncMode, metalHUD, dxvkHUD, extra
+        case syncMode, advertiseAVX, metalHUD, metalFX, dxr, dxvkHUD, extra
         case esync, msync   // legacy fields from configs written before the SyncMode enum
     }
 
@@ -66,12 +85,14 @@ public struct EnvFlags: Codable, Sendable, Hashable {
         if let mode = try c.decodeIfPresent(SyncMode.self, forKey: .syncMode) {
             syncMode = mode
         } else {
-            // Old config: prefer msync if it was on, else esync, else the new msync default.
             let legacyMsync = try c.decodeIfPresent(Bool.self, forKey: .msync) ?? false
             let legacyEsync = try c.decodeIfPresent(Bool.self, forKey: .esync) ?? false
             syncMode = legacyMsync ? .msync : (legacyEsync ? .esync : .msync)
         }
+        advertiseAVX = try c.decodeIfPresent(Bool.self, forKey: .advertiseAVX) ?? true
         metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
+        metalFX = try c.decodeIfPresent(Bool.self, forKey: .metalFX) ?? false
+        dxr = try c.decodeIfPresent(Bool.self, forKey: .dxr) ?? false
         dxvkHUD = try c.decodeIfPresent(String.self, forKey: .dxvkHUD)
         extra = try c.decodeIfPresent([String: String].self, forKey: .extra) ?? [:]
     }
@@ -79,7 +100,10 @@ public struct EnvFlags: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(syncMode, forKey: .syncMode)
+        try c.encode(advertiseAVX, forKey: .advertiseAVX)
         try c.encode(metalHUD, forKey: .metalHUD)
+        try c.encode(metalFX, forKey: .metalFX)
+        try c.encode(dxr, forKey: .dxr)
         try c.encodeIfPresent(dxvkHUD, forKey: .dxvkHUD)
         try c.encode(extra, forKey: .extra)
     }

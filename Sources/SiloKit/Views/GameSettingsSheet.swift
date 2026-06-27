@@ -46,16 +46,28 @@ struct GameSettingsSheet: View {
                 }
             }
 
-            Section("Environment") {
+            Section {
                 Picker("Sync", selection: $vm.config.envFlags.syncMode) {
                     ForEach(SyncMode.allCases) { Text($0.displayName).tag($0) }
                 }
-                Toggle("Metal HUD", isOn: $vm.config.envFlags.metalHUD)
+                Toggle("Advertise AVX (Rosetta)", isOn: $vm.config.envFlags.advertiseAVX)
+                Toggle("Performance HUD (FPS / frame time)", isOn: $vm.config.envFlags.metalHUD)
+                if vm.config.backend == .gptk {
+                    Toggle("MetalFX upscaling", isOn: $vm.config.envFlags.metalFX)
+                    Toggle("DirectX Raytracing (M3+)", isOn: $vm.config.envFlags.dxr)
+                }
                 if vm.config.backend == .crossover {
                     TextField("DXVK HUD (e.g. fps,memory)", text: Binding(
                         get: { vm.config.envFlags.dxvkHUD ?? "" },
                         set: { vm.config.envFlags.dxvkHUD = $0.isEmpty ? nil : $0 }))
                 }
+            } header: {
+                Text("Performance")
+            } footer: {
+                Text("MSync + advertise-AVX is the recommended Apple-Silicon baseline. The Performance "
+                     + "HUD overlays live FPS/frame time on the game. MetalFX upscales for more FPS; "
+                     + "Raytracing needs an M3 or newer.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Launch options") {
