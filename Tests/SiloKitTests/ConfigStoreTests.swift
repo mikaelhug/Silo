@@ -105,6 +105,24 @@ struct ConfigStoreTests {
         let esyncCfg = try JSONDecoder().decode(
             EnvFlags.self, from: Data(#"{"esync": true, "msync": false}"#.utf8))
         #expect(esyncCfg.syncMode == .esync)
+        // Legacy configs (no perf keys) get the recommended AVX default.
+        #expect(esyncCfg.advertiseAVX)
+    }
+
+    @Test("EnvFlags performance vars: AVX everywhere, MetalFX/DXR only for GPTK")
+    func perfFlags() {
+        let on = EnvFlags(advertiseAVX: true, metalHUD: true, metalFX: true, dxr: true)
+        let gptk = on.environment(for: .gptk)
+        #expect(gptk["ROSETTA_ADVERTISE_AVX"] == "1")
+        #expect(gptk["MTL_HUD_ENABLED"] == "1")
+        #expect(gptk["D3DM_ENABLE_METALFX"] == "1")
+        #expect(gptk["D3DM_SUPPORT_DXR"] == "1")
+
+        let cx = on.environment(for: .crossover)
+        #expect(cx["ROSETTA_ADVERTISE_AVX"] == "1")        // Rosetta applies on every backend
+        #expect(cx["D3DM_ENABLE_METALFX"] == nil)          // D3DMetal vars are GPTK-only
+
+        #expect(EnvFlags(advertiseAVX: false).environment(for: .gptk)["ROSETTA_ADVERTISE_AVX"] == nil)
     }
 
     @Test("BackendConfig wine fallback selection")
