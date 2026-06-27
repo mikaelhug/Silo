@@ -23,7 +23,8 @@ struct SteamGameTileView: View {
             AsyncImage(url: headerArtURL) { phase in
                 switch phase {
                 case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
-                case .empty: artPlaceholder.overlay(ProgressView().controlSize(.small))
+                // No spinner here: an animating ProgressView inside the grid drives a per-frame
+                // CADisplayLink that re-lays out the whole grid (the gradient placeholder is enough).
                 default: artPlaceholder
                 }
             }
