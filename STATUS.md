@@ -3,6 +3,27 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **M51–M57 COMPLETE — perf + reliability + UX pass.** 153 tests / 31 suites green; clean build (no
+  warnings); .app assembles; verified running at **0.0% idle CPU** (was pinned at 100%).
+  - **M51 (the energy bug):** sampled the live app → main thread pinned in SwiftUI layout driven by a
+    CADisplayLink. Root cause: indeterminate `ProgressView()` spinners INSIDE the ScrollView (loading /
+    "Updating" / AsyncImage placeholder) re-laid out the whole grid every frame. Moved spinners out of
+    the scroll content; download bar `safeAreaInset`→VStack sibling; `filtered` no longer re-sorts.
+    Verified 100%→0%.
+  - **M52 (event-driven, no polling):** `ProcessRunning` gains `observeExit` (DispatchSource process) +
+    `observeWrites` (file-system) + `firstPID`. Downloads read progress reactively from the SteamCMD log
+    and detect completion/interruption from the process's real exit (no 2s poll, no flaky pgrep) — fixes
+    the false "Resume"; manifest is authoritative on exit. Game-exit clears state via an exit observer.
+  - **M53 (UX):** whole card opens details; detail view shows Disk size / Metacritic / Minimum
+    requirements; status messages auto-dismiss (6s); refresh toolbar keeps button chrome while spinning.
+    Fixed logged-in account "falling away" — `autodetect` was wiping `steamUsername`; now preserved + the
+    account shows in the navigation subtitle.
+  - **M54:** Uninstall (menu + details, confirmed) deletes the game's bucket files.
+  - **M55:** fast refresh — incremental app-metadata cache (`ownedGames(known:)` only `app_info`s new
+    apps; the cache persists the full owned catalog).
+  - **M56:** `BackendPolicy` — GPTK default for DirectX 9–12, auto CrossOver fallback when GPTK absent;
+    detail view shows the recommended backend + DirectX-derived rationale.
+  - **M57:** log viewer is now a kqueue file-watcher (was a 1s poll). No timer/poll loops remain anywhere.
 - **M0–M41 COMPLETE — pivot DONE.** 137 tests / 29 suites green; clean build (no warnings); .app assembles.
 - **PIVOT COMPLETE (M36–M41):** Wine Steam-client GUI fully removed; replaced by native-macOS SteamCMD.
   - M37–M38: SteamCMDClient (install + force-windows download + capture) + SteamAppInfo metadata +
