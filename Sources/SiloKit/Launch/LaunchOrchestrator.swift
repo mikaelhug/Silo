@@ -109,7 +109,6 @@ public struct LaunchOrchestrator: Sendable {
     }
 
     public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
-    public func terminate(pid: Int32) { runner.terminate(pid: pid) }
 
     /// Stop a game running in the shared Steam bottle. SIGTERMs the launched process AND asks Wine to
     /// `taskkill /IM <game exe>` — the launched PID is only Wine's loader, so a game that re-execs or
