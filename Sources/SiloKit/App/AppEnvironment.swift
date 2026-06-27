@@ -59,8 +59,8 @@ public final class AppEnvironment {
         let steamCMD = SteamCMDClient(runner: runner, paths: paths)
         self.steamCMD = steamCMD
         let gameLibrary = GameLibraryViewModel(
-            steamCMD: steamCMD, orchestrator: orchestrator, configStore: configStore,
-            paths: paths, backend: initialBackend)
+            steamCMD: steamCMD, discovery: discovery, orchestrator: orchestrator,
+            configStore: configStore, paths: paths, backend: initialBackend)
         self.gameLibrary = gameLibrary
         self.steamLogin = SteamLoginViewModel(steamCMD: steamCMD)
 

@@ -12,6 +12,7 @@ struct SteamGameTileView: View {
     var body: some View {
         let lib = env.gameLibrary
         let installed = lib.isInstalled(game)
+        let downloading = lib.isDownloading(game)
         let busy = lib.isBusy(game)
         let running = lib.isRunning(game)
 
@@ -25,15 +26,20 @@ struct SteamGameTileView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92).clipped()
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(game.name).font(.headline).lineLimit(1)
                     Spacer()
-                    Text(installed ? "Installed" : "Owned")
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background((installed ? Color.green : Color.gray).opacity(0.2), in: Capsule())
-                        .foregroundStyle(installed ? .green : .gray)
+                    badge(installed: installed, downloading: downloading)
+                }
+                if let size = lib.sizeString(game), installed {
+                    Text(size).font(.caption).foregroundStyle(.secondary)
+                }
+                if downloading {
+                    ProgressView(value: lib.downloadProgress(game) ?? 0) {
+                        Text(lib.downloadProgress(game).map { "Downloading \(Int($0 * 100))%" } ?? "Downloading…")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 HStack {
                     if running {
@@ -45,8 +51,8 @@ struct SteamGameTileView: View {
                             .buttonStyle(.borderedProminent).disabled(busy || !lib.canLaunch)
                     } else {
                         Button { Task { await lib.download(game) } } label: {
-                            Label("Download", systemImage: "arrow.down.circle")
-                        }.buttonStyle(.borderedProminent).disabled(busy)
+                            Label(downloading ? "Downloading…" : "Download", systemImage: "arrow.down.circle")
+                        }.buttonStyle(.borderedProminent).disabled(busy || downloading)
                     }
                     Spacer()
                     if busy { ProgressView().controlSize(.small) }
@@ -59,6 +65,16 @@ struct SteamGameTileView: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .contextMenu { menuItems(installed: installed) }
+    }
+
+    @ViewBuilder private func badge(installed: Bool, downloading: Bool) -> some View {
+        let (text, color): (String, Color) =
+            downloading ? ("Downloading", .blue) : installed ? ("Installed", .green) : ("Owned", .gray)
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(color.opacity(0.2), in: Capsule())
+            .foregroundStyle(color)
     }
 
     @ViewBuilder private func menuItems(installed: Bool) -> some View {

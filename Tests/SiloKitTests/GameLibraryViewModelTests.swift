@@ -19,9 +19,16 @@ struct GameLibraryViewModelTests {
         var backend = BackendConfig()
         if wine { backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64") }
         let vm = GameLibraryViewModel(
-            steamCMD: steamCMD, orchestrator: orchestrator, configStore: ConfigStore(paths: paths),
-            paths: paths, backend: backend)
+            steamCMD: steamCMD, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend)
         return (vm, fake, paths)
+    }
+
+    private func writeManifest(_ paths: AppPaths, _ acf: String, appID: Int) throws {
+        let steamapps = paths.gameLibraryDir.appendingPathComponent("steamapps")
+        try FileManager.default.createDirectory(at: steamapps, withIntermediateDirectories: true)
+        try acf.write(to: steamapps.appendingPathComponent("appmanifest_\(appID).acf"),
+                      atomically: true, encoding: .utf8)
     }
 
     @Test("load without a signed-in account → needsLogin")
@@ -46,16 +53,21 @@ struct GameLibraryViewModelTests {
         #expect(vm.owned.map(\.appID) == [220])
     }
 
-    @Test("isInstalled tracks the bucket's appmanifest")
-    func installed() throws {
+    @Test("install state: parses bucket appmanifests for installed size + live download progress")
+    func installState() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, _, paths) = make(tmp)
-        let info = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])
-        #expect(!vm.isInstalled(info))
-        let manifests = paths.gameLibraryDir.appendingPathComponent("steamapps")
-        try FileManager.default.createDirectory(at: manifests, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: manifests.appendingPathComponent("appmanifest_220.acf").path, contents: Data())
-        #expect(vm.isInstalled(info))
+        try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "SizeOnDisk" "12000000" }"#, appID: 220)
+        try writeManifest(paths, #""AppState" { "appid" "70" "name" "HL" "StateFlags" "1026" "installdir" "HL" "SizeOnDisk" "0" "BytesDownloaded" "50" "BytesToDownload" "100" }"#, appID: 70)
+        await vm.load()   // username nil → just refreshes install state
+
+        let hl2 = SteamAppInfo(appID: 220, name: "HL2", oslist: ["windows"])
+        let hl = SteamAppInfo(appID: 70, name: "HL", oslist: ["windows"])
+        #expect(vm.isInstalled(hl2))
+        #expect(vm.sizeString(hl2) != nil)
+        #expect(!vm.isInstalled(hl))
+        #expect(vm.isDownloading(hl))
+        #expect(vm.downloadProgress(hl) == 0.5)
     }
 
     @Test("download delegates to SteamCMD app_update for the game's bucket")

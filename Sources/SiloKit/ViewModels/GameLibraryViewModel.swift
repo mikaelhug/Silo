@@ -8,28 +8,35 @@ public final class GameLibraryViewModel {
     public enum LoadState: Equatable { case idle, needsLogin, loading, loaded, empty, error(String) }
 
     public private(set) var owned: [SteamAppInfo] = []
+    /// Install state per appID, parsed from each bucket's `appmanifest_*.acf` (size + download progress).
+    public private(set) var installedByID: [Int: SteamApp] = [:]
     public private(set) var loadState: LoadState = .idle
     public private(set) var busyAppIDs: Set<Int> = []
+    public private(set) var downloadingIDs: Set<Int> = []
     public private(set) var runningPIDs: [Int: Int32] = [:]   // appID → launched wine PID
     public var searchText: String = ""
     public var statusMessage: String?
 
     private let steamCMD: SteamCMDClient
+    private let discovery: DiscoveryEngine
     private let orchestrator: LaunchOrchestrator
     private let configStore: ConfigStore
     private let paths: AppPaths
     private var backend: BackendConfig
     private var username: String?
     private var monitorTask: Task<Void, Never>?
+    private var downloadMonitor: Task<Void, Never>?
 
     public init(
         steamCMD: SteamCMDClient,
+        discovery: DiscoveryEngine,
         orchestrator: LaunchOrchestrator,
         configStore: ConfigStore,
         paths: AppPaths,
         backend: BackendConfig
     ) {
         self.steamCMD = steamCMD
+        self.discovery = discovery
         self.orchestrator = orchestrator
         self.configStore = configStore
         self.paths = paths
@@ -41,24 +48,48 @@ public final class GameLibraryViewModel {
 
     public var canLaunch: Bool { backend.isWineConfigured }
     public var isLoggedIn: Bool { !(username ?? "").isEmpty }
+    public var installedCount: Int { owned.filter { isInstalled($0) }.count }
 
+    /// Search + sort: installed first, then downloading, then by name.
     public var filtered: [SteamAppInfo] {
-        searchText.isEmpty ? owned
+        let base = searchText.isEmpty ? owned
             : owned.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        // Precompute ranks on the main actor so the (non-isolated) sort closure only compares values.
+        let ranked = base.map { (game: $0, rank: isInstalled($0) ? 0 : (isDownloading($0) ? 1 : 2)) }
+        return ranked.sorted { a, b in
+            a.rank == b.rank
+                ? a.game.name.localizedCaseInsensitiveCompare(b.game.name) == .orderedAscending
+                : a.rank < b.rank
+        }.map(\.game)
     }
 
-    /// A game is installed once its bucket holds the SteamCMD appmanifest.
-    public func isInstalled(_ info: SteamAppInfo) -> Bool {
-        let manifest = paths.gameLibraryDir
-            .appendingPathComponent("steamapps/appmanifest_\(info.appID).acf")
-        return FileManager.default.fileExists(atPath: manifest.path)
-    }
+    // MARK: - Install state
 
+    public func isInstalled(_ info: SteamAppInfo) -> Bool { installedByID[info.appID]?.isFullyInstalled == true }
+    public func isDownloading(_ info: SteamAppInfo) -> Bool {
+        downloadingIDs.contains(info.appID) || (installedByID[info.appID].map { !$0.isFullyInstalled } ?? false)
+    }
     public func isRunning(_ info: SteamAppInfo) -> Bool { runningPIDs[info.appID] != nil }
     public func isBusy(_ info: SteamAppInfo) -> Bool { busyAppIDs.contains(info.appID) }
 
-    /// Load the owned Windows-only catalog from SteamCMD (requires a signed-in username).
+    /// `0...1` download progress for a game being fetched, else nil.
+    public func downloadProgress(_ info: SteamAppInfo) -> Double? { installedByID[info.appID]?.downloadProgress }
+    /// Human-readable on-disk size for an installed game, else nil.
+    public func sizeString(_ info: SteamAppInfo) -> String? {
+        guard let size = installedByID[info.appID]?.sizeOnDisk, size > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+
+    private func refreshInstalled() async {
+        let found = (try? await discovery.discoverGames(steamRoot: paths.gameLibraryDir)) ?? []
+        installedByID = Dictionary(found.map { ($0.appID, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    // MARK: - Catalog
+
+    /// Load the owned Windows-only catalog from SteamCMD (requires a signed-in username) + install state.
     public func load() async {
+        await refreshInstalled()
         guard let username, !username.isEmpty else { loadState = .needsLogin; return }
         loadState = .loading
         do {
@@ -69,19 +100,42 @@ public final class GameLibraryViewModel {
         }
     }
 
-    /// Download (or update) a game's Windows files into its bucket via SteamCMD (detached).
+    // MARK: - Download
+
+    /// Download (or update) a game's Windows files into its bucket via SteamCMD (detached), then poll
+    /// its appmanifest for live progress until it finishes.
     public func download(_ info: SteamAppInfo) async {
         guard let username, !busyAppIDs.contains(info.appID) else { return }
         busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
-        statusMessage = "Downloading \(info.name)…"
+        statusMessage = "Starting download: \(info.name)…"
         do {
             _ = try await steamCMD.download(appID: info.appID, username: username,
                                             logURL: paths.log(forAppID: info.appID))
-            statusMessage = "\(info.name): download started (watch its log for progress)."
+            downloadingIDs.insert(info.appID)
+            startDownloadMonitor()
+            statusMessage = "Downloading \(info.name)…"
         } catch {
             statusMessage = "\(info.name): \((error as NSError).localizedDescription)"
         }
     }
+
+    private func startDownloadMonitor() {
+        guard downloadMonitor == nil else { return }
+        downloadMonitor = Task { [weak self] in
+            while true {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, !self.downloadingIDs.isEmpty else { break }
+                await self.refreshInstalled()
+                for id in self.downloadingIDs where self.installedByID[id]?.isFullyInstalled == true {
+                    self.downloadingIDs.remove(id)
+                }
+                if self.downloadingIDs.isEmpty { break }
+            }
+            self?.downloadMonitor = nil
+        }
+    }
+
+    // MARK: - Launch
 
     /// Launch an installed game in its isolated GPTK bucket.
     public func play(_ info: SteamAppInfo) async {
@@ -112,11 +166,12 @@ public final class GameLibraryViewModel {
         await orchestrator.runWineTool("winecfg", appID: info.appID, backend: backend)
     }
 
-    /// Bridge owned metadata → the `SteamApp` the launch pipeline expects. The bucket layout
-    /// (`<gameLibrary>/steamapps/common/<appID>`) matches SteamCMD's `force_install_dir`.
+    /// Bridge owned metadata → the `SteamApp` the launch pipeline expects. Prefer the installed manifest
+    /// (real installDir/name); fall back to the bucket layout that matches SteamCMD's force_install_dir.
     private func steamApp(for info: SteamAppInfo) -> SteamApp {
-        SteamApp(appID: info.appID, name: info.name, installDir: String(info.appID),
-                 stateFlags: .fullyInstalled, sizeOnDisk: 0, libraryPath: paths.gameLibraryDir)
+        installedByID[info.appID]
+            ?? SteamApp(appID: info.appID, name: info.name, installDir: String(info.appID),
+                        stateFlags: .fullyInstalled, sizeOnDisk: 0, libraryPath: paths.gameLibraryDir)
     }
 
     private func startMonitor() {
