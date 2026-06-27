@@ -23,6 +23,10 @@ public enum Silo {
     /// Apple's official GPTK page (manual DMG download, requires Apple ID).
     public static let appleGPTKURL = URL(string: "https://developer.apple.com/games/game-porting-toolkit/")!
 
+    /// Official Windows Steam installer (run with `/S` for a silent install into the Steam bottle).
+    public static let steamInstallerURL =
+        URL(string: "https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe")!
+
     /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
     public static let winePrefixInitOverrides = "mscoree,mshtml="
