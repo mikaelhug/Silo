@@ -47,7 +47,10 @@ extension URL {
             .appendingPathComponent("lib/silo-bundled", isDirectory: true)
     }
 
-    /// `DYLD_FALLBACK_LIBRARY_PATH` value so wine resolves its bundled deps (by leaf name) then system libs.
+    /// `DYLD_FALLBACK_LIBRARY_PATH` value so wine resolves missing deps. The bundle comes FIRST:
+    /// empirically wine only finds its dlopen'd FreeType from the bundle, not from /usr/local/lib.
+    /// (The glib/gstreamer double-load is avoided by NOT bundling that media stack — see
+    /// Scripts/bundle-wine-dylibs.sh — rather than by reordering, which breaks fonts.)
     public var siloDyldFallback: String {
         "\(siloBundledDylibDir.path):/usr/local/lib:/usr/lib"
     }

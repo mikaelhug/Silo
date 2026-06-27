@@ -28,9 +28,17 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     var onRun: (@Sendable (Invocation) -> Void)?
 
     private var _alivePIDs: Set<Int32> = []
+    private var _processCount = 0
 
     var invocations: [Invocation] { lock.withLock { _invocations } }
     var lastInvocation: Invocation? { lock.withLock { _invocations.last } }
+
+    /// Value returned by `processCount` (set high in tests to simulate a winedbg storm).
+    var processCountValue: Int {
+        get { lock.withLock { _processCount } }
+        set { lock.withLock { _processCount = newValue } }
+    }
+    func processCount(matching pattern: String) async -> Int { lock.withLock { _processCount } }
 
     /// Simulate a process exiting (or coming alive) for `isRunning` checks.
     func setAlive(_ pid: Int32, _ alive: Bool) {

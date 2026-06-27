@@ -3,7 +3,18 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M32 COMPLETE.** 125 tests / 25 suites green; CI green.
+- **M0–M33 COMPLETE.** 127 tests / 26 suites green; CI green.
+- M33 (user UX/bug fixes): (1) Steam card now has a right-click context menu + always-visible ellipsis
+  (Open Steam, Reinstall, View Log…, Wine Config…, Reveal Bottle, Settings…). (2) Log viewer opens as a
+  STANDALONE WINDOW (WindowGroup id "silo-log" + openWindow), not a modal sheet, so it live-tails while
+  you drive the main window; generalized to any file (title+url), added an Autoscroll toggle. (3) (b)
+  CrashLoopGuard + ProcessRunning.processCount: auto `wineserver -k` if a `winedbg` storm appears, wired
+  behind openSteam. (4) (a) gstreamer dedup: reorder to bundled-LAST was tried but BREAKS FreeType
+  (wine only finds its dlopen'd freetype from the bundle), so kept bundled-FIRST; proper dedup = don't
+  bundle the glib/gstreamer/ffmpeg media stack (TODO in bundler; only manifests during video playback).
+- **OPEN (windowing):** Steam launches but renders as two blank/black rootless windows (steam + CEF
+  steamwebhelper). Testing a wine VIRTUAL DESKTOP (HKCU\Software\Wine\Explorer Desktop=Default) to
+  composite into one window — enabled on the user's bottle; awaiting visual confirmation it renders.
 - M32 (bug: "Open Steam" opens nothing): Steam WAS launching but its CEF UI renderer went
   "unresponsive" and Steam killed+relaunched it every ~90s forever, so the window stayed 0x0/blank.
   Root cause: the CEF sandbox under wine. Fix: `Silo.steamLaunchArgs` now passes `-no-cef-sandbox`

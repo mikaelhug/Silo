@@ -19,5 +19,13 @@ public struct SiloApp: App {
                 }
         }
         .windowToolbarStyle(.unified)
+
+        // Logs open as independent windows so they stay up (live-tailing) while you drive the main
+        // window — e.g. watching steam.log while pressing "Open Steam".
+        WindowGroup(id: "silo-log", for: LogTarget.self) { $target in
+            if let target {
+                LogViewerView(title: target.title, url: target.url)
+            }
+        }
     }
 }
