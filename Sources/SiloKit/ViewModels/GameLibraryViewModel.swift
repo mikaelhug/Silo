@@ -62,18 +62,13 @@ public final class GameLibraryViewModel {
     public var isLoggedIn: Bool { !(username ?? "").isEmpty }
     public var installedCount: Int { owned.filter { isInstalled($0) }.count }
 
-    /// Search + Windows-only toggle + sort: installed first, then downloading, then by name.
+    /// Search + Windows-only filter. `owned` is already name-sorted (from `merge`) and the UI groups by
+    /// state in sections, so no per-access re-sort is needed — keeps this cheap during a download.
     public var filtered: [SteamAppInfo] {
-        var base = searchText.isEmpty ? owned
-            : owned.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        var base = owned
         if showWindowsOnly { base = base.filter { !$0.supportsMac } }
-        // Precompute ranks on the main actor so the (non-isolated) sort closure only compares values.
-        let ranked = base.map { (game: $0, rank: isInstalled($0) ? 0 : (isDownloading($0) ? 1 : 2)) }
-        return ranked.sorted { a, b in
-            a.rank == b.rank
-                ? a.game.name.localizedCaseInsensitiveCompare(b.game.name) == .orderedAscending
-                : a.rank < b.rank
-        }.map(\.game)
+        if !searchText.isEmpty { base = base.filter { $0.name.localizedCaseInsensitiveContains(searchText) } }
+        return base
     }
 
     // MARK: - Install state
@@ -244,25 +239,41 @@ public final class GameLibraryViewModel {
     private func startDownloadMonitor() {
         guard downloadMonitor == nil else { return }
         downloadMonitor = Task { [weak self] in
+            var tick = 0
             while true {
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                try? await Task.sleep(for: .seconds(2))
                 guard let self, !self.downloadingIDs.isEmpty else { break }
+                let ids = self.downloadingIDs
+                let paths = self.paths
+                tick &+= 1
+                // Read the logs + run the progress regex OFF the main actor (file I/O + NSRegularExpression).
+                let parsed: [Int: (progress: SteamCMD.Progress?, finished: Bool)] =
+                    await Task.detached(priority: .utility) {
+                        ids.reduce(into: [:]) { acc, id in
+                            let text = Self.tail(paths.log(forAppID: id))
+                            acc[id] = (SteamCMD.parseProgress(text), SteamCMD.isInstalledInLog(text, appID: id))
+                        }
+                    }.value
+
                 let now = Date()
-                for id in self.downloadingIDs {
-                    let log = Self.tail(self.paths.log(forAppID: id))
-                    if SteamCMD.isInstalledInLog(log, appID: id) {
-                        self.finishDownload(id)
-                        await self.refreshInstalled()
-                        continue
-                    }
-                    guard let progress = SteamCMD.parseProgress(log) else { continue }
+                for id in ids {
+                    guard let entry = parsed[id] else { continue }
+                    if entry.finished { self.finishDownload(id); await self.refreshInstalled(); continue }
+                    guard let progress = entry.progress else { continue }
                     self.downloadProgressByID[id] = progress.fraction
                     if let prev = self.lastBytes[id], now.timeIntervalSince(prev.at) > 0.5 {
                         self.downloadSpeeds[id] = max(0, Double(progress.done - prev.bytes) / now.timeIntervalSince(prev.at))
                     }
                     self.lastBytes[id] = (progress.done, now)
                 }
-                if self.downloadingIDs.isEmpty { break }
+                // Every ~12s, stop tracking a download whose SteamCMD has died (crash / lost network) so the
+                // loop can't spin forever — it falls back to the "paused" state, resumable by the user.
+                if tick % 6 == 0 {
+                    for id in self.downloadingIDs where !(await self.steamCMD.isDownloadProcessRunning(appID: id)) {
+                        self.clearDownloadState(id)
+                    }
+                    await self.refreshInstalled()
+                }
             }
             self?.downloadMonitor = nil
         }
@@ -275,8 +286,9 @@ public final class GameLibraryViewModel {
         statusMessage = "\(name) finished downloading."
     }
 
-    /// Read the tail of a log file (SteamCMD progress lines live near the end).
-    private static func tail(_ url: URL, maxBytes: Int = 64 * 1024) -> String {
+    /// Read the tail of a log file (SteamCMD progress lines live near the end). `nonisolated` so the
+    /// monitor can call it off the main actor.
+    private nonisolated static func tail(_ url: URL, maxBytes: Int = 32 * 1024) -> String {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
         defer { try? handle.close() }
         let end = (try? handle.seekToEnd()) ?? 0
