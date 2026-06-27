@@ -77,10 +77,15 @@ struct GameSettingsSheet: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Launch options") {
+            Section {
                 TextField("e.g. -windowed -dx11 -novid", text: $vm.config.launchOptionsString)
                     .autocorrectionDisabled()
-                Text("Extra arguments passed to the game executable (space-separated).")
+            } header: {
+                Text("Launch options")
+            } footer: {
+                Text("Extra arguments passed to the game executable (space-separated). Electron/Chromium "
+                     + "games that fail with “Could not create D3D11 device” / “No available renderers”: "
+                     + "try --use-angle=gl, then --disable-gpu --in-process-gpu.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -106,8 +111,11 @@ struct GameSettingsSheet: View {
                 if vm.config.presence == .emulatorStub {
                     PathPickerRow(title: "Emulator stub (e.g. steam_api64.dll)",
                                   url: $vm.config.steamStubSourcePath, chooseDirectories: false)
-                    Text("Owned games only. You are responsible for compliance with Steam's "
-                         + "Subscriber Agreement. Silo never downloads this file.")
+                    Text("For games that quit with “Steam not initialized”. Provide a steam_api(64).dll "
+                         + "(e.g. from Goldberg) — Silo backs up and replaces the game's matching DLL "
+                         + "wherever it ships (incl. Electron resources/). The filename must match the "
+                         + "game's. Owned games only; you are responsible for Steam Subscriber Agreement "
+                         + "compliance, and Silo never downloads this file.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

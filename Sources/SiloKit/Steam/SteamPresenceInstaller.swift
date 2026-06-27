@@ -52,26 +52,13 @@ public struct SteamPresenceInstaller: Sendable {
                 throw PresenceError.stubMissing(stubSource)
             }
             var receipt = Receipt()
-            let dest = dir.appendingPathComponent(stubSource.lastPathComponent)
-            let destExists = fileManager.fileExists(atPath: dest.path)
-            // Idempotent re-apply: if our stub is already in place, don't "back it up" as if it were
-            // the game's original DLL (that previously overwrote the real backup → permanent data loss).
-            let alreadyOurStub = destExists && fileManager.contentsEqual(atPath: dest.path, andPath: stubSource.path)
-
-            if destExists && !alreadyOurStub {
-                let backup = dir.appendingPathComponent(stubSource.lastPathComponent + ".silo-backup")
-                // Preserve the real original ONCE; never overwrite an existing backup on re-apply.
-                if !fileManager.fileExists(atPath: backup.path) {
-                    try fileManager.copyItem(at: dest, to: backup)
-                }
-                try fileManager.removeItem(at: dest)
-                receipt.backups.append(Backup(original: dest, backup: backup))
-            } else if !destExists {
-                receipt.createdFiles.append(dest)
-            }
-            if !alreadyOurStub {
-                try fileManager.copyItem(at: stubSource, to: dest)
-            }
+            // Replace EVERY copy of the game's Steam-API DLL in the install tree. Electron/Unity/etc. ship
+            // it in a subdir (e.g. resources/app.asar.unpacked/.../win64/steam_api64.dll), where a stub
+            // merely dropped next to the exe would never be loaded. If the game ships none, place one next
+            // to the exe (the game must then load it from there).
+            var targets = locateFiles(named: stubSource.lastPathComponent, under: dir)
+            if targets.isEmpty { targets = [dir.appendingPathComponent(stubSource.lastPathComponent)] }
+            for dest in targets { try installStub(stubSource, at: dest, into: &receipt) }
             receipt.createdFiles.append(try writeAppID(appID, in: dir))
             return receipt
 
@@ -111,6 +98,35 @@ public struct SteamPresenceInstaller: Sendable {
     }
 
     // MARK: - Helpers
+
+    /// Copy `stub` over `dest`, backing up a pre-existing original exactly once. Idempotent: never
+    /// "backs up" our own stub and never overwrites an existing backup (which would lose the real DLL).
+    private func installStub(_ stub: URL, at dest: URL, into receipt: inout Receipt) throws {
+        let destExists = fileManager.fileExists(atPath: dest.path)
+        if destExists && fileManager.contentsEqual(atPath: dest.path, andPath: stub.path) { return }
+        if destExists {
+            let backup = dest.appendingPathExtension("silo-backup")
+            if !fileManager.fileExists(atPath: backup.path) { try fileManager.copyItem(at: dest, to: backup) }
+            try fileManager.removeItem(at: dest)
+            receipt.backups.append(Backup(original: dest, backup: backup))
+        } else {
+            try fileManager.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            receipt.createdFiles.append(dest)
+        }
+        try fileManager.copyItem(at: stub, to: dest)
+    }
+
+    /// Every file named `name` under `root` (bounded recursion so a huge game tree isn't fully walked).
+    private func locateFiles(named name: String, under root: URL, maxDepth: Int = 12) -> [URL] {
+        guard let enumerator = fileManager.enumerator(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
+        var found: [URL] = []
+        for case let url as URL in enumerator {
+            if enumerator.level >= maxDepth { enumerator.skipDescendants() }
+            if url.lastPathComponent == name { found.append(url) }
+        }
+        return found
+    }
 
     private func writeAppID(_ appID: Int, in dir: URL) throws -> URL {
         let file = dir.appendingPathComponent("steam_appid.txt")
