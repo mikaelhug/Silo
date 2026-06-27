@@ -3,7 +3,7 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M31 COMPLETE.** 125 tests / 25 suites green; CI green.
+- **M0–M32 COMPLETE.** 125 tests / 25 suites green; CI green.
 - M32 (bug: "Open Steam" opens nothing): Steam WAS launching but its CEF UI renderer went
   "unresponsive" and Steam killed+relaunched it every ~90s forever, so the window stayed 0x0/blank.
   Root cause: the CEF sandbox under wine. Fix: `Silo.steamLaunchArgs` now passes `-no-cef-sandbox`
