@@ -379,14 +379,17 @@ public final class GameLibraryViewModel {
         await orchestrator.runWineTool("winecfg", appID: info.appID, backend: backend)
     }
 
-    /// Delete an installed game's files (the bucket) to reclaim disk. The isolated prefix is left in
-    /// place (it holds the game's wine config + any local saves and is reused on re-download). No-op
-    /// while the game is running or downloading.
+    /// Fully remove an installed game: delete both its downloaded files (the bucket) **and** its isolated
+    /// wine prefix, reclaiming all of its disk. No-op while the game is running or downloading.
     public func uninstall(_ info: SteamAppInfo) async {
         guard !isRunning(info), !isDownloading(info), !busyAppIDs.contains(info.appID) else { return }
         busyAppIDs.insert(info.appID); defer { busyAppIDs.remove(info.appID) }
         let bucket = paths.gameInstallDir(forAppID: info.appID)
-        await Task.detached { try? FileManager.default.removeItem(at: bucket) }.value   // off the main actor
+        let prefix = paths.prefix(forAppID: info.appID)
+        await Task.detached {   // off the main actor
+            try? FileManager.default.removeItem(at: bucket)
+            try? FileManager.default.removeItem(at: prefix)
+        }.value
         await refreshInstalled()
         setStatus("Uninstalled \(info.name).")
     }
