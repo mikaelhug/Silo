@@ -33,6 +33,12 @@ process with `WINEPREFIX` overridden to the isolated prefix).
 7. **Never bundle or auto-download Wine, GPTK, or any Steam-API emulator (Goldberg).** The runtime is
    fetched only from a URL the user can see/override; the emulator stub is **user-provided only**,
    with a prominent legal/ToS caveat, original DLL backed up.
+8. **The Wine runtime is built ONLY from CrossOver's FOSS source** (`crossover-sources-<ver>.tar.gz` via
+   `Scripts/build-wine.sh` / `build-wine.yml`). This is the ONE accepted base. **Do NOT propose, switch to,
+   or suggest** Gcenx/`macOS_Wine_builds` (stale, unverifiable source provenance), Whisky, mainline/staging
+   prebuilts, or using an installed CrossOver/CodeWeavers product. Every black-window / login / graphics
+   problem is to be **fixed on this from-source CrossOver-FOSS Wine** — debug the build flags, Wine
+   registry, env, and Silo's launch code; never answer "use a different runtime." Decided 2026-06-28.
 
 ## Two runtime roles
 - `BottleRole.steam` → a **simple/vanilla** Wine bottle (Steam is finicky; no GPTK overrides).
