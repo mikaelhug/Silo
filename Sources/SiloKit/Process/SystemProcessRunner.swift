@@ -75,6 +75,34 @@ public struct SystemProcessRunner: ProcessRunning {
         return Int(text) ?? 0
     }
 
+    public func firstPID(matching pattern: String) async -> Int32? {
+        let result = try? await run(
+            executable: URL(fileURLWithPath: "/usr/bin/pgrep"),
+            arguments: ["-f", pattern], environment: [:], currentDirectory: nil)
+        return result?.stdoutString
+            .split(whereSeparator: \.isNewline).first
+            .flatMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
+        guard pid > 0 else { return NoopObservation() }
+        let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
+        source.setEventHandler(handler: onExit)
+        source.resume()
+        return DispatchObservation(source)
+    }
+
+    public func observeWrites(at url: URL, onWrite: @escaping @Sendable () -> Void) -> any ProcessObservation {
+        let fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else { return NoopObservation() }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write, .extend], queue: .global())
+        source.setEventHandler(handler: onWrite)
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        return DispatchObservation(source)
+    }
+
     // MARK: - Synchronous workers (run on a background queue)
 
     private static func mergedEnvironment(_ overrides: [String: String]) -> [String: String] {
@@ -147,4 +175,13 @@ public struct SystemProcessRunner: ProcessRunning {
         try process.run()
         return process.processIdentifier
     }
+}
+
+/// Owns a `DispatchSource` (process-exit or file-write) and tears it down on `cancel()`/deinit.
+/// Held on the actor that created it; the wrapped source is internally thread-safe.
+private final class DispatchObservation: ProcessObservation {
+    private let source: any DispatchSourceProtocol
+    init(_ source: any DispatchSourceProtocol) { self.source = source }
+    func cancel() { source.cancel() }   // also runs the cancel handler (closes the file fd)
+    deinit { source.cancel() }
 }

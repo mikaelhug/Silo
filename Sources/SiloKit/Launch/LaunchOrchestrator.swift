@@ -112,6 +112,11 @@ public struct LaunchOrchestrator: Sendable {
 
     public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
 
+    /// Observe a launched game's exit **without polling** (kqueue). Retain the token to keep observing.
+    public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
+        runner.observeExit(pid: pid, onExit: onExit)
+    }
+
     /// Run a built-in wine tool (e.g. `winecfg`, `regedit`) against a game's prefix, detached.
     public func runWineTool(_ tool: String, appID: Int, backend: BackendConfig) async {
         guard let wine = backend.wineBinary(for: .gptk) else { return }

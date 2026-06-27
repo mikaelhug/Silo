@@ -1,5 +1,12 @@
 import Foundation
 
+/// A cancellable handle to an event observation (process exit / file write). Held by the observer
+/// (on the main actor); dropping or cancelling it stops the observation and frees OS resources.
+/// Not `Sendable` by design — it never leaves the actor that created it.
+public protocol ProcessObservation: AnyObject {
+    func cancel()
+}
+
 /// The single seam through which Silo executes external binaries (wine, wineboot, codesign, …).
 ///
 /// Production code uses `SystemProcessRunner`; tests inject a fake so provisioning, linking, and
@@ -32,11 +39,35 @@ public protocol ProcessRunning: Sendable {
     /// implement it.
     func processCount(matching pattern: String) async -> Int
 
+    /// First PID whose full command line contains `pattern` (e.g. re-attaching to an orphaned download).
+    func firstPID(matching pattern: String) async -> Int32?
+
     /// Terminate a process by PID (SIGTERM). Used to cancel a SteamCMD download. No-op default.
     func terminate(pid: Int32)
+
+    /// Observe a process's exit **without polling** (kqueue): `onExit` fires once when `pid` dies.
+    /// The returned token must be retained to keep observing; cancelling/dropping it stops.
+    func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation
+
+    /// Observe appends to a file **without polling** (kqueue): `onWrite` fires when the file grows.
+    /// Used to read SteamCMD download progress reactively from its log.
+    func observeWrites(at url: URL, onWrite: @escaping @Sendable () -> Void) -> any ProcessObservation
+}
+
+/// A token that observes nothing — for conformers (and platforms) without event support.
+public final class NoopObservation: ProcessObservation {
+    public init() {}
+    public func cancel() {}
 }
 
 extension ProcessRunning {
     public func processCount(matching pattern: String) async -> Int { 0 }
+    public func firstPID(matching pattern: String) async -> Int32? { nil }
     public func terminate(pid: Int32) {}
+    public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
+        NoopObservation()
+    }
+    public func observeWrites(at url: URL, onWrite: @escaping @Sendable () -> Void) -> any ProcessObservation {
+        NoopObservation()
+    }
 }

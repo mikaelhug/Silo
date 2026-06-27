@@ -30,6 +30,8 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     private var _alivePIDs: Set<Int32> = []
     private var _processCount = 0
     private var _matching: Set<String> = []
+    private var _exitHandlers: [Int32: [(id: Int, run: @Sendable () -> Void)]] = [:]
+    private var _nextObservationID = 0
 
     var invocations: [Invocation] { lock.withLock { _invocations } }
     var lastInvocation: Invocation? { lock.withLock { _invocations.last } }
@@ -47,12 +49,36 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     func processCount(matching pattern: String) async -> Int {
         lock.withLock { _matching.contains(pattern) ? 1 : _processCount }
     }
+    func firstPID(matching pattern: String) async -> Int32? {
+        lock.withLock { _matching.contains(pattern) ? spawnPID : nil }
+    }
 
-    /// Simulate a process exiting (or coming alive) for `isRunning` checks.
+    /// Simulate a process exiting (or coming alive). When marked dead, fires any `observeExit` handlers.
     func setAlive(_ pid: Int32, _ alive: Bool) {
-        lock.withLock { if alive { _alivePIDs.insert(pid) } else { _alivePIDs.remove(pid) } }
+        let handlers: [@Sendable () -> Void] = lock.withLock {
+            if alive { _alivePIDs.insert(pid); return [] }
+            _alivePIDs.remove(pid)
+            let fired = _exitHandlers[pid]?.map(\.run) ?? []
+            _exitHandlers[pid] = nil
+            return fired
+        }
+        handlers.forEach { $0() }
     }
     func isRunning(pid: Int32) -> Bool { lock.withLock { _alivePIDs.contains(pid) } }
+
+    func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
+        let id: Int = lock.withLock {
+            let id = _nextObservationID; _nextObservationID += 1
+            _exitHandlers[pid, default: []].append((id, onExit))
+            return id
+        }
+        return FakeObservation { [weak self] in
+            self?.lock.withLock { self?._exitHandlers[pid]?.removeAll { $0.id == id } }
+        }
+    }
+    func observeWrites(at url: URL, onWrite: @escaping @Sendable () -> Void) -> any ProcessObservation {
+        FakeObservation {}   // tests drive progress via the manifest, not live log writes
+    }
 
     /// Queue a result to be returned by the next `run` call (FIFO).
     func queueResult(_ result: ProcessResult) {
@@ -93,4 +119,11 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
         hook?(invocation)
         return pid
     }
+}
+
+/// Cancellable token returned by the fake's observers; runs `onCancel` to detach the handler.
+final class FakeObservation: ProcessObservation {
+    private let onCancel: @Sendable () -> Void
+    init(_ onCancel: @escaping @Sendable () -> Void) { self.onCancel = onCancel }
+    func cancel() { onCancel() }
 }
