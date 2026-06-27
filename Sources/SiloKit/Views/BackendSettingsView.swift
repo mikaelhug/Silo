@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BackendSettingsView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.openWindow) private var openWindow
     @State private var showAdvanced = false
 
     var body: some View {
@@ -41,6 +42,8 @@ struct BackendSettingsView: View {
                 }
             }
 
+            steamBottleSection
+
             Section {
                 Button("Save") { Task { await vm.save() } }
                     .keyboardShortcut("s", modifiers: .command)
@@ -48,5 +51,34 @@ struct BackendSettingsView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Advanced Settings")
+    }
+
+    /// Experimental: stand up a shared Steam bottle (real Windows Steam, login seeded from macOS Steam)
+    /// for Steamworks/DRM games. This is the validation surface for the in-prefix-Steam approach.
+    @ViewBuilder private var steamBottleSection: some View {
+        let bottle = env.steamBottleVM
+        Section {
+            Button("Set up Steam bottle") { Task { await bottle.setUp() } }
+                .disabled(!bottle.canSetUp)
+            Button("Re-seed login from macOS Steam") { Task { await bottle.reseedLogin() } }
+                .disabled(bottle.busy)
+            Button("Launch Steam (background)") { Task { await bottle.launchSteam() } }
+                .disabled(bottle.busy || !bottle.steamInstalled)
+            Button("Open bottle log") {
+                openWindow(id: LogTarget.windowID,
+                           value: LogTarget(title: "Steam Bottle — Log", url: env.paths.steamBottleLog))
+            }
+            if bottle.busy { ProgressView().controlSize(.small) }
+            if !bottle.status.isEmpty {
+                Text(bottle.status).font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Steam bottle (experimental)")
+        } footer: {
+            Text("For Steamworks/DRM games that need a running Steam client. Sign in to the macOS Steam "
+                 + "app first; “Set up” installs Windows Steam into a shared prefix and copies that login "
+                 + "in (no second sign-in). Then Launch Steam, and run a DRM game — it shares this prefix.")
+                .font(.caption)
+        }
     }
 }
