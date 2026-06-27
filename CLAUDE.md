@@ -40,12 +40,19 @@ process with `WINEPREFIX` overridden to the isolated prefix).
   (auto-selected when GPTK is unavailable or a GPTK launch attempt fails).
 
 ## Steam Presence Strategy (per-game, the DRM answer)
-The Master bottle cannot project Steam presence into an isolated prefix (Steam IPC is prefix-scoped).
-So per game (`SteamPresenceStrategy`, default `.steamAppIDFile`):
+Steamworks IPC is **prefix-scoped**: a game can only reach a Steam client running in its OWN Wine prefix
+(separate wineservers = no cross-prefix bridge; Valve's Proton↔native-Steam bridge is Linux-only). So a
+single "master" Steam can NOT serve games in other bottles — the game and a logged-in Steam client must
+be **co-resident in one prefix**.
+Per game (`SteamPresenceStrategy`, default `.steamAppIDFile`):
 - `.none` — no Steam needed.
-- `.steamAppIDFile` — write `steam_appid.txt` next to the exe.
-- `.sharedSteamClient` — symlink Master Steam client into the prefix + background `steam.exe`.
-- `.emulatorStub` — copy a **user-provided** stub next to the exe (backup original; legal caveat).
+- `.steamAppIDFile` — write `steam_appid.txt` next to the exe (enough for most non-DRM titles).
+- `.sharedSteamClient` — **planned, not implemented**: run a real Windows Steam client co-resident in the
+  game's prefix (the only correct way to satisfy a Steamworks/DRM game with online features intact). The
+  open problem is a headless/cached login that sidesteps the macOS-26 CEF black-window. Hidden from the UI.
+**Goldberg emulator REMOVED (2026-06-27):** a Steam-API emulator fakes ownership and kills all online
+features ("no online" = dealbreaker), so `.emulatorStub` was dropped. Constraint #7 still stands — never
+bundle/auto-download an emulator.
 
 ## Concurrency model (apply consistently)
 - **Pure & synchronous** (trivially `Sendable`): `ACFTokenizer`, `KeyValuesParser`, `KVNode`,
@@ -96,7 +103,8 @@ Write the exact question into `STATUS.md` → `## BLOCKED`, commit the last gree
 - The third-party GPTK/wine-crossover download URL/license to pin as default, or it 404s.
 - Apple Developer login / notarization secrets for signed distribution.
 - A real Wine runtime + downloaded game to validate true `wineboot`/launch end-to-end.
-- A user-provided Goldberg stub path to exercise `.emulatorStub` for real.
+- Getting the Windows Steam client to render/log in once in a bottle on macOS 26 (the CEF black-window) —
+  the prerequisite for the `.sharedSteamClient` (in-prefix Steam) path.
 - A material product/legal ambiguity where guessing risks rework.
 - Anything needing SIP disable / Full Disk Access / a TCC prompt the agent can't satisfy headlessly.
 

@@ -104,20 +104,17 @@ struct GameSettingsSheet: View {
                 }
             }
 
-            Section("Steam presence") {
+            Section {
                 Picker("Strategy", selection: $vm.config.presence) {
                     ForEach(SteamPresenceStrategy.userSelectable) { Text($0.displayName).tag($0) }
                 }
-                if vm.config.presence == .emulatorStub {
-                    PathPickerRow(title: "Emulator stub (e.g. steam_api64.dll)",
-                                  url: $vm.config.steamStubSourcePath, chooseDirectories: false)
-                    Text("For games that quit with “Steam not initialized”. Provide a steam_api(64).dll "
-                         + "(e.g. from Goldberg) — Silo backs up and replaces the game's matching DLL "
-                         + "wherever it ships (incl. Electron resources/). The filename must match the "
-                         + "game's. Owned games only; you are responsible for Steam Subscriber Agreement "
-                         + "compliance, and Silo never downloads this file.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+            } header: {
+                Text("Steam presence")
+            } footer: {
+                Text("steam_appid.txt is enough for most games. Titles that hard-require the Steam client "
+                     + "(they quit with “Steam not initialized”) aren't supported yet — running a real "
+                     + "Steam client in the prefix is planned.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

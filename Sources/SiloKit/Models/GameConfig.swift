@@ -7,8 +7,6 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
     public var backend: GraphicsBackend
     public var envFlags: EnvFlags
     public var presence: SteamPresenceStrategy
-    /// User-provided Steam-API emulator stub (only used when `presence == .emulatorStub`).
-    public var steamStubSourcePath: URL?
     /// Game executable relative to the install dir (e.g. `bin/game.exe`). `nil` = auto-detect.
     public var executableRelativePath: String?
     /// Extra arguments appended after the game executable.
@@ -20,7 +18,6 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
         backend: GraphicsBackend = .gptk,
         envFlags: EnvFlags = EnvFlags(),
         presence: SteamPresenceStrategy = .steamAppIDFile,
-        steamStubSourcePath: URL? = nil,
         executableRelativePath: String? = nil,
         customArgs: [String] = [],
         lastPlayed: Date? = nil
@@ -29,7 +26,6 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
         self.backend = backend
         self.envFlags = envFlags
         self.presence = presence
-        self.steamStubSourcePath = steamStubSourcePath
         self.executableRelativePath = executableRelativePath
         self.customArgs = customArgs
         self.lastPlayed = lastPlayed
