@@ -111,6 +111,28 @@ public struct LaunchOrchestrator: Sendable {
     public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
     public func terminate(pid: Int32) { runner.terminate(pid: pid) }
 
+    /// Stop a game running in the shared Steam bottle. SIGTERMs the launched process AND asks Wine to
+    /// `taskkill /IM <game exe>` — the launched PID is only Wine's loader, so a game that re-execs or
+    /// spawns children would otherwise be orphaned (SIGTERM hits the loader, not the wineserver-hosted
+    /// process). We can't `wineserver -k` (it'd kill the co-resident Steam), but `/IM` targets only the
+    /// game's own image name, so Steam (steam.exe / steamwebhelper.exe) is untouched. `WINEMSYNC=1` so the
+    /// taskkill joins the SAME wineserver as the game (Steam + games all run msync). Best-effort.
+    public func stopGame(pid: Int32, exeName: String?, prefix: URL, backend: BackendConfig) async {
+        runner.terminate(pid: pid)
+        guard let exeName, let wine = backend.wineBinary(for: .gptk) else { return }
+        var env = Silo.wineEnvironment(prefix: prefix, wine: wine)
+        env["WINEMSYNC"] = "1"
+        _ = try? await runner.spawnDetached(
+            executable: wine, arguments: ["taskkill", "/F", "/IM", exeName],
+            environment: env, currentDirectory: nil,
+            logURL: prefix.appendingPathComponent("winetool.log"))
+    }
+
+    /// The basename of the executable a game would launch (for `taskkill`), or nil if unresolvable.
+    public func resolvedExecutableName(app: SteamApp, config: GameConfig) -> String? {
+        (try? resolveExecutable(app: app, config: config))?.lastPathComponent
+    }
+
     /// Observe a launched game's exit **without polling** (kqueue). Retain the token to keep observing.
     public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
         runner.observeExit(pid: pid, onExit: onExit)
