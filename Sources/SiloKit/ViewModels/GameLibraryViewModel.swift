@@ -11,27 +11,33 @@ public final class GameLibraryViewModel {
     /// Install state per appID, parsed from each bucket's `appmanifest_*.acf` (size + download progress).
     public private(set) var installedByID: [Int: SteamApp] = [:]
     public private(set) var loadState: LoadState = .idle
+    public private(set) var isRefreshing = false
     public private(set) var busyAppIDs: Set<Int> = []
     public private(set) var downloadingIDs: Set<Int> = []
     public private(set) var runningPIDs: [Int: Int32] = [:]   // appID → launched wine PID
     public var searchText: String = ""
+    /// Hide games that also have a native macOS build (run those in the Steam app instead).
+    public var showWindowsOnly: Bool = false
     public var statusMessage: String?
 
     private let steamCMD: SteamCMDClient
     private let discovery: DiscoveryEngine
     private let orchestrator: LaunchOrchestrator
     private let configStore: ConfigStore
+    private let cache: LibraryCacheStore
     private let paths: AppPaths
     private var backend: BackendConfig
     private var username: String?
     private var monitorTask: Task<Void, Never>?
     private var downloadMonitor: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
 
     public init(
         steamCMD: SteamCMDClient,
         discovery: DiscoveryEngine,
         orchestrator: LaunchOrchestrator,
         configStore: ConfigStore,
+        cache: LibraryCacheStore,
         paths: AppPaths,
         backend: BackendConfig
     ) {
@@ -39,6 +45,7 @@ public final class GameLibraryViewModel {
         self.discovery = discovery
         self.orchestrator = orchestrator
         self.configStore = configStore
+        self.cache = cache
         self.paths = paths
         self.backend = backend
     }
@@ -50,10 +57,11 @@ public final class GameLibraryViewModel {
     public var isLoggedIn: Bool { !(username ?? "").isEmpty }
     public var installedCount: Int { owned.filter { isInstalled($0) }.count }
 
-    /// Search + sort: installed first, then downloading, then by name.
+    /// Search + Windows-only toggle + sort: installed first, then downloading, then by name.
     public var filtered: [SteamAppInfo] {
-        let base = searchText.isEmpty ? owned
+        var base = searchText.isEmpty ? owned
             : owned.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        if showWindowsOnly { base = base.filter { !$0.supportsMac } }
         // Precompute ranks on the main actor so the (non-isolated) sort closure only compares values.
         let ranked = base.map { (game: $0, rank: isInstalled($0) ? 0 : (isDownloading($0) ? 1 : 2)) }
         return ranked.sorted { a, b in
@@ -87,17 +95,57 @@ public final class GameLibraryViewModel {
 
     // MARK: - Catalog
 
-    /// Load the owned Windows-only catalog from SteamCMD (requires a signed-in username) + install state.
+    /// Show the cached catalog **instantly**, then refresh from SteamCMD in the background and merge —
+    /// so launch is fast, the cold-cache "random subset" converges to the full set, and nothing that
+    /// was showing disappears on a flaky refresh.
     public func load() async {
         await refreshInstalled()
         guard let username, !username.isEmpty else { loadState = .needsLogin; return }
-        loadState = .loading
-        do {
-            owned = try await steamCMD.ownedWindowsGames(username: username)
-            loadState = owned.isEmpty ? .empty : .loaded
-        } catch {
-            loadState = .error((error as NSError).localizedDescription)
+        if let cached = await cache.load(), cached.username == username, !cached.games.isEmpty {
+            owned = cached.games
+            loadState = .loaded
+        } else if owned.isEmpty {
+            loadState = .loading
         }
+        startRefresh(username: username)
+    }
+
+    /// Manual refresh (toolbar) — re-enumerate in the background and merge into the cache.
+    public func refresh() async {
+        guard let username, !username.isEmpty else { loadState = .needsLogin; return }
+        await refreshInstalled()
+        startRefresh(username: username)
+    }
+
+    private func startRefresh(username: String) {
+        guard refreshTask == nil else { return }
+        isRefreshing = true
+        refreshTask = Task { [weak self] in
+            await self?.performRefresh(username: username)
+            self?.isRefreshing = false
+            self?.refreshTask = nil
+        }
+    }
+
+    /// Enumerate from SteamCMD and merge into the catalog (awaitable; `startRefresh` wraps it in a Task).
+    func performRefresh(username: String) async {
+        if let fresh = try? await steamCMD.ownedGames(username: username) {
+            let snapshot = merge(fresh)
+            await cache.save(username: username, games: snapshot, at: Date())
+        } else if owned.isEmpty {
+            loadState = .error("Couldn't reach Steam — try Refresh.")
+        }
+    }
+
+    /// Union the fresh catalog into what we have (newer metadata wins; cached-but-missing games are kept,
+    /// guarding against a partial cold-cache enumeration). Returns the merged snapshot to persist.
+    @discardableResult
+    private func merge(_ fresh: [SteamAppInfo]) -> [SteamAppInfo] {
+        var byID = Dictionary(owned.map { ($0.appID, $0) }, uniquingKeysWith: { _, new in new })
+        for game in fresh { byID[game.appID] = game }
+        owned = byID.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        loadState = owned.isEmpty ? .empty : .loaded
+        return owned
     }
 
     // MARK: - Download

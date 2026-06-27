@@ -75,9 +75,9 @@ struct SteamCMDClientTests {
         """.utf8)))
         let client = SteamCMDClient(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
 
-        let games = try await client.ownedWindowsGames(username: "alice")
-        #expect(games.map(\.appID) == [220])          // 70 has a mac build → excluded; only HL2 kept
-        #expect(games.first?.name == "Half-Life 2")
+        let games = try await client.ownedGames(username: "alice")
+        #expect(games.map(\.appID) == [70, 220])      // both run on Windows (HL also has Mac, still listed)
+        #expect(games.first?.name == "Half-Life")
     }
 
     @Test("capture returns SteamCMD stdout for metadata parsing")
