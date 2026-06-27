@@ -63,25 +63,12 @@ struct GameCardView: View {
                         .labelStyle(.titleAndIcon).font(.caption).foregroundStyle(.green)
                 } else if busy {
                     ProgressView().controlSize(.small)
-                } else {
-                    Menu {
-                        Button("Settings…", action: onSettings)
-                        Button("View Log…", action: onLog)
-                        Divider()
-                        Button("Reveal Prefix in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([env.library.prefixURL(for: game)])
-                        }
-                        Button("Wine Config…") { Task { await env.library.openWinecfg(game) } }
-                            .disabled(!env.library.canLaunch)
-                        Button("Reset Prefix", role: .destructive) {
-                            Task { await env.library.resetPrefix(game) }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
                 }
+                Menu { managementMenu() } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
             }
             .padding()
@@ -89,6 +76,39 @@ struct GameCardView: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .help(env.library.canLaunch ? "" : "Configure a Wine backend to launch games.")
+        .contextMenu {
+            if running {
+                Button("Stop", role: .destructive) { Task { await env.library.stop(game) } }
+            } else {
+                Button("Play") { Task { await env.library.play(game) } }
+                    .disabled(busy || !env.library.canLaunch)
+                Button("Isolate (Prepare Prefix)") { Task { await env.library.isolate(game) } }
+                    .disabled(busy || !env.library.canLaunch)
+            }
+            Divider()
+            managementMenu()
+        }
+    }
+
+    /// Per-game management actions, shared by the ellipsis menu and the right-click context menu.
+    @ViewBuilder
+    private func managementMenu() -> some View {
+        Button("Settings…", action: onSettings)
+        Button("View Log…", action: onLog)
+        Divider()
+        Button("Reveal Prefix in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([env.library.prefixURL(for: game)])
+        }
+        Button("Wine Config…") { Task { await env.library.openWinecfg(game) } }
+            .disabled(!env.library.canLaunch)
+        if let store = game.storePageURL {
+            Button("View on Steam Store") { NSWorkspace.shared.open(store) }
+        }
+        Divider()
+        Button("Reset Prefix", role: .destructive) {
+            Task { await env.library.resetPrefix(game) }
+        }
+        .disabled(env.library.isRunning(game))
     }
 
     private var artPlaceholder: some View {

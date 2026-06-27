@@ -34,4 +34,11 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
         self.customArgs = customArgs
         self.lastPlayed = lastPlayed
     }
+
+    /// Single-field, space-separated view of `customArgs` for a Steam-style "launch options" editor.
+    /// Splits on any whitespace and drops empties (quoting is not supported in v1).
+    public var launchOptionsString: String {
+        get { customArgs.joined(separator: " ") }
+        set { customArgs = newValue.split(whereSeparator: \.isWhitespace).map(String.init) }
+    }
 }

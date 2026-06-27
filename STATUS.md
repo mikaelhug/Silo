@@ -3,7 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **M0–M30 COMPLETE.** 122 tests / 24 suites green; CI green.
+- **M0–M31 COMPLETE.** 125 tests / 25 suites green; CI green.
+- M31 (bug: can't right-click library cards): GameCardView had only the ellipsis `Menu`, no
+  `.contextMenu`. Added a right-click menu (Play/Stop, Isolate, Settings…, View Log…, Reveal Prefix,
+  Wine Config…, View on Steam Store, Reset Prefix) via a shared `managementMenu()` builder reused by
+  the ellipsis menu, which is now always visible (even while running). Per-game settings pane gained
+  **Launch options** (`GameConfig.launchOptionsString` ↔ `customArgs`, Steam-style) and a DXVK HUD
+  field (CrossOver backend only). `SteamApp.storePageURL` added. +3 tests.
 - M30 (bug: Install Steam hung + crash storm): the silent `SteamSetup.exe /S` auto-launches Steam.exe,
   which crash-loops under wine (Steam CEF) and spawns *hundreds* of `winedbg --auto` processes, so the
   installer NEVER returns → app stuck "Installing…", `masterBottlePath` never set. Fix: `SteamBottleInstaller`

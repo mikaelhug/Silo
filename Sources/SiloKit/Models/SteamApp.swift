@@ -49,6 +49,11 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
         URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appID)/header.jpg")
     }
 
+    /// Public Steam store page for this game.
+    public var storePageURL: URL? {
+        URL(string: "https://store.steampowered.com/app/\(appID)")
+    }
+
     /// Download progress in `0...1` while a download is active, else `nil`.
     public var downloadProgress: Double? {
         guard let total = bytesToDownload, total > 0, let done = bytesDownloaded else { return nil }
