@@ -52,7 +52,8 @@ struct LogViewerView: View {
                 }
             }
         }
-        .frame(width: 680, height: 460)
+        // Resizable (not a fixed frame) so the monospaced log reflows to the window width.
+        .frame(minWidth: 380, idealWidth: 560, minHeight: 260, idealHeight: 380)
         .onChange(of: url, initial: true) { _, newURL in tailer.start(url: newURL) }
         .onDisappear { tailer.stop() }
     }

@@ -53,6 +53,10 @@ public struct SteamCMDClient: Sendable {
     public func download(appID: Int, username: String, logURL: URL) async throws -> Int32 {
         let installDir = paths.gameInstallDir(forAppID: appID)
         try FileManager.default.createDirectory(at: installDir, withIntermediateDirectories: true)
+        // Start each download with a FRESH log — logs persist across uninstall/reinstall, so an appended
+        // log would still contain a prior session's "fully installed" line and progress, which the live
+        // progress watcher would misread as instant completion.
+        try? Data().write(to: logURL)
         let script = try await ensureInstalled()
         return try await runner.spawnDetached(
             executable: script,

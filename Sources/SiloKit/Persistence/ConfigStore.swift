@@ -45,4 +45,13 @@ public actor ConfigStore {
         try save(state)
         return state
     }
+
+    /// Remove a single game's config (e.g. on uninstall), preserving everything else.
+    @discardableResult
+    public func removeGame(appID: Int) throws -> AppState {
+        var state = load()
+        state.removeGame(appID: appID)
+        try save(state)
+        return state
+    }
 }

@@ -8,6 +8,7 @@ struct LibraryGridView: View {
     @State private var detailTarget: SteamAppInfo?
     @State private var showAdvanced = false
     @State private var showLogin = false
+    @State private var showAddGame = false
 
     var body: some View {
         @Bindable var lib = env.gameLibrary
@@ -28,6 +29,8 @@ struct LibraryGridView: View {
                 .help(lib.account.map { "Signed in as \($0)" } ?? "Steam account")
                 Menu {
                     Toggle("Windows-only (hide games with a Mac version)", isOn: $lib.showWindowsOnly)
+                    Divider()
+                    Button("Add Game Manually…", systemImage: "plus") { showAddGame = true }
                 } label: { Label("Filter", systemImage: "line.3.horizontal.decrease.circle") }
                 // Keep the button chrome while refreshing (spinner inside) so the toolbar group doesn't
                 // shrink and crowd the spinner against its border.
@@ -44,6 +47,7 @@ struct LibraryGridView: View {
         }
         .sheet(isPresented: $showAdvanced) { AdvancedSettingsSheet() }
         .sheet(isPresented: $showLogin) { SteamLoginView() }
+        .sheet(isPresented: $showAddGame) { AddGameSheet() }
         .sheet(item: $settingsTarget) { GameSettingsSheet(appID: $0.appID, name: $0.name) }
         .sheet(item: $detailTarget) { game in
             GameDetailView(game: game, onSettings: { detailTarget = nil; settingsTarget = game })
@@ -167,6 +171,54 @@ struct DownloadStatusBar: View {
             }
             .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(.bar)
         }
+    }
+}
+
+/// Add a game that isn't in the Steam-owned list by its App ID, then install it into a fresh bucket.
+struct AddGameSheet: View {
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    @State private var appIDText = ""
+    @State private var name = ""
+
+    private var appID: Int? {
+        let trimmed = appIDText.trimmingCharacters(in: .whitespaces)
+        guard let id = Int(trimmed), id > 0 else { return nil }
+        return id
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Steam App ID (e.g. 220)", text: $appIDText)
+                        .autocorrectionDisabled()
+                    TextField("Name (optional)", text: $name)
+                } header: {
+                    Text("Add a game by App ID")
+                } footer: {
+                    Text("The App ID is the number in the game's Steam store URL "
+                         + "(store.steampowered.com/app/<ID>). Silo installs it into its own bucket; once "
+                         + "installed, open the game's Settings to point at the right .exe if auto-detect "
+                         + "picks the wrong one.")
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Add Game")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Install") {
+                        guard let appID else { return }
+                        let gameName = name
+                        Task { await env.gameLibrary.addManualGame(appID: appID, name: gameName) }
+                        dismiss()
+                    }
+                    .disabled(appID == nil)
+                }
+            }
+        }
+        .frame(width: 440, height: 300)
     }
 }
 

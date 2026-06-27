@@ -131,14 +131,14 @@ struct SteamGameTileView: View {
     @ViewBuilder private func menuItems(installed: Bool) -> some View {
         Button("Details…", action: onDetails)
         Button("Settings…", action: onSettings)
-        Button("View Download/Run Log…") {
+        Button("View Log") {
             openWindow(id: LogTarget.windowID, value: env.logTarget(for: game))
         }
         if installed {
-            Button("Update / Re-download") { Task { await env.gameLibrary.download(game) } }
+            Button("Update") { Task { await env.gameLibrary.download(game) } }
             Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg(game) } }
                 .disabled(!env.gameLibrary.canLaunch)
-            Button("Reveal Files in Finder") {
+            Button("View in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([env.paths.gameInstallDir(forAppID: game.appID)])
             }
         }
