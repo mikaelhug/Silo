@@ -35,9 +35,17 @@ public struct AppPaths: Sendable, Hashable {
     /// `steam.exe` inside the bottle.
     public var steamBottleExe: URL { steamBottleClientDir.appendingPathComponent("steam.exe") }
 
-    /// Steam's CEF helper inside the bottle (the process whose black window we wrap to fix).
+    /// The directory holding Steam's CEF binaries inside the bottle. The leaf name varies by Steam version
+    /// (currently `cef.win7x64`), so callers that need the exact `steamwebhelper.exe` glob this dir's
+    /// children rather than assume the leaf — see `SteamBottle.locateWebHelper`.
+    public var steamBottleCEFDir: URL {
+        steamBottleClientDir.appendingPathComponent("bin/cef")
+    }
+
+    /// Steam's CEF helper inside the bottle (the process whose black window we wrap to fix). The CEF dir
+    /// name is version-dependent; this is the current (`cef.win7x64`) default — resolution is dynamic.
     public var steamBottleWebHelper: URL {
-        steamBottleClientDir.appendingPathComponent("bin/cef/cef.win64/steamwebhelper.exe")
+        steamBottleCEFDir.appendingPathComponent("cef.win7x64/steamwebhelper.exe")
     }
 
     /// The bottle's Steam log.
