@@ -3,6 +3,23 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M73–M81 — THE GATE IS CLEARED: bottle Steam RENDERS + LOGS IN on the from-source CrossOver wine
+  (on-device, 2026-06-28).** 117 tests / 26 suites green; clean build. Three fixes, each found from live
+  logs, finally got the Windows Steam client visible + signed in:
+  - **winebus/SDL crash** (the recurring `NSWindow … main thread` abort): `winebus.so` dlopens libSDL2
+    whose macOS init pops an off-main-thread NSAlert → Wine aborts. `WINEDLLOVERRIDES=winebus=` does NOT
+    disable a PnP `.sys` driver; the reliable fix is removing the dylib. → build `--without-sdl` (M80) +
+    `RuntimeManager.stripBundledSDL` auto-strips bundled `libSDL2*` (no rebuild needed).
+  - **wrapper stranded** (M81): a Steam update switched the CEF dir `cef.win7x64`→`cef.win64`, leaving the
+    single-dir wrapper orphaned while Steam ran the unwrapped webhelper → black. `installWebHelperWrapper`
+    now wraps ALL `bin/cef/*/steamwebhelper.exe`. (Path was also wrongly `cef.win64`-hardcoded pre-M78.)
+  - **presentation** (M79): Steam launches in a Wine virtual desktop (`explorer /desktop=`) so winemac.drv
+    presents the CEF surface (rootless = black on CrossOver). CEF forced onto SwiftShader software GL via
+    `STEAM_CEF_COMMAND_LINE` + the `--in-process-gpu` wrapper (M76).
+  - Login via QR (Steam mobile) succeeded + cached (AllowAutoLogin=1). The Chromium `WSALookupServiceBegin`/
+    `10045`/`Transport Error` log spam is NON-fatal background noise, not a login blocker.
+  - **NEXT:** validate the co-resident GAME launch (install a game in the bottle → `launchInBottle` → GPTK/
+    D3DMetal with the running Steam serving Steamworks).
 - **M68–M72 — REVERT to the Steam-bottle model + a 3-round agentic audit.** 115 tests / 26 suites green;
   clean build (no warnings). SteamCMD + macOS credential-seeding were removed and the app reverted to a
   single shared **Steam bottle**: one Wine prefix hosting a logged-in Windows Steam client; games install
