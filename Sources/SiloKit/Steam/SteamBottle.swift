@@ -90,31 +90,34 @@ public struct SteamBottle: Sendable {
     public func installWebHelperWrapper(wine: URL) throws {
         let wrapper = wine.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe")
-        guard fileManager.fileExists(atPath: wrapper.path), let helper = locateWebHelper() else { return }
-        if fileManager.contentsEqual(atPath: helper.path, andPath: wrapper.path) { return }   // already current
-        let real = helper.deletingLastPathComponent().appendingPathComponent("steamwebhelper_orig.exe")
-        if fileManager.fileExists(atPath: real.path) {
-            // The real webhelper is already preserved; `helper` is a STALE wrapper (e.g. older flags) —
-            // replace just it, so we never move a wrapper over the genuine `…_orig.exe`.
-            try fileManager.removeItem(at: helper)
-        } else {
-            // `helper` is the real webhelper (fresh install or a Steam update): preserve it once.
-            try fileManager.moveItem(at: helper, to: real)
+        guard fileManager.fileExists(atPath: wrapper.path) else { return }
+        // Wrap EVERY CEF dir's webhelper, not just one: a Steam update can add a new dir (e.g. cef.win64)
+        // alongside the old (cef.win7x64) and switch to it, stranding a single-dir wrapper in the unused
+        // one while Steam runs the unwrapped binary → black window.
+        for helper in webHelpers() {
+            if fileManager.contentsEqual(atPath: helper.path, andPath: wrapper.path) { continue }   // already wrapped
+            let real = helper.deletingLastPathComponent().appendingPathComponent("steamwebhelper_orig.exe")
+            if fileManager.fileExists(atPath: real.path) {
+                // Real webhelper already preserved; `helper` is a STALE wrapper — replace just it, so we
+                // never move a wrapper over the genuine `…_orig.exe`.
+                try fileManager.removeItem(at: helper)
+            } else {
+                // `helper` is the real webhelper (fresh install or a Steam update): preserve it once.
+                try fileManager.moveItem(at: helper, to: real)
+            }
+            try fileManager.copyItem(at: wrapper, to: helper)
         }
-        try fileManager.copyItem(at: wrapper, to: helper)
     }
 
-    /// Locate Steam's `steamwebhelper.exe` (or our wrapper already in its place). Steam's CEF dir leaf name
-    /// is version-dependent (e.g. `cef.win7x64`, historically `cef.win64`), so glob `bin/cef/*/` rather
-    /// than hardcode it — getting this wrong silently no-ops the wrapper and leaves a black window.
-    func locateWebHelper() -> URL? {
+    /// Every `steamwebhelper.exe` across the bottle's CEF dirs. The leaf name is Steam-version-dependent
+    /// (`cef.win64`, `cef.win7x64`, …) and a Steam UPDATE can add a new dir alongside the old one, so we
+    /// wrap them ALL — otherwise the wrapper can sit in an orphaned dir while Steam runs the unwrapped one.
+    func webHelpers() -> [URL] {
         guard let dirs = try? fileManager.contentsOfDirectory(
-            at: paths.steamBottleCEFDir, includingPropertiesForKeys: nil) else { return nil }
-        for dir in dirs {
-            let candidate = dir.appendingPathComponent("steamwebhelper.exe")
-            if fileManager.fileExists(atPath: candidate.path) { return candidate }
-        }
-        return nil
+            at: paths.steamBottleCEFDir, includingPropertiesForKeys: nil) else { return [] }
+        return dirs
+            .map { $0.appendingPathComponent("steamwebhelper.exe") }
+            .filter { fileManager.fileExists(atPath: $0.path) }
     }
 
     // MARK: - Launch
