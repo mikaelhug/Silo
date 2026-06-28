@@ -45,7 +45,7 @@ struct ViewModelTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let json = """
         [
-          {"tag_name":"v0.1.0","name":"Silo 0.1.0","assets":[
+          {"tag_name":"v0.1.1","name":"Silo 0.1.1","assets":[
             {"name":"Silo.zip","browser_download_url":"https://e.com/Silo.zip","size":1}]},
           {"tag_name":"wine-cx-26.2.0","name":"Wine CX 26.2.0","assets":[
             {"name":"wine.tar.xz","browser_download_url":"https://e.com/wf.tar.xz","size":1}]}
