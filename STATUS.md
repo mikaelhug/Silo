@@ -18,8 +18,11 @@
     `STEAM_CEF_COMMAND_LINE` + the `--in-process-gpu` wrapper (M76).
   - Login via QR (Steam mobile) succeeded + cached (AllowAutoLogin=1). The Chromium `WSALookupServiceBegin`/
     `10045`/`Transport Error` log spam is NON-fatal background noise, not a login blocker.
-  - **NEXT:** validate the co-resident GAME launch (install a game in the bottle → `launchInBottle` → GPTK/
-    D3DMetal with the running Steam serving Steamworks).
+  - **✅ CO-RESIDENT LAUNCH + STEAMWORKS VALIDATED:** GeoGuessr Steam Edition (3478870 — previously FAILED
+    Steamworks with no logged-in Steam) launched via `launchInBottle` under GPTK and got
+    `getAuthTicketForWebApi -> OK` from the co-resident Steam. The whole shared-bottle architecture works.
+    Per-game polish left: GeoGuessr is Electron and its ANGLE/WebGL doesn't init under GPTK (map renders
+    broken) — fixable per-game via software/SwiftShader GL, separate from the (working) architecture.
 - **M68–M72 — REVERT to the Steam-bottle model + a 3-round agentic audit.** 115 tests / 26 suites green;
   clean build (no warnings). SteamCMD + macOS credential-seeding were removed and the app reverted to a
   single shared **Steam bottle**: one Wine prefix hosting a logged-in Windows Steam client; games install
