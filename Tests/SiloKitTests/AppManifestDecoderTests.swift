@@ -55,4 +55,42 @@ struct AppManifestDecoderTests {
             try decoder.decode(text: FixtureLoader.text("appmanifest_malformed.acf"), libraryPath: lib)
         }
     }
+
+    @Test("LastUpdated of 0 / non-positive / non-numeric / absent yields nil lastUpdated")
+    func lastUpdatedNilBranches() throws {
+        func app(_ lu: String?) throws -> SteamApp {
+            let lastUpdatedKV = lu.map { #""LastUpdated" "\#($0)""# } ?? ""
+            let text = #""AppState" { "appid" "1" "name" "X" "installdir" "x" \#(lastUpdatedKV) }"#
+            return try decoder.decode(text: text, libraryPath: lib)
+        }
+        #expect(try app("0").lastUpdated == nil)          // queued-but-never-updated → 'never', not 1 Jan 1970
+        #expect(try app("-5").lastUpdated == nil)         // non-positive guard
+        #expect(try app("notanumber").lastUpdated == nil) // TimeInterval(string) parse failure
+        #expect(try app(nil).lastUpdated == nil)          // key absent entirely
+        // Positive control: a real epoch still parses.
+        #expect(try app("1659899091").lastUpdated == Date(timeIntervalSince1970: 1_659_899_091))
+    }
+
+    @Test("Missing StateFlags falls back to rawValue 0 and is not fully installed")
+    func missingStateFlags() throws {
+        let app = try decoder.decode(text: #""AppState" { "appid" "1" "name" "X" "installdir" "x" }"#, libraryPath: lib)
+        #expect(app.stateFlags == StateFlags(rawValue: 0))
+        #expect(!app.isFullyInstalled)
+    }
+
+    @Test("Downloading + fullyInstalled bits → contains(.downloading) and isFullyInstalled")
+    func downloadingButInstalled() throws {
+        // 1048580 = downloading (1048576) | fullyInstalled (4)
+        let app = try decoder.decode(text: #""AppState" { "appid" "1" "name" "X" "installdir" "x" "StateFlags" "1048580" }"#, libraryPath: lib)
+        #expect(app.stateFlags.contains(.downloading))
+        #expect(app.isFullyInstalled)
+    }
+
+    @Test("StateFlags without the fullyInstalled bit is not fully installed")
+    func notFullyInstalled() throws {
+        // 2 = updateRequired only (no fullyInstalled bit)
+        let app = try decoder.decode(text: #""AppState" { "appid" "1" "name" "X" "installdir" "x" "StateFlags" "2" }"#, libraryPath: lib)
+        #expect(app.stateFlags.contains(.updateRequired))
+        #expect(!app.isFullyInstalled)
+    }
 }

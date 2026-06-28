@@ -71,7 +71,9 @@ struct GameLibraryViewModelTests {
 
         await vm.play(game)
         #expect(vm.isRunning(game))
-        #expect(vm.runningPIDs[220] == 4242)
+        // Steam cold-starts first (PID 4242), so the game loader is the next spawn (4243).
+        let loaderPID = try #require(vm.runningPIDs[220])
+        #expect(loaderPID == 4243)
         // The game was launched detached with WINEPREFIX forced to the shared bottle.
         #expect(fake.invocations.contains {
             $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
@@ -80,6 +82,8 @@ struct GameLibraryViewModelTests {
 
         await vm.stop(game)
         #expect(!vm.isRunning(game))
+        // Stop SIGTERMs the launched loader (not just taskkill) — proving both halves of the contract.
+        #expect(fake.terminatedPIDs.contains(loaderPID))
         // Stop also taskkills the game's image (in the bottle's msync wineserver) so a child/relauncher
         // isn't orphaned — without clobbering the co-resident Steam.
         #expect(fake.invocations.contains {
@@ -96,7 +100,8 @@ struct GameLibraryViewModelTests {
         await vm.play(game)
         #expect(vm.isRunning(game))
 
-        fake.setAlive(4242, false)   // simulate the game process exiting
+        let pid = try #require(vm.runningPIDs[220])
+        fake.setAlive(pid, false)   // simulate the game process exiting
         for _ in 0..<20 where vm.isRunning(game) { await Task.yield() }   // let the @MainActor handler run
         #expect(!vm.isRunning(game))
     }
@@ -149,5 +154,86 @@ struct GameLibraryViewModelTests {
         await vm.uninstall(game)
         let call = try #require(fake.lastInvocation)
         #expect(call.arguments.contains("steam://uninstall/220"))
+    }
+
+    @Test("uninstall is a no-op while the game is running")
+    func uninstallNoOpWhileRunning() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+
+        await vm.play(game)                          // launches the game → runningPIDs[220] set
+        #expect(vm.isRunning(game))
+
+        await vm.uninstall(game)                      // guard !isRunning must short-circuit
+
+        // No steam://uninstall URL was ever sent for a running game.
+        #expect(!fake.invocations.contains { $0.arguments.contains("steam://uninstall/220") })
+        #expect(vm.isRunning(game))                  // still running, untouched
+    }
+
+    /// Count the bottle-Steam (CEF) launches recorded by the runner.
+    private func steamCEFLaunches(_ fake: FakeProcessRunner) -> Int {
+        fake.invocations.filter {
+            $0.arguments.first == "explorer" && $0.arguments.contains("-cef-in-process-gpu")
+        }.count
+    }
+
+    @Test("a second Play with Steam already up does not relaunch Steam")
+    func secondPlayReusesRunningSteam() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let a = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        let b = try installedGame(paths, appID: 570, name: "Dota", dir: "Dota")
+
+        await vm.play(a)   // cold-starts Steam (first spawn, alive) + launches A
+        await vm.play(b)   // Steam already up → isRunning short-circuit, NOT a relaunch
+        #expect(steamCEFLaunches(fake) == 1)
+    }
+
+    @Test("a Play after the bottle Steam exits cold-starts Steam again")
+    func playAfterSteamExitRestartsSteam() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let a = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        let b = try installedGame(paths, appID: 570, name: "Dota", dir: "Dota")
+
+        await vm.play(a)
+        #expect(steamCEFLaunches(fake) == 1)
+
+        // ensureSteamRunning() runs before the game launch, so Steam is the FIRST detached spawn (PID 4242).
+        // Kill it → the steamObserver nulls steamPID.
+        #expect(fake.invocations.first { $0.detached }?.arguments.contains("-cef-in-process-gpu") == true)
+        fake.setAlive(4242, false)
+        // Let the @MainActor exit observer run (it nulls steamPID).
+        for _ in 0..<50 { await Task.yield() }
+
+        await vm.play(b)                            // steamPID nil now → cold-starts Steam again
+        #expect(steamCEFLaunches(fake) == 2)
+    }
+
+    @Test("play surfaces a launch failure to statusMessage without sticking the game busy/running")
+    func playLaunchFailureSurfacesStatus() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)                       // past the wine/steam guards
+        // A game whose install dir has NO exe → orchestrator.launchInBottle throws executableNotFound.
+        let game = SteamApp(appID: 220, name: "HL2", installDir: "Nope",
+                            stateFlags: .fullyInstalled, sizeOnDisk: 100,
+                            libraryPath: paths.steamBottleClientDir)
+
+        await vm.play(game)
+
+        #expect(!vm.isRunning(game))                  // never reached runningPIDs[id] = pid
+        #expect(!vm.isBusy(game))                     // defer cleared busyAppIDs
+        #expect(vm.runningPIDs[220] == nil)
+        #expect(vm.statusMessage?.contains("HL2") == true)   // the catch surfaced "<name>: <error>"
+        // The game itself was never spawned detached (resolution failed before spawn).
+        #expect(!fake.invocations.contains {
+            $0.detached && ($0.arguments.first?.hasSuffix("Nope.exe") ?? false)
+        })
     }
 }

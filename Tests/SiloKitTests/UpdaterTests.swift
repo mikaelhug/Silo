@@ -78,6 +78,89 @@ struct UpdaterTests {
         }
     }
 
+    @Test("downloadUpdate throws badResponse on a non-2xx asset response and writes no file")
+    func downloadBadResponse() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let asset = "https://dl.example.com/silo-dl-500/Silo-0.3.0.zip"   // unique URL (shared registry)
+        FakeURLProtocol.stub(asset, statusCode: 500, data: Data("oops".utf8))
+        let check = Updater.UpdateCheck(latestVersion: "0.3.0", isNewer: true,
+                                        downloadURL: URL(string: asset), releaseName: "Silo 0.3.0")
+        await #expect(throws: Updater.UpdateError.badResponse(500)) {
+            try await Updater(session: FakeURLProtocol.makeSession()).downloadUpdate(check, into: tmp.url)
+        }
+        // The move only runs after the guard, so the destination .zip must not exist.
+        let dest = tmp.url.appendingPathComponent("Silo-0.3.0.zip")
+        #expect(!FileManager.default.fileExists(atPath: dest.path))
+    }
+
+    @Test("installUpdate throws unpackFailed when ditto exits non-zero")
+    func installUnpackDittoFails() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        fake.queueResult(ProcessResult(exitCode: 1, standardError: Data("ditto: bad".utf8)))
+        let zip = tmp.url.appendingPathComponent("Silo.zip")   // ditto is faked; need not be a real zip
+        try tmp.write("Applications/Silo.app/Contents/MacOS/Silo", "OLD")
+        let installed = tmp.url.appendingPathComponent("Applications/Silo.app")
+        await #expect(throws: Updater.UpdateError.unpackFailed) {
+            try await Updater(runner: fake).installUpdate(zip: zip, replacing: installed)
+        }
+    }
+
+    @Test("installUpdate throws unpackFailed and cleans up staging when archive has no .app")
+    func installUnpackNoApp() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let runner = SystemProcessRunner()
+        // Zip a plain file (not a .app) with real ditto.
+        try tmp.write("payload/notes.txt", "hello")
+        let zip = tmp.url.appendingPathComponent("NoApp.zip")
+        _ = try await runner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/ditto"),
+            arguments: ["-c", "-k", "--keepParent", tmp.url.appendingPathComponent("payload").path, zip.path],
+            environment: [:], currentDirectory: nil)
+        try tmp.write("Applications/Silo.app/Contents/MacOS/Silo", "OLD")
+        let installed = tmp.url.appendingPathComponent("Applications/Silo.app")
+        await #expect(throws: Updater.UpdateError.unpackFailed) {
+            try await Updater(runner: runner).installUpdate(zip: zip, replacing: installed)
+        }
+        // defer cleanup ran: no leftover .silo-update-* sibling in Applications/.
+        let siblings = try FileManager.default.contentsOfDirectory(
+            atPath: tmp.url.appendingPathComponent("Applications").path)
+        #expect(!siblings.contains { $0.hasPrefix(".silo-update-") })
+        // Old bundle untouched (not half-replaced).
+        #expect(try String(contentsOf: installed.appendingPathComponent("Contents/MacOS/Silo"), encoding: .utf8) == "OLD")
+    }
+
+    @Test("installUpdate throws replaceFailed when the atomic swap cannot complete")
+    func installReplaceFails() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fm = FileManager.default
+        // A real installed bundle whose parent dir we make read-only AFTER ditto stages the new .app,
+        // so the unpack guard passes (New.app exists) but the atomic replaceItemAt into the parent fails.
+        try tmp.write("Applications/Silo.app/Contents/MacOS/Silo", "OLD")
+        let installed = tmp.url.appendingPathComponent("Applications/Silo.app")
+        let parent = installed.deletingLastPathComponent()
+        // Always restore write perms so TempDir cleanup can remove the tree.
+        defer { try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent.path) }
+
+        let fake = FakeProcessRunner()   // defaultResult exitCode 0 → ditto "succeeds"
+        fake.onRun = { inv in
+            guard inv.executable.lastPathComponent == "ditto", inv.arguments.count >= 4 else { return }
+            let staging = URL(fileURLWithPath: inv.arguments[3])   // the sibling staging dir
+            let app = staging.appendingPathComponent("New.app/Contents/MacOS", isDirectory: true)
+            try? FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+            try? "NEW".write(to: app.appendingPathComponent("Silo"), atomically: true, encoding: .utf8)
+            // Now make the parent read-only: staging + New.app exist, but the swap into parent will fail.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: parent.path)
+        }
+        let zip = tmp.url.appendingPathComponent("Silo.zip")
+        await #expect(throws: Updater.UpdateError.replaceFailed) {
+            try await Updater(runner: fake).installUpdate(zip: zip, replacing: installed)
+        }
+        // The old bundle was not half-replaced.
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent.path)
+        #expect(try String(contentsOf: installed.appendingPathComponent("Contents/MacOS/Silo"), encoding: .utf8) == "OLD")
+    }
+
     @Test("installUpdate unpacks the .zip and atomically replaces the installed app bundle")
     func installSwapsBundle() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

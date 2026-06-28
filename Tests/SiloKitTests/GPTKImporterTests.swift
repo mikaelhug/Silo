@@ -90,6 +90,13 @@ struct GPTKImporterTests {
         // Two attaches + two detaches (cleanup).
         #expect(fake.invocations.filter { $0.arguments.contains("attach") }.count == 2)
         #expect(fake.invocations.filter { $0.arguments.contains("detach") }.count == 2)
+
+        // GPTK is de-quarantined so the D3DMetal libs load...
+        #expect(fake.invocations.contains {
+            $0.executable.lastPathComponent == "xattr" && $0.arguments.contains("com.apple.quarantine")
+        })
+        // ...but NOT ad-hoc re-signed: preserve Apple's D3DMetal signature (reSign:false).
+        #expect(!fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
     }
 
     @Test("Imports from a single-DMG layout (redist at top level)")
@@ -107,6 +114,47 @@ struct GPTKImporterTests {
         #expect(FileManager.default.fileExists(atPath: result.gptkLibDir.appendingPathComponent("dxgi.dll").path))
         #expect(fake.invocations.filter { $0.arguments.contains("attach") }.count == 1)
         #expect(fake.invocations.filter { $0.arguments.contains("detach") }.count == 1)
+    }
+
+    @Test("Throws attachFailed (with stderr) when hdiutil attach fails")
+    func attachFailure() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        fake.queueResult(ProcessResult(exitCode: 1, standardError: Data("hdiutil: corrupt image".utf8)))
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        do {
+            _ = try await GPTKImporter(runner: fake, paths: paths)
+                .importGPTK(fromDMG: tmp.url.appendingPathComponent("Bad.dmg"))
+            Issue.record("expected importGPTK to throw")
+        } catch let GPTKImporter.ImportError.attachFailed(message) {
+            #expect(message.contains("corrupt image"))
+        }
+        // Attach was attempted but failed → nothing to detach.
+        #expect(fake.invocations.filter { $0.arguments.contains("attach") }.count == 1)
+        #expect(fake.invocations.filter { $0.arguments.contains("detach") }.isEmpty)
+    }
+
+    @Test("Throws redistNotFound and detaches BOTH mounts when the eval volume lacks redist/lib")
+    func redistNotFoundDetachesBoth() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // Outer mount: no redist, but a nested Evaluation dmg → triggers the inner attach.
+        let outer = try tmp.makeDir("outerMount2")
+        try tmp.write("outerMount2/Evaluation environment for Windows games.dmg", "nested")
+        // Inner mount: present but WITHOUT redist/lib → redistNotFound.
+        let eval = try tmp.makeDir("evalMount2")
+
+        let fake = FakeProcessRunner()
+        fake.queueResult(attachPlist(mountPoint: outer.path))   // 1st attach → outer
+        fake.queueResult(attachPlist(mountPoint: eval.path))    // 2nd attach → inner (no redist)
+
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        await #expect(throws: GPTKImporter.ImportError.redistNotFound) {
+            try await GPTKImporter(runner: fake, paths: paths)
+                .importGPTK(fromDMG: tmp.url.appendingPathComponent("GPTK.dmg"))
+        }
+        // Both mounts were cleaned up via the do/catch detachAll.
+        #expect(fake.invocations.filter { $0.arguments.contains("attach") }.count == 2)
+        #expect(fake.invocations.filter { $0.arguments.contains("detach") }.count == 2)
     }
 
     @Test("Throws nestedDMGNotFound when no redist and no inner dmg")

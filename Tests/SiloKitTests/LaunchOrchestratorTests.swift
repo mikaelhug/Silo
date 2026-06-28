@@ -49,6 +49,20 @@ struct MakePlanTests {
         #expect(plan.environment["WINEESYNC"] == nil)
     }
 
+    @Test("Bottle launch forces msync even when sync vars are injected via the extra escape hatch")
+    func forcesMsyncOverExtraEscapeHatch() throws {
+        var cfg = GameConfig(appID: 220)
+        // Power user reaches past the SyncMode enum and injects sync vars directly via `extra`,
+        // which EnvFlags.environment() merges LAST — yet co-residency must still win.
+        cfg.envFlags = EnvFlags(syncMode: .msync,
+                                extra: ["WINEESYNC": "1", "WINEMSYNC": "0", "MTL_HUD_ENABLED": "1"])
+        let plan = try LaunchOrchestrator.makePlan(
+            app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+        #expect(plan.environment["WINEMSYNC"] == "1")        // forced override beats extra:["WINEMSYNC":"0"]
+        #expect(plan.environment["WINEESYNC"] == nil)        // forced override strips extra:["WINEESYNC":"1"]
+        #expect(plan.environment["MTL_HUD_ENABLED"] == "1")  // non-sync extras still survive
+    }
+
     @Test("GPTK plan with GPTK configured: D3DMetal resolves from the RUNTIME's lib/external, no WINEDLLPATH")
     func gptkPlanD3DMetalWiring() throws {
         let cfg = GameConfig(appID: 220)

@@ -20,6 +20,41 @@ struct ConfigStoreTests {
         #expect(!state.backend.isWineConfigured)
     }
 
+    @Test("load() returns a fresh default for a present-but-corrupt config.json")
+    func corruptFileDefault() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        try FileManager.default.createDirectory(at: paths.supportDir, withIntermediateDirectories: true)
+        try Data("{ this is not json".utf8).write(to: paths.configFile)
+        let state = await store.load()
+        #expect(state.games.isEmpty)
+        #expect(!state.backend.isWineConfigured)
+    }
+
+    @Test("load() returns a fresh default when config.json is valid JSON of the wrong shape")
+    func wrongShapeDefault() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        try FileManager.default.createDirectory(at: paths.supportDir, withIntermediateDirectories: true)
+        try Data("[]".utf8).write(to: paths.configFile)
+        let state = await store.load()
+        #expect(state.games.isEmpty)
+        #expect(!state.backend.isWineConfigured)
+    }
+
+    @Test("a corrupt config.json is recoverable by the next save")
+    func corruptFileRecoverable() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        try FileManager.default.createDirectory(at: paths.supportDir, withIntermediateDirectories: true)
+        try Data("{bad".utf8).write(to: paths.configFile)
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/runtimes/gptk/bin/wine64")
+        try await store.saveBackend(backend)             // load() inside must not throw on the corrupt file
+        let reloaded = await store.load()
+        #expect(reloaded.backend.wineBinaryPath?.path == "/runtimes/gptk/bin/wine64")
+    }
+
     @Test("Round-trips backend + game configs through JSON")
     func roundTrip() async throws {
         let (store, paths, tmp) = try makeStore()
@@ -112,6 +147,46 @@ struct ConfigStoreTests {
         #expect(esyncCfg.syncMode == .esync)
         // Legacy configs (no perf keys) get the recommended AVX default.
         #expect(esyncCfg.advertiseAVX)
+    }
+
+    @Test("EnvFlags legacy migration defaults to .msync when neither sync bool is set")
+    func legacySyncFallsBackToMsync() throws {
+        // Explicit false/false: third arm of the migration ternary.
+        let both = try JSONDecoder().decode(
+            EnvFlags.self, from: Data(#"{"esync": false, "msync": false}"#.utf8))
+        #expect(both.syncMode == .msync)            // NOT .none — must keep a sync primitive
+
+        // Empty legacy object: no sync keys at all → else branch, both default false.
+        let empty = try JSONDecoder().decode(EnvFlags.self, from: Data(#"{}"#.utf8))
+        #expect(empty.syncMode == .msync)
+        #expect(empty.advertiseAVX)                 // Apple-Silicon default preserved
+        #expect(!empty.metalHUD)
+        #expect(empty.extra.isEmpty)
+
+        // Prove it did not degrade to .none: WINEMSYNC set, WINEESYNC unset.
+        let env = empty.environment()
+        #expect(env["WINEMSYNC"] == "1")
+        #expect(env["WINEESYNC"] == nil)
+    }
+
+    @Test("EnvFlags survives a full encode→decode round-trip with populated extra")
+    func envFlagsCodableRoundTrip() throws {
+        let original = EnvFlags(
+            syncMode: .esync, advertiseAVX: false, metalHUD: true,
+            metalFX: true, dxr: true,
+            extra: ["WINEDEBUG": "+seh", "DXVK_HUD": "fps"])
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(EnvFlags.self, from: data)
+        #expect(decoded == original)   // Hashable/Equatable: proves extra + all fields survive
+    }
+
+    @Test("EnvFlags new syncMode key wins over stale legacy esync/msync keys")
+    func envFlagsSyncModeBeatsLegacyKeys() throws {
+        // Both the new key AND a contradictory legacy key present: new must win, legacy ignored.
+        let decoded = try JSONDecoder().decode(
+            EnvFlags.self,
+            from: Data(#"{"syncMode":"esync","msync":true,"esync":false,"extra":{}}"#.utf8))
+        #expect(decoded.syncMode == .esync)   // .esync is non-default → not a fallback coincidence
     }
 
     @Test("EnvFlags performance vars: AVX + MetalFX/DXR when their flags are on")

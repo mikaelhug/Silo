@@ -22,17 +22,25 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
 
     /// Returned by `run` when no scripted result is queued.
     var defaultResult = ProcessResult(exitCode: 0)
-    /// Returned by `spawnDetached`.
-    var spawnPID: Int32 = 4242
+    /// First PID handed out by `spawnDetached`; each subsequent spawn gets the next integer, so
+    /// distinct detached processes (e.g. the bottle Steam vs. a game) don't collide on one PID.
+    /// Setting this resets the counter (back-compat for tests that assert the first spawn == 4242).
+    var spawnPID: Int32 = 4242 {
+        didSet { lock.withLock { _nextSpawnPID = spawnPID } }
+    }
     /// Invoked (outside the lock) for every call, before returning — use to mutate a fake FS.
     var onRun: (@Sendable (Invocation) -> Void)?
 
+    private var _nextSpawnPID: Int32 = 4242
     private var _alivePIDs: Set<Int32> = []
+    private var _terminatedPIDs: [Int32] = []
     private var _exitHandlers: [Int32: [(id: Int, run: @Sendable () -> Void)]] = [:]
     private var _nextObservationID = 0
 
     var invocations: [Invocation] { lock.withLock { _invocations } }
     var lastInvocation: Invocation? { lock.withLock { _invocations.last } }
+    /// PIDs sent SIGTERM via `terminate(pid:)`.
+    var terminatedPIDs: [Int32] { lock.withLock { _terminatedPIDs } }
 
     /// Simulate a process exiting (or coming alive). When marked dead, fires any `observeExit` handlers.
     func setAlive(_ pid: Int32, _ alive: Bool) {
@@ -46,6 +54,12 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
         handlers.forEach { $0() }
     }
     func isRunning(pid: Int32) -> Bool { lock.withLock { _alivePIDs.contains(pid) } }
+
+    /// Record a SIGTERM and stop reporting the PID as alive (mirrors the real runner; does NOT fire
+    /// `observeExit` handlers, matching SIGTERM-vs-kqueue-exit semantics).
+    func terminate(pid: Int32) {
+        lock.withLock { _terminatedPIDs.append(pid); _alivePIDs.remove(pid) }
+    }
 
     func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
         let id: Int = lock.withLock {
@@ -91,8 +105,9 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
         )
         let (hook, pid): (((Invocation) -> Void)?, Int32) = lock.withLock {
             _invocations.append(invocation)
-            _alivePIDs.insert(spawnPID)   // a spawned game is "running" until a test marks it exited
-            return (onRun, spawnPID)
+            let pid = _nextSpawnPID; _nextSpawnPID += 1
+            _alivePIDs.insert(pid)   // a spawned game is "running" until a test marks it exited
+            return (onRun, pid)
         }
         hook?(invocation)
         return pid
