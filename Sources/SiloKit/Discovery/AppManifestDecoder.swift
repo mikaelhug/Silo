@@ -8,6 +8,7 @@ public struct AppManifestDecoder: Sendable {
         case missingRoot                                  // no top-level "AppState"
         case missingField(String)
         case invalidInteger(field: String, value: String)
+        case invalidInstallDir(String)                    // a path-escaping/empty installdir
     }
 
     /// Convenience: parse text then decode.
@@ -21,7 +22,7 @@ public struct AppManifestDecoder: Sendable {
         return SteamApp(
             appID: try requireInt(state, "appid"),
             name: try requireString(state, "name"),
-            installDir: try requireString(state, "installdir"),
+            installDir: try requireInstallDir(state),
             stateFlags: StateFlags(rawValue: optInt(state, "StateFlags") ?? 0),
             sizeOnDisk: optInt64(state, "SizeOnDisk") ?? 0,
             bytesDownloaded: optInt64(state, "BytesDownloaded"),
@@ -36,6 +37,18 @@ public struct AppManifestDecoder: Sendable {
 
     private func requireString(_ node: KVNode, _ key: String) throws -> String {
         guard let value = node[key]?.stringValue else { throw DecodeError.missingField(key) }
+        return value
+    }
+
+    /// `installdir` is a single directory name under `steamapps/common`, where the game exe and
+    /// `steam_appid.txt` get resolved. A hostile manifest could set it to `../…` or an absolute path to
+    /// escape that dir, so reject anything that isn't a flat component (empty, `/`, `\`, `.`, `..`).
+    private func requireInstallDir(_ node: KVNode) throws -> String {
+        let value = try requireString(node, "installdir")
+        guard !value.isEmpty, !value.contains("/"), !value.contains("\\"),
+              value != ".", value != ".." else {
+            throw DecodeError.invalidInstallDir(value)
+        }
         return value
     }
 

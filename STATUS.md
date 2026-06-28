@@ -3,6 +3,21 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M90 — Phase 3 security hardening (agentic adversarial review, 14 findings).** 4 threat lenses
+  (download/execute integrity, archive extraction, process-exec injection, error/failure modes) →
+  exploitability verification → applied 8 hardenings:
+  - **CRITICAL — in-app updater had ZERO integrity check** before replacing+executing the running app.
+    Added fail-closed **SHA-256** verification of the release `.zip` against a published `<asset>.zip.sha256`
+    (release.yml now ships it) + **https-only** download guard. (App is ad-hoc signed → no Developer-ID/spctl
+    to pin; this defeats MITM/CDN tampering. **Defeating a *compromised release* needs notarization** — see
+    BLOCKED.)
+  - **HIGH — path traversal** via an attacker-named release tag flowing into a `Runtimes/` path: added
+    `safeRuntimeComponent` sanitizer + a `runtimesDir`-containment assert; **HIGH — runtime SHA-256 now
+    mandatory** (fail-closed) for the built-in `Silo.wineRepo` (was best-effort-skip).
+  - https-only guard on all release-derived downloads (+ `NSAppTransportSecurity` ATS dict, default-deny);
+    appmanifest `installdir` path-escape validation; **scrub `DYLD_INSERT_LIBRARIES`/`DYLD_FORCE_FLAT_NAMESPACE`**
+    from inherited env for wine children; crash-safe staged GPTK import; honest checksum UI copy.
+  - Shared `FileDigest.sha256` + `DownloadGuard.requireHTTPS`. +10 tests → **171 / 28 suites green**; clean build.
 - **✅ M89 — Phase 2 test-coverage gaps (agentic, +49 tests → 161).** 4 domain mappers (orchestration,
   error/edge, graphics/runtime, parsing/models) → adversarial verify (real gap + catches a real bug, not
   coverage theater) → 25 verified gaps filled. New: `AppEnvironment.installUpdate` orchestration (no-bundle

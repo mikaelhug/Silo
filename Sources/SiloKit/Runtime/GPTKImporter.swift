@@ -86,12 +86,24 @@ public struct GPTKImporter: Sendable {
             progress?(.copying)
             let installDir = paths.runtimesDir.appendingPathComponent(runtimeName, isDirectory: true)
             let destLib = installDir.appendingPathComponent("lib", isDirectory: true)
-            try fileManager.createDirectory(at: installDir, withIntermediateDirectories: true)
-            if fileManager.fileExists(atPath: destLib.path) { try fileManager.removeItem(at: destLib) }
-            try fileManager.copyItem(at: redistLib, to: destLib)
+
+            // Copy + de-quarantine into a sibling STAGING dir first, then atomically swap it into the
+            // final installDir only once everything succeeded. Otherwise a failure mid-copy could leave
+            // a partial, de-quarantined tree that later passes `installed()` (a half-broken GPTK).
+            try fileManager.createDirectory(at: paths.runtimesDir, withIntermediateDirectories: true)
+            let staging = paths.runtimesDir
+                .appendingPathComponent(".gptk-import-\(UUID().uuidString)", isDirectory: true)
+            defer { try? fileManager.removeItem(at: staging) }   // cleaned up on any failure or after move
+            let stagingLib = staging.appendingPathComponent("lib", isDirectory: true)
+            try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+            try fileManager.copyItem(at: redistLib, to: stagingLib)
 
             // Strip quarantine so the libs load; do NOT re-sign (preserve Apple's D3DMetal signature).
-            await deQuarantine(installDir, reSign: false, using: runner)
+            await deQuarantine(staging, reSign: false, using: runner)
+
+            // Atomic publish: replace any prior install only now that the staging tree is complete.
+            if fileManager.fileExists(atPath: installDir.path) { try fileManager.removeItem(at: installDir) }
+            try fileManager.moveItem(at: staging, to: installDir)
 
             await detachAll(mounted)
             progress?(.done)

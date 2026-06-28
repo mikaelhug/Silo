@@ -76,8 +76,15 @@ public struct SystemProcessRunner: ProcessRunning {
 
     // MARK: - Synchronous workers (run on a background queue)
 
-    private static func mergedEnvironment(_ overrides: [String: String]) -> [String: String] {
+    /// Loader-injection vectors stripped from the INHERITED environment before Silo's overrides are
+    /// applied, so a hostile ambient env can't force a dylib into the wine child. We do NOT strip
+    /// `DYLD_FALLBACK_LIBRARY_PATH`/`DYLD_FALLBACK_FRAMEWORK_PATH` — Silo sets those explicitly in its
+    /// overrides (they still apply on top), and they only add *fallback* search paths, not forced loads.
+    static let injectionDenylist: Set<String> = ["DYLD_INSERT_LIBRARIES", "DYLD_FORCE_FLAT_NAMESPACE"]
+
+    static func mergedEnvironment(_ overrides: [String: String]) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
+        for key in injectionDenylist { env[key] = nil }
         for (key, value) in overrides { env[key] = value }
         return env
     }

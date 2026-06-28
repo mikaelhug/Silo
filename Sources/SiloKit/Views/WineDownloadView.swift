@@ -19,7 +19,7 @@ struct WineDownloadView: View {
                 Text("Wine")
             } footer: {
                 Text("Downloads the latest Wine build from Silo's releases (CrossOver-based, ~250 MB) "
-                     + "and verifies its checksum.")
+                     + "and checks its SHA-256 digest to detect corruption or tampering in transit.")
                     .font(.caption)
             }
 

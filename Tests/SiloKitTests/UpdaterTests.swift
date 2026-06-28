@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import SiloKit
 
@@ -58,16 +59,65 @@ struct UpdaterTests {
 
     // MARK: - Inline apply
 
-    @Test("downloadUpdate saves the release .zip into the target directory")
+    /// Lower-case hex SHA-256 (matches `FileDigest`).
+    private func hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    @Test("downloadUpdate saves the release .zip when its published SHA-256 matches")
     func downloadsZip() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let asset = "https://dl.example.com/silo-dl/Silo-0.3.0.zip"
-        FakeURLProtocol.stub(asset, data: Data("ZIP-BYTES".utf8))
+        let bytes = Data("ZIP-BYTES".utf8)
+        FakeURLProtocol.stub(asset, data: bytes)
+        // shasum format ("<hex>  filename"); the parser takes the first whitespace-delimited token.
+        FakeURLProtocol.stub(asset + ".sha256", data: Data("\(hex(bytes))  Silo-0.3.0.zip\n".utf8))
         let check = Updater.UpdateCheck(latestVersion: "0.3.0", isNewer: true,
                                         downloadURL: URL(string: asset), releaseName: "Silo 0.3.0")
         let saved = try await Updater(session: FakeURLProtocol.makeSession()).downloadUpdate(check, into: tmp.url)
         #expect(saved.lastPathComponent == "Silo-0.3.0.zip")
-        #expect(try Data(contentsOf: saved) == Data("ZIP-BYTES".utf8))
+        #expect(try Data(contentsOf: saved) == bytes)
+    }
+
+    @Test("downloadUpdate throws checksumMismatch on a wrong SHA-256 and leaves no file")
+    func downloadChecksumMismatch() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let asset = "https://dl.example.com/silo-dl-bad/Silo-0.3.0.zip"
+        FakeURLProtocol.stub(asset, data: Data("ZIP-BYTES".utf8))
+        FakeURLProtocol.stub(asset + ".sha256", data: Data("deadbeef  Silo-0.3.0.zip\n".utf8))
+        let check = Updater.UpdateCheck(latestVersion: "0.3.0", isNewer: true,
+                                        downloadURL: URL(string: asset), releaseName: "Silo 0.3.0")
+        await #expect(throws: Updater.UpdateError.checksumMismatch) {
+            try await Updater(session: FakeURLProtocol.makeSession()).downloadUpdate(check, into: tmp.url)
+        }
+        // The bad (unverified) zip must be deleted — never leave an unverified app on disk.
+        #expect(!FileManager.default.fileExists(atPath: tmp.url.appendingPathComponent("Silo-0.3.0.zip").path))
+    }
+
+    @Test("downloadUpdate throws checksumUnavailable when the .sha256 can't be fetched (404)")
+    func downloadChecksumUnavailable() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let asset = "https://dl.example.com/silo-dl-nosha/Silo-0.3.0.zip"
+        FakeURLProtocol.stub(asset, data: Data("ZIP-BYTES".utf8))
+        FakeURLProtocol.stub(asset + ".sha256", statusCode: 404, data: Data("Not Found".utf8))
+        let check = Updater.UpdateCheck(latestVersion: "0.3.0", isNewer: true,
+                                        downloadURL: URL(string: asset), releaseName: "Silo 0.3.0")
+        await #expect(throws: Updater.UpdateError.checksumUnavailable) {
+            try await Updater(session: FakeURLProtocol.makeSession()).downloadUpdate(check, into: tmp.url)
+        }
+        // Fail-closed: no zip left behind either.
+        #expect(!FileManager.default.fileExists(atPath: tmp.url.appendingPathComponent("Silo-0.3.0.zip").path))
+    }
+
+    @Test("downloadUpdate rejects a non-https asset URL before any network call")
+    func downloadInsecureURL() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let check = Updater.UpdateCheck(latestVersion: "0.3.0", isNewer: true,
+                                        downloadURL: URL(string: "http://dl.example.com/Silo.zip"),
+                                        releaseName: "Silo 0.3.0")
+        await #expect(throws: DownloadError.insecureURL("http")) {
+            try await Updater(session: FakeURLProtocol.makeSession()).downloadUpdate(check, into: tmp.url)
+        }
     }
 
     @Test("downloadUpdate throws when the release has no downloadable asset")

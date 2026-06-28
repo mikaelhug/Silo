@@ -49,6 +49,32 @@ struct AppManifestDecoderTests {
         }
     }
 
+    @Test("Rejects a path-escaping installdir as a decode failure")
+    func invalidInstallDir() {
+        // A hostile manifest could point installdir outside steamapps/common (where the exe +
+        // steam_appid.txt resolve). Each of these must be a decode failure (the manifest is skipped).
+        for bad in ["../../etc", "a/b", ".", "..", ""] {
+            #expect(throws: AppManifestDecoder.DecodeError.invalidInstallDir(bad)) {
+                try decoder.decode(
+                    text: #""AppState" { "appid" "1" "name" "X" "installdir" "\#(bad)" }"#, libraryPath: lib)
+            }
+        }
+        // The backslash case is built directly (the ACF tokenizer would consume `\` as an escape).
+        let nodeWithBackslash = KVNode.object([
+            KVPair("AppState", .object([
+                KVPair("appid", .leaf("1")), KVPair("name", .leaf("X")),
+                KVPair("installdir", .leaf("a\\b")),
+            ])),
+        ])
+        #expect(throws: AppManifestDecoder.DecodeError.invalidInstallDir("a\\b")) {
+            try decoder.decode(nodeWithBackslash, libraryPath: lib)
+        }
+        // A normal flat dir name still decodes.
+        let ok = try? decoder.decode(
+            text: #""AppState" { "appid" "1" "name" "X" "installdir" "Half-Life 2" }"#, libraryPath: lib)
+        #expect(ok?.installDir == "Half-Life 2")
+    }
+
     @Test("Propagates tokenizer errors for malformed manifests")
     func malformed() {
         #expect(throws: ACFTokenizer.TokenizerError.self) {

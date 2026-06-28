@@ -140,6 +140,72 @@ struct RuntimeManagerTests {
         }
     }
 
+    @Test("safeRuntimeComponent accepts a flat tag and rejects path-traversal attempts")
+    func safeRuntimeComponent() {
+        // Accepts a normal release tag.
+        #expect(RuntimeManager.safeRuntimeComponent("wine-cx-26.2.0") == "wine-cx-26.2.0")
+        // Rejects anything that could escape the Runtimes dir.
+        #expect(RuntimeManager.safeRuntimeComponent("../x") == nil)
+        #expect(RuntimeManager.safeRuntimeComponent("a/b") == nil)
+        #expect(RuntimeManager.safeRuntimeComponent("..") == nil)
+        #expect(RuntimeManager.safeRuntimeComponent(".") == nil)
+        #expect(RuntimeManager.safeRuntimeComponent("") == nil)
+        #expect(RuntimeManager.safeRuntimeComponent("a\0b") == "ab")   // NUL stripped, still flat
+        #expect(RuntimeManager.safeRuntimeComponent("/etc/passwd") == nil)
+    }
+
+    @Test("install rejects a path-traversal release name before any download")
+    func installRejectsUnsafeName() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())
+        await #expect(throws: RuntimeManager.RuntimeError.unsafeRuntimeName("../../evil")) {
+            try await manager.install(name: "../../evil", from: URL(string: "https://e.com/x.tar.gz")!)
+        }
+        // Never even attempted the download/extract.
+        #expect(fake.invocations.isEmpty)
+    }
+
+    @Test("install rejects a non-https download URL before any network call")
+    func installRejectsInsecureURL() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())
+        await #expect(throws: DownloadError.insecureURL("http")) {
+            try await manager.install(name: "X", from: URL(string: "http://e.com/x.tar.gz")!)
+        }
+        #expect(fake.invocations.isEmpty)
+    }
+
+    @Test("requireDigest makes a missing .sha256 fail closed (built-in repo)")
+    func requireDigestFailsClosed() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let url = "https://e.com/require-digest/wine.tar.xz"
+        FakeURLProtocol.stub(url, data: Data("ARCHIVE".utf8))   // NO sibling .sha256 published
+        let fake = FakeProcessRunner()
+        let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())
+        // requireDigest:true → checksumUnavailable; nothing extracted.
+        await #expect(throws: RuntimeManager.RuntimeError.checksumUnavailable) {
+            try await manager.installWine(name: "WineReq", from: URL(string: url)!, requireDigest: true)
+        }
+        #expect(!fake.invocations.contains { $0.executable.lastPathComponent == "tar" })
+        // requireDigest:false (a user override) keeps the legacy best-effort skip → installs fine.
+        let fake2 = FakeProcessRunner()
+        fake2.onRun = { inv in
+            if inv.executable.lastPathComponent == "tar",
+               let i = inv.arguments.firstIndex(of: "-C"), i + 1 < inv.arguments.count {
+                let bin = URL(fileURLWithPath: inv.arguments[i + 1]).appendingPathComponent("bin")
+                try? FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+                FileManager.default.createFile(atPath: bin.appendingPathComponent("wine64").path, contents: Data("x".utf8))
+            }
+        }
+        let url2 = "https://e.com/no-digest/wine.tar.xz"
+        FakeURLProtocol.stub(url2, data: Data("ARCHIVE".utf8))
+        let manager2 = makeManager(tmp, fake2, session: FakeURLProtocol.makeSession())
+        _ = try await manager2.installWine(name: "WineOpt", from: URL(string: url2)!, requireDigest: false)
+        #expect(await manager2.installedWines().map(\.name) == ["WineOpt"])
+    }
+
     @Test("locateWineBinary prefers wine64 under a bin directory")
     func locate() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

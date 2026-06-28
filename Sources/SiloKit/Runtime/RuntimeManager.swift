@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 /// Downloads and manages Wine/GPTK runtimes under the Runtimes dir (Heroic-style), with zero
 /// dependency on Homebrew. Metadata + download use `URLSession`; extraction uses `tar` via the
@@ -27,6 +26,21 @@ public actor RuntimeManager {
         case downloadFailed(Int)
         case extractionFailed(Int32)
         case checksumMismatch(expected: String, actual: String)
+        /// No `<url>.sha256` was published but a digest is required for this repo (the built-in repo —
+        /// see `requireDigest`). Never silently downgrade integrity for code we point users at.
+        case checksumUnavailable
+        /// The release name/tag couldn't be reduced to a safe single path component (path-traversal
+        /// attempt, e.g. a release literally named `../../evil`). See `safeRuntimeComponent`.
+        case unsafeRuntimeName(String)
+    }
+
+    /// A release tag is a flat label, never a path. Reduce it to a single safe path component
+    /// (strip path separators, leading dots, NUL); returns nil if nothing safe remains.
+    static func safeRuntimeComponent(_ raw: String) -> String? {
+        let cleaned = raw.replacingOccurrences(of: "\0", with: "")
+        guard !cleaned.contains("/"), cleaned != "." , cleaned != "..",
+              !cleaned.hasPrefix(".."), !cleaned.isEmpty else { return nil }
+        return cleaned
     }
 
     /// The latest `limit` releases of `repo` (newest first) — for the Heroic-style Wine list.
@@ -59,12 +73,25 @@ public actor RuntimeManager {
         }.sorted { $0.name > $1.name }   // newest tag first
     }
 
-    /// Download + extract a Wine build and locate its binary.
+    /// Download + extract a Wine build and locate its binary. `requireDigest` mandates a published
+    /// `<url>.sha256` (fail-closed) when installing from the built-in repo; pass `false` only for a
+    /// user-overridden custom repo (best-effort, mirroring the legacy behavior).
     @discardableResult
-    public func installWine(name: String, from downloadURL: URL) async throws -> WineInstall {
-        _ = try await install(name: name, from: downloadURL)   // reuse download + tar extraction
-        let dir = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
-        return WineInstall(name: name, installDir: dir, wineBinary: Self.locateWineBinary(in: dir))
+    public func installWine(
+        name: String, from downloadURL: URL, requireDigest: Bool = false
+    ) async throws -> WineInstall {
+        let safe = try Self.requireSafeComponent(name)
+        _ = try await install(name: safe, from: downloadURL, requireDigest: requireDigest)
+        let dir = paths.runtimesDir.appendingPathComponent(safe, isDirectory: true)
+        return WineInstall(name: safe, installDir: dir, wineBinary: Self.locateWineBinary(in: dir))
+    }
+
+    /// `safeRuntimeComponent` or throw — the boundary check applied before any tag/name builds a path.
+    private static func requireSafeComponent(_ name: String) throws -> String {
+        guard let safe = safeRuntimeComponent(name) else {
+            throw RuntimeError.unsafeRuntimeName(name)
+        }
+        return safe
     }
 
     /// Recursively find a `wine64`/`wine` loader, preferring one under a `bin` directory.
@@ -87,8 +114,12 @@ public actor RuntimeManager {
     }
 
     /// Download an asset and extract it into `Runtimes/<name>` (the shared download+extract engine;
-    /// `installWine` wraps it and locates the binary).
-    public func install(name: String, from downloadURL: URL) async throws {
+    /// `installWine` wraps it and locates the binary). `name` is sanitized to a single safe path
+    /// component before it builds any path (path-traversal defense). When `requireDigest` is true a
+    /// published `<url>.sha256` is mandatory (fail-closed) — see the integrity check below.
+    public func install(name: String, from downloadURL: URL, requireDigest: Bool = false) async throws {
+        let safeName = try Self.requireSafeComponent(name)
+        try DownloadGuard.requireHTTPS(downloadURL)   // reject http/file/other before any network call
         try fileManager.createDirectory(at: paths.runtimesDir, withIntermediateDirectories: true)
 
         let (tempFile, response) = try await session.download(from: downloadURL)
@@ -96,21 +127,32 @@ public actor RuntimeManager {
             throw RuntimeError.downloadFailed(http.statusCode)
         }
 
-        let archive = paths.runtimesDir.appendingPathComponent("\(name).archive")
+        let archive = paths.runtimesDir.appendingPathComponent("\(safeName).archive")
         if fileManager.fileExists(atPath: archive.path) { try fileManager.removeItem(at: archive) }
         try fileManager.moveItem(at: tempFile, to: archive)
         defer { try? fileManager.removeItem(at: archive) }
 
-        // Supply-chain integrity: if a sibling <url>.sha256 exists, the archive must match before we
-        // extract + run ~250 MB of unsigned native code. Best-effort (skipped if no digest published).
+        // Supply-chain integrity: an archive must match its published <url>.sha256 before we extract +
+        // run ~250 MB of unsigned native code. For the built-in repo the digest is MANDATORY
+        // (`requireDigest`) — never silently downgrade integrity for code we point users at; for a
+        // user's own override it stays best-effort (skipped if no digest published). NB: a matching
+        // digest defeats MITM/CDN tampering, NOT a compromised release (the digest ships from the same
+        // place) — that requires notarization (separate, human-gated).
         if let expected = await expectedSHA256(for: downloadURL) {
-            let actual = Self.sha256(ofFileAt: archive)
+            let actual = try FileDigest.sha256(ofFileAt: archive)
             guard actual == expected else {
                 throw RuntimeError.checksumMismatch(expected: expected, actual: actual)
             }
+        } else if requireDigest {
+            throw RuntimeError.checksumUnavailable
         }
 
-        let dest = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
+        let dest = paths.runtimesDir.appendingPathComponent(safeName, isDirectory: true)
+        // Belt-and-suspenders: the extraction target must stay inside the Runtimes dir.
+        let runtimesPath = paths.runtimesDir.standardizedFileURL.path
+        guard dest.standardizedFileURL.path.hasPrefix(runtimesPath) else {
+            throw RuntimeError.unsafeRuntimeName(name)
+        }
         try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
 
         let result = try await runner.run(
@@ -156,21 +198,11 @@ public actor RuntimeManager {
     /// Returns nil if none is published (best-effort verification).
     private func expectedSHA256(for downloadURL: URL) async -> String? {
         let shaURL = downloadURL.appendingPathExtension("sha256")
-        guard let (data, response) = try? await session.data(from: shaURL),
+        guard (try? DownloadGuard.requireHTTPS(shaURL)) != nil,
+              let (data, response) = try? await session.data(from: shaURL),
               let http = response as? HTTPURLResponse, http.statusCode == 200,
               let text = String(data: data, encoding: .utf8) else { return nil }
         return text.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map { $0.lowercased() }
-    }
-
-    /// Streaming SHA-256 of a file (memory-safe for large archives).
-    static func sha256(ofFileAt url: URL) -> String {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
-            hasher.update(data: chunk)
-        }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// De-quarantine (and optionally ad-hoc re-sign) an extracted runtime tree so macOS will run it.
