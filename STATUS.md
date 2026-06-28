@@ -3,6 +3,17 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M89 — Phase 2 test-coverage gaps (agentic, +49 tests → 161).** 4 domain mappers (orchestration,
+  error/edge, graphics/runtime, parsing/models) → adversarial verify (real gap + catches a real bug, not
+  coverage theater) → 25 verified gaps filled. New: `AppEnvironment.installUpdate` orchestration (no-bundle
+  `.failed` + not-newer no-op), `applyBackend` fan-out, full `SteamBottleViewModel` suite, `GameLibraryVM`
+  stop/uninstall-guard, and error branches across `Updater`/`RuntimeManager`/`GPTKImporter`/`ConfigStore`/
+  `SteamBottle` (download/unpack/replace/wineboot/checksum failures + corrupt-config fallback), plus
+  parser/Codable edges (`SteamPresenceStrategy` unknown-case, `EnvFlags` legacy migration + round-trip,
+  `AppManifestDecoder`/`LibraryFoldersDecoder`). Test-infra only: `FakeProcessRunner` real terminate +
+  incrementing PIDs; `FakeURLProtocol` per-session stub scoping (fixes a shared-registry race). No
+  production code touched; **no production bugs found** (all assert existing behavior). 161 tests / 28
+  suites green; clean build.
 - **✅ M88 — Phase 1 architecture review (agentic, 8 verified fixes).** 4 cross-file lenses (boundaries,
   abstraction value, dependency direction, concurrency-fit) → adversarial verify → 12 actionable, applied
   the 8 safe ones: deleted the vestigial **`BackendResolver`** (it adopted an installed Whisky/CrossOver

@@ -172,6 +172,36 @@ struct RuntimeManagerTests {
         #expect(await manager.installedWines().map(\.name) == ["Wine-1"])
     }
 
+    @Test("install throws downloadFailed on a non-2xx download, never invoking tar")
+    func downloadFailed() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let url = "https://example.com/wine.tar.gz"
+        FakeURLProtocol.stub(url, statusCode: 503, data: Data())   // empty error body, like a 503
+        let fake = FakeProcessRunner()
+        let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())
+        await #expect(throws: RuntimeManager.RuntimeError.downloadFailed(503)) {
+            try await manager.install(name: "X", from: URL(string: url)!)
+        }
+        // Early-exit before move/extract: tar never ran, no archive and no runtime dir left behind.
+        #expect(!fake.invocations.contains { $0.executable.lastPathComponent == "tar" })
+        let runtimes = tmp.url.appendingPathComponent("Silo/Runtimes")
+        #expect(!FileManager.default.fileExists(atPath: runtimes.appendingPathComponent("X.archive").path))
+        #expect(!FileManager.default.fileExists(atPath: runtimes.appendingPathComponent("X").path))
+    }
+
+    @Test("availableReleases throws badResponse on a non-200 (GitHub rate-limit)")
+    func badResponse() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // A realistic GitHub 403 rate-limit JSON body — must NOT be decoded as [GitHubRelease].
+        // Unique repo (the registry is shared across the parallel suite; `acme/wine` is taken by releases()).
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/wine-ratelimited/releases?per_page=3",
+                             statusCode: 403, data: Data("{\"message\":\"API rate limit exceeded\"}".utf8))
+        let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
+        await #expect(throws: RuntimeManager.RuntimeError.badResponse(403)) {
+            try await manager.availableReleases(repo: "acme/wine-ratelimited", limit: 3)
+        }
+    }
+
     @Test("Throws extractionFailed when tar fails")
     func extractionFails() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

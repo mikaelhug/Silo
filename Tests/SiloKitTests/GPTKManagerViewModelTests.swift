@@ -52,4 +52,19 @@ struct GPTKManagerViewModelTests {
         #expect(vm.installs.isEmpty)
         #expect(vm.defaultName == nil)
     }
+
+    @Test("importGPTK failure surfaces a message and resets the spinner without refreshing")
+    func importFailureSurfacesStatus() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        fake.queueResult(ProcessResult(exitCode: 1))   // hdiutil attach fails → ImportError.attachFailed
+        let vm = GPTKManagerViewModel(importer: GPTKImporter(runner: fake, paths: paths))
+
+        await vm.importGPTK(from: tmp.url.appendingPathComponent("Bad.dmg"))
+
+        #expect(vm.statusMessage?.hasPrefix("Import failed") == true)
+        #expect(!vm.isImporting)                     // defer reset fired
+        #expect(vm.installs.isEmpty)                  // catch path does NOT call refresh()
+    }
 }

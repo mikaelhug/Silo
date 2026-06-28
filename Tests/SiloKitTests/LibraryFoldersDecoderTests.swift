@@ -41,4 +41,14 @@ struct LibraryFoldersDecoderTests {
             try decoder.decode(text: #""other" { "0" { "path" "/x" } }"#)
         }
     }
+
+    @Test("Skips a numeric folder entry missing its path key, keeps valid siblings")
+    func skipsObjectEntryWithoutPath() throws {
+        let text = #""libraryfolders" { "0" { "label" "NoPath" "apps" { "10" "1" } } "1" { "path" "/good" "label" "Good" "apps" { "440" "1" } } }"#
+        let folders = try decoder.decode(text: text)
+        #expect(folders.count == 1)                         // path-less "0" dropped, not crashed/defaulted
+        #expect(folders[0].path.path == "/good")            // surviving sibling decodes correctly
+        #expect(folders[0].label == "Good")
+        #expect(folders[0].appIDs == [440])
+    }
 }

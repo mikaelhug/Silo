@@ -63,6 +63,39 @@ struct ViewModelTests {
         #expect(vm.installed.map(\.name) == ["wine-cx-26.2.0"])
     }
 
+    @Test("installLatest reports 'No Wine build published' when the repo has no wine-* release")
+    func installLatestNoWineRelease() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let json = """
+        [{"tag_name":"v0.1.1","name":"Silo 0.1.1","assets":[
+          {"name":"Silo.zip","browser_download_url":"https://e.com/Silo.zip","size":1}]}]
+        """
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/noWine/releases?per_page=15", data: Data(json.utf8))
+        let vm = RuntimeViewModel(
+            manager: RuntimeManager(paths: paths, runner: FakeProcessRunner(), session: FakeURLProtocol.makeSession()),
+            repo: "acme/noWine")
+        await vm.installLatest()
+        #expect(vm.statusMessage?.contains("No Wine build published") == true)
+        #expect(!vm.isInstalling)
+    }
+
+    @Test("installLatest reports 'no installable archive' when the wine-* release has no archive asset")
+    func installLatestNoAsset() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let json = """
+        [{"tag_name":"wine-cx-26.2.0","name":"Wine CX 26.2.0","assets":[]}]
+        """
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/noAsset/releases?per_page=15", data: Data(json.utf8))
+        let vm = RuntimeViewModel(
+            manager: RuntimeManager(paths: paths, runner: FakeProcessRunner(), session: FakeURLProtocol.makeSession()),
+            repo: "acme/noAsset")
+        await vm.installLatest()
+        #expect(vm.statusMessage?.contains("no installable archive") == true)
+        #expect(!vm.isInstalling)
+    }
+
     @Test("AppEnvironment.setupComplete needs Wine + GPTK + the Steam bottle")
     func setupComplete() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

@@ -106,6 +106,33 @@ struct GraphicsLinkerTests {
         #expect(try String(contentsOf: kernel32, encoding: .utf8) == "WINE-REAL")   // untouched
     }
 
+    @Test("overlayGPTK selects a fallback witness when d3d11.dll is absent and re-applies on update")
+    func overlayFallbackWitness() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // SINGLE non-d3d11 module → witness is unambiguously modules[0] (no d3d11.dll present).
+        let gptkLibDir = try makeGPTK(tmp, modules: ["d3d12.dll"])
+        let wine = try makeWine(tmp)
+        let wineWin = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-windows/d3d12.dll")
+
+        // 1. First overlay completes the copy via the fallback witness (not a short-circuit).
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+        #expect(FileManager.default.contentsEqual(
+            atPath: wineWin.path, andPath: gptkLibDir.appendingPathComponent("d3d12.dll").path))
+
+        // 2. A GPTK update rewrites d3d12.dll; the fallback-keyed idempotency check must DETECT it + re-apply.
+        try tmp.write("gptk/lib/wine/x86_64-windows/d3d12.dll", "PE:d3d12.dll v2")
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+        #expect(try String(contentsOf: wineWin, encoding: .utf8) == "PE:d3d12.dll v2")
+
+        // 3. No-op when unchanged: the witness short-circuit fires; bytes + mtime are untouched.
+        let mtime = try FileManager.default.attributesOfItem(atPath: wineWin.path)[.modificationDate] as? Date
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+        #expect(try String(contentsOf: wineWin, encoding: .utf8) == "PE:d3d12.dll v2")
+        let mtime2 = try FileManager.default.attributesOfItem(atPath: wineWin.path)[.modificationDate] as? Date
+        #expect(mtime == mtime2)   // not re-copied (guards the re-copy-every-launch failure mode)
+    }
+
     @Test("overlayGPTK throws sourceMissing when GPTK's module dir does not exist")
     func overlaySourceMissing() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
