@@ -22,6 +22,7 @@ public final class AppEnvironment {
     public private(set) var updateCheck: Updater.UpdateCheck?
     public private(set) var updateState: UpdateState = .idle
     public private(set) var didBootstrap = false
+    private var isBootstrapping = false
 
     /// Progress of the inline (download + self-replace + relaunch) update.
     public enum UpdateState: Sendable, Equatable {
@@ -52,7 +53,7 @@ public final class AppEnvironment {
 
         let initialBackend = BackendConfig()
         self.backendSettings = BackendSettingsViewModel(
-            config: initialBackend, resolver: BackendResolver(), configStore: configStore, paths: paths)
+            config: initialBackend, resolver: BackendResolver(), configStore: configStore)
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
@@ -84,8 +85,8 @@ public final class AppEnvironment {
 
     /// Load persisted config and populate the UI. Idempotent.
     public func bootstrap() async {
-        guard !didBootstrap else { return }
-        didBootstrap = true
+        guard !didBootstrap, !isBootstrapping else { return }
+        isBootstrapping = true
         let state = await configStore.load()
         backendSettings.config = state.backend
         gameLibrary.updateBackend(state.backend)
@@ -97,6 +98,8 @@ public final class AppEnvironment {
         // Library = games installed in the Steam bottle.
         await gameLibrary.load()
         updateCheck = try? await updater.checkForUpdate()   // best-effort; nil on failure/offline
+        didBootstrap = true
+        isBootstrapping = false
     }
 
     /// Reload the bottle's game library (e.g. on app re-activation).
@@ -105,7 +108,7 @@ public final class AppEnvironment {
         await gameLibrary.load()
     }
 
-    /// Apply the available update **inline** (Velox-style): download the release, swap the running
+    /// Apply the available update **inline** (Sparkle-style): download the release, swap the running
     /// `Silo.app` in place, and relaunch — no browser hop or manual install. No-op without a newer
     /// release; surfaces a recoverable `.failed` state when not running from an `.app` bundle (dev/CLI)
     /// or on a download/install error. On success it relaunches and never returns. Surfaced by `AboutView`.
@@ -135,9 +138,9 @@ public final class AppEnvironment {
     public var setupComplete: Bool { wineReady && gptkReady && steamReady }
 
     /// Build a per-game settings view model with the game's persisted config.
-    public func makeGameSettings(appID: Int, name: String) async -> GameSettingsViewModel {
+    public func makeGameSettings(appID: Int) async -> GameSettingsViewModel {
         let state = await configStore.load()
-        return GameSettingsViewModel(config: state.config(for: appID), appName: name, configStore: configStore)
+        return GameSettingsViewModel(config: state.config(for: appID), configStore: configStore)
     }
 
     /// A game's launch log (per appID).

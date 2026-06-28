@@ -8,7 +8,8 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var wineRuntimeName: String?
     /// Fallback wine binary (CrossOver).
     public var crossoverWinePath: URL?
-    /// Directory containing GPTK / D3DMetal libraries to inject into game prefixes.
+    /// Directory containing GPTK / D3DMetal libraries, overlaid into the wine runtime's `lib/wine` tree
+    /// by `GraphicsLinker.overlayGPTK`.
     public var gptkLibDirPath: URL?
     /// Name of the default GPTK install (managed in the GPTK Manager).
     public var gptkRuntimeName: String?

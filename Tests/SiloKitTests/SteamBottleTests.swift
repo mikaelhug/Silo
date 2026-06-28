@@ -54,7 +54,7 @@ struct SteamBottleTests {
         let wine = tmp.url.appendingPathComponent("wine/bin/wine64")
         _ = try tmp.write("wine/share/silo/steamwebhelper-wrapper.exe", "WRAPPER")
         // Steam installed its real webhelper in the bottle.
-        let helper = paths.steamBottleWebHelper
+        let helper = paths.steamBottleCEFDir.appendingPathComponent("cef.win7x64/steamwebhelper.exe")
         try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
         try "REAL".write(to: helper, atomically: true, encoding: .utf8)
 

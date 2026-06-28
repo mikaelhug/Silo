@@ -10,7 +10,6 @@ public struct GitHubRelease: Codable, Sendable, Equatable {
     public struct Asset: Codable, Sendable, Equatable {
         public let name: String
         public let browserDownloadUrl: URL
-        public let size: Int
     }
 
     /// Version with any leading `v` stripped (e.g. `v0.2.0` → `0.2.0`).

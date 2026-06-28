@@ -47,13 +47,13 @@ public struct AppManifestDecoder: Sendable {
         return value
     }
 
-    private func optInt(_ node: KVNode, _ key: String) -> Int? {
-        node[key]?.stringValue.flatMap(Int.init)
+    private func opt<T>(_ node: KVNode, _ key: String, _ parse: (String) -> T?) -> T? {
+        node[key]?.stringValue.flatMap(parse)
     }
 
-    private func optInt64(_ node: KVNode, _ key: String) -> Int64? {
-        node[key]?.stringValue.flatMap(Int64.init)
-    }
+    private func optInt(_ node: KVNode, _ key: String) -> Int? { opt(node, key, Int.init) }
+
+    private func optInt64(_ node: KVNode, _ key: String) -> Int64? { opt(node, key, Int64.init) }
 
     private func optDate(_ node: KVNode, _ key: String) -> Date? {
         guard let string = node[key]?.stringValue,

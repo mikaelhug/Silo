@@ -30,7 +30,7 @@ struct GameSettingsSheet: View {
         }
         .frame(width: 480, height: 540)
         .task {
-            vm = await env.makeGameSettings(appID: game.appID, name: game.name)
+            vm = await env.makeGameSettings(appID: game.appID)
             executables = ExecutableResolver.allExecutables(in: game.installURL)
         }
     }

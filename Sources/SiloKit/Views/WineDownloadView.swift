@@ -28,28 +28,14 @@ struct WineDownloadView: View {
                     Text("None installed.").foregroundStyle(.secondary)
                 } else {
                     ForEach(vm.installed) { wine in
-                        HStack(spacing: 10) {
-                            Image(systemName: vm.isDefault(wine) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(vm.isDefault(wine) ? Color.green : Color.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(wine.displayName)
-                                if !wine.isUsable {
-                                    Text("no wine binary found").font(.caption).foregroundStyle(.orange)
-                                }
-                            }
-                            Spacer()
-                            if vm.isDefault(wine) {
-                                Text("Default").font(.caption2).foregroundStyle(.green)
-                            } else {
-                                Button("Set default") { vm.setDefault(wine) }.disabled(!wine.isUsable)
-                            }
-                            Button(role: .destructive) {
-                                Task { await vm.remove(wine) }
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
-                        }
+                        RuntimeInstallRow(
+                            title: wine.displayName,
+                            warning: wine.isUsable ? nil : "no wine binary found",
+                            subtitle: nil,
+                            isDefault: vm.isDefault(wine),
+                            canSetDefault: wine.isUsable,
+                            onSetDefault: { vm.setDefault(wine) },
+                            onRemove: { Task { await vm.remove(wine) } })
                     }
                 }
             }
