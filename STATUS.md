@@ -3,6 +3,18 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M95 — UI refinements (6 changes).** (1) Renamed "Advanced Settings" → **Settings** and made it the
+  standard macOS **Settings window** (app-menu "Settings…" / ⌘, via a `Settings` scene + `openSettings`;
+  the Library toolbar gear now opens it). Tabs: **Steam Bottle**, **Runtimes**, **Updates**. (2) Removed the
+  Status section (Ready-to-launch / Default Wine / Default GPTK) and (3) the "Advanced (manual paths)"
+  disclosure + the now-vestigial Save button from `BackendSettingsView` (it's just the Steam-bottle pane
+  now). (4) **Removed the experimental HW-accelerated Steam UI** entirely (`cefHardwareArgs` /
+  `hardwareAccelerated` everywhere) — on-device it only black-screened, confirming the ANGLE-D3D11-under-GPTK
+  limit. (5) **Fixed the GPTK Runtimes list showing wine runtimes** — the M83 overlay copies
+  `D3DMetal.framework` into the wine runtime's `lib/external`, so `GPTKImporter.installed()` matched it;
+  now excludes any dir with a wine binary. (6) **Fixed the updater offering a Wine version as an app
+  update** — it queried `/releases/latest` (often `wine-cx-*`); now fetches the release list and considers
+  only the app's own `v*` releases (`isAppRelease`). 173 tests / 28 suites green; clean build.
 - **✅ M94 — UI: single-pane Library + consolidated Advanced Settings.** Removed the sidebar entirely
   (`RootView` is now just `NavigationStack { LibraryGridView() }`); deleted `SidebarView`/`SidebarItem` and
   the **About** pane. **Advanced Settings** (Library toolbar → gear) is now a `TabView`: **Backend** (the

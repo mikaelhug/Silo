@@ -42,14 +42,22 @@ public struct Updater: Sendable {
     }
 
     public func checkForUpdate() async throws -> UpdateCheck {
-        let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!
+        // The repo ALSO hosts `wine-cx-*` runtime releases, so fetch the release LIST and consider only the
+        // app's own `v*` releases — not `/releases/latest`, which is often the newest wine build and would
+        // make the updater "offer" a Wine version as an app update.
+        let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=30")!
         let (data, response) = try await session.data(for: .github(url))
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw UpdateError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let release = try decoder.decode(GitHubRelease.self, from: data)
+        let releases = try decoder.decode([GitHubRelease].self, from: data)
+        guard let release = releases
+            .filter({ Self.isAppRelease($0.tagName) })
+            .max(by: { Self.isVersion($1.version, newerThan: $0.version) }) else {
+            return UpdateCheck(latestVersion: currentVersion, isNewer: false, downloadURL: nil, releaseName: nil)
+        }
         let asset = release.assets.first { $0.name.hasSuffix(".zip") }
         return UpdateCheck(
             latestVersion: release.version,
@@ -57,6 +65,13 @@ public struct Updater: Sendable {
             downloadURL: asset?.browserDownloadUrl,
             releaseName: release.name
         )
+    }
+
+    /// Whether a release tag is one of the APP's own releases (`vX.Y.Z`), not a runtime build (`wine-cx-*`).
+    static func isAppRelease(_ tag: String) -> Bool {
+        guard !tag.lowercased().hasPrefix("wine") else { return false }
+        let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        return version.first?.isNumber == true
     }
 
     /// Numeric, component-aware version comparison (`0.10.0` > `0.9.0`).

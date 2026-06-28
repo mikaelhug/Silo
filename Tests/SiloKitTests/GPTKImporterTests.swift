@@ -48,15 +48,20 @@ struct GPTKImporterTests {
     func installedAndRemove() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        // Two GPTK installs + one non-GPTK dir (should be ignored).
+        // Two real GPTK installs (overlay tree, no wine binary)…
         for name in ["GPTK-4.0", "GPTK-3.1"] {
             try tmp.write("Silo/Runtimes/\(name)/lib/wine/x86_64-windows/d3d11.dll", "x")
             try tmp.makeDir("Silo/Runtimes/\(name)/lib/external/D3DMetal.framework")
         }
-        try tmp.write("Silo/Runtimes/wine-only/bin/wine64", "x")   // not a GPTK install
+        // …plus an OVERLAID wine runtime: it ALSO carries lib/external/D3DMetal.framework + d3d modules
+        // (GraphicsLinker.overlayGPTK copies them in), so it must be distinguished by its wine binary and
+        // NOT listed as GPTK.
+        try tmp.write("Silo/Runtimes/wine-cx-26.2.0/lib/wine/x86_64-windows/d3d11.dll", "x")
+        try tmp.makeDir("Silo/Runtimes/wine-cx-26.2.0/lib/external/D3DMetal.framework")
+        try tmp.write("Silo/Runtimes/wine-cx-26.2.0/bin/wine64", "x")
 
         let importer = GPTKImporter(runner: FakeProcessRunner(), paths: paths)
-        #expect(importer.installed().map(\.name) == ["GPTK-3.1", "GPTK-4.0"])   // sorted, GPTK-only
+        #expect(importer.installed().map(\.name) == ["GPTK-3.1", "GPTK-4.0"])   // GPTK-only (wine excluded)
 
         try importer.remove(name: "GPTK-3.1")
         #expect(importer.installed().map(\.name) == ["GPTK-4.0"])

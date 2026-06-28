@@ -44,7 +44,13 @@ public struct GPTKImporter: Sendable {
             let libDir = dir.appendingPathComponent("lib/wine/x86_64-windows", isDirectory: true)
             let framework = dir.appendingPathComponent("lib/external/D3DMetal.framework", isDirectory: true)
             guard fileManager.fileExists(atPath: libDir.path),
-                  fileManager.fileExists(atPath: framework.path) else { return nil }
+                  fileManager.fileExists(atPath: framework.path),
+                  // A real GPTK install is an overlay tree with NO wine binary. The wine runtime now ALSO
+                  // carries lib/external/D3DMetal.framework (GraphicsLinker.overlayGPTK copies it in), so it
+                  // would otherwise match here — distinguish the two by the presence of a wine binary.
+                  !fileManager.fileExists(atPath: dir.appendingPathComponent("bin/wine64").path),
+                  !fileManager.fileExists(atPath: dir.appendingPathComponent("bin/wine").path)
+            else { return nil }
             return GPTKInstall(name: dir.lastPathComponent, installDir: dir,
                                gptkLibDir: libDir, d3dMetalFramework: framework)
         }.sorted { $0.name < $1.name }

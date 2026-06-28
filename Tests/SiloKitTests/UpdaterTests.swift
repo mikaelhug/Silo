@@ -6,14 +6,14 @@ import Testing
 @Suite("Updater")
 struct UpdaterTests {
 
-    private let releaseJSON = """
-    {
-      "tag_name": "v0.2.0",
-      "name": "Silo 0.2.0",
-      "assets": [
-        { "name": "Silo.app.zip", "browser_download_url": "https://example.com/Silo.app.zip", "size": 12345 }
-      ]
-    }
+    /// A releases LIST (the repo also hosts `wine-cx-*` runtime builds, so the updater must filter to the
+    /// app's own `v*` releases). The newest entry is a Wine build — picking 0.2.0 over it proves the filter.
+    private let releasesJSON = """
+    [
+      { "tag_name": "wine-cx-26.2.0", "name": "Wine 26.2.0", "assets": [] },
+      { "tag_name": "v0.2.0", "name": "Silo 0.2.0", "assets": [
+          { "name": "Silo.app.zip", "browser_download_url": "https://example.com/Silo.app.zip", "size": 12345 } ] }
+    ]
     """
 
     // Tests run in parallel and share FakeURLProtocol's registry, so each uses a UNIQUE repo URL.
@@ -21,29 +21,40 @@ struct UpdaterTests {
         Updater(repo: repo, currentVersion: current, session: FakeURLProtocol.makeSession())
     }
 
-    @Test("Reports a newer release with its download URL")
+    @Test("Reports the newest APP release (ignoring wine-cx-* runtime releases) with its download URL")
     func newer() async throws {
-        FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-newer/releases/latest",
-                             data: Data(releaseJSON.utf8))
+        FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-newer/releases?per_page=30",
+                             data: Data(releasesJSON.utf8))
         let check = try await updater(repo: "owner/Silo-newer", current: "0.1.1").checkForUpdate()
-        #expect(check.latestVersion == "0.2.0")
+        #expect(check.latestVersion == "0.2.0")        // NOT 26.2.0 — the wine-cx release is filtered out
         #expect(check.isNewer)
         #expect(check.downloadURL?.absoluteString == "https://example.com/Silo.app.zip")
         #expect(check.releaseName == "Silo 0.2.0")
     }
 
-    @Test("Reports no update when current >= latest")
+    @Test("Reports no update when current >= the newest app release")
     func notNewer() async throws {
-        FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-eq/releases/latest",
-                             data: Data(releaseJSON.utf8))
+        FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-eq/releases?per_page=30",
+                             data: Data(releasesJSON.utf8))
         let check = try await updater(repo: "owner/Silo-eq", current: "0.2.0").checkForUpdate()
         #expect(!check.isNewer)
     }
 
+    @Test("Reports no update when only wine-cx-* releases exist (no app release at all)")
+    func onlyWineReleases() async throws {
+        FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-wineonly/releases?per_page=30",
+                             data: Data("""
+                             [ { "tag_name": "wine-cx-26.2.0", "name": "Wine 26.2.0", "assets": [] } ]
+                             """.utf8))
+        let check = try await updater(repo: "owner/Silo-wineonly", current: "0.1.1").checkForUpdate()
+        #expect(!check.isNewer)
+        #expect(check.downloadURL == nil)
+    }
+
     @Test("Throws badResponse on a non-200 status")
     func badResponse() async throws {
-        FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-404/releases/latest",
-                             statusCode: 404, data: Data("{}".utf8))
+        FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-404/releases?per_page=30",
+                             statusCode: 404, data: Data("[]".utf8))
         await #expect(throws: Updater.UpdateError.badResponse(404)) {
             try await updater(repo: "owner/Silo-404", current: "0.1.1").checkForUpdate()
         }

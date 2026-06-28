@@ -21,10 +21,6 @@ public final class SteamClientSession {
     /// Seconds to wait after a cold start before returning, so a game launched right after can reach Steam
     /// (boot + auto-login + connect). Overridden to 0 in tests.
     var coldStartGraceSeconds: Double = 10
-
-    /// **Experimental** — render Steam's CEF UI on the GPU (ANGLE→D3DMetal) instead of SwiftShader software
-    /// GL. Default off (the verified path); may show a black window. Games are HW-accelerated regardless.
-    public var hardwareAccelerated = false
     /// The last launch failure message (for the UI), cleared on a successful launch.
     public private(set) var launchError: String?
 
@@ -72,7 +68,7 @@ public final class SteamClientSession {
     private func launchSteamProcess() async -> Int32? {
         do {
             if let wine = wineBinary { try bottle.installWebHelperWrapper(wine: wine) }
-            return try await bottle.launchSteam(wine: wineBinary, hardwareAccelerated: hardwareAccelerated)
+            return try await bottle.launchSteam(wine: wineBinary)
         } catch {
             launchError = (error as NSError).localizedDescription
             return nil
