@@ -47,7 +47,11 @@ public final class RuntimeViewModel {
                 return
             }
             statusMessage = "Downloading \(release.version)… (large file, ~250 MB)"
-            _ = try await manager.installWine(name: release.tagName, from: asset.browserDownloadUrl)
+            // The built-in repo MUST publish a SHA-256 (fail-closed); a user's own override repo may
+            // not, so the digest stays best-effort there.
+            let requireDigest = repo == Silo.wineRepo
+            _ = try await manager.installWine(
+                name: release.tagName, from: asset.browserDownloadUrl, requireDigest: requireDigest)
             await refresh()
             if defaultName == nil, let new = installed.first(where: { $0.name == release.tagName }) {
                 setDefault(new)

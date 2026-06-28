@@ -27,6 +27,11 @@ public struct Updater: Sendable {
         case unpackFailed
         case notRunningFromBundle
         case replaceFailed
+        /// The downloaded `.zip` didn't match its published `<url>.sha256` (corruption/MITM in transit).
+        case checksumMismatch
+        /// No `<url>.sha256` could be fetched. Fail-closed here (unlike the runtime path's best-effort
+        /// skip) because this code overwrites + executes the app itself — we won't install unverified.
+        case checksumUnavailable
     }
 
     public struct UpdateCheck: Sendable, Equatable {
@@ -65,6 +70,7 @@ public struct Updater: Sendable {
     /// `installUpdate` so the GUI can show download progress, and so it's testable with a stubbed session.
     public func downloadUpdate(_ check: UpdateCheck, into directory: URL) async throws -> URL {
         guard let url = check.downloadURL else { throw UpdateError.noDownloadAsset }
+        try DownloadGuard.requireHTTPS(url)   // https-only — no cleartext/file: app download
         let (tempFile, response) = try await session.download(for: .github(url))
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw UpdateError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)
@@ -74,7 +80,38 @@ public struct Updater: Sendable {
         let dest = directory.appendingPathComponent(url.lastPathComponent)
         if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
         try fm.moveItem(at: tempFile, to: dest)
+
+        // Fail-closed integrity check. This path overwrites + EXECUTES the running app, so unlike the
+        // runtime's best-effort skip we REQUIRE a matching `<url>.sha256`: if it can't be fetched →
+        // `.checksumUnavailable`; if the digest of the saved zip doesn't match → `.checksumMismatch`
+        // (and the bad file is deleted). A match defeats MITM/CDN tampering in transit; it does NOT
+        // defeat a compromised GitHub release (the digest ships from the same place) — full authenticity
+        // needs notarization, a separate human-gated task.
+        do {
+            let expected = try await expectedSHA256(for: url)
+            let actual = try FileDigest.sha256(ofFileAt: dest)
+            guard actual.caseInsensitiveCompare(expected) == .orderedSame else {
+                try? fm.removeItem(at: dest)
+                throw UpdateError.checksumMismatch
+            }
+        } catch {
+            try? fm.removeItem(at: dest)   // never leave an unverified app .zip on disk
+            throw error
+        }
         return dest
+    }
+
+    /// Fetch the expected SHA-256 from the sibling `<url>.sha256` (shasum format: "<hex>  filename").
+    /// Throws `.checksumUnavailable` if it can't be fetched (non-2xx / empty) — fail-closed.
+    private func expectedSHA256(for downloadURL: URL) async throws -> String {
+        let shaURL = downloadURL.appendingPathExtension("sha256")
+        try DownloadGuard.requireHTTPS(shaURL)
+        guard let (data, response) = try? await session.data(for: .github(shaURL)),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let text = String(data: data, encoding: .utf8),
+              let token = text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).first
+        else { throw UpdateError.checksumUnavailable }
+        return String(token)
     }
 
     /// Unpack the downloaded `.zip` and **atomically replace** `appBundle` with the contained `.app`,

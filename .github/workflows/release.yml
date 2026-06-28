@@ -55,6 +55,9 @@ jobs:
       - name: Package Silo.zip
         run: ditto -c -k --keepParent dist/Silo.app dist/Silo.zip
 
+      - name: Compute Silo.zip SHA-256 (the in-app updater verifies this fail-closed)
+        run: shasum -a 256 dist/Silo.zip | awk '{print $1}' > dist/Silo.zip.sha256
+
       # Optional notarization — gated on secrets (AC_API_KEY_ID, AC_API_ISSUER_ID, AC_API_KEY_BASE64).
       - name: Notarize
         if: ${{ env.HAS_NOTARY != '' }}
@@ -78,6 +81,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')   # tags publish a downloadable release; manual runs don't
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Silo.zip
+          files: |
+            dist/Silo.zip
+            dist/Silo.zip.sha256
           generate_release_notes: true
           fail_on_unmatched_files: true

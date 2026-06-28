@@ -114,6 +114,40 @@ struct GPTKImporterTests {
         #expect(FileManager.default.fileExists(atPath: result.gptkLibDir.appendingPathComponent("dxgi.dll").path))
         #expect(fake.invocations.filter { $0.arguments.contains("attach") }.count == 1)
         #expect(fake.invocations.filter { $0.arguments.contains("detach") }.count == 1)
+
+        // The atomic-publish staging dir is cleaned up — no leftover `.gptk-import-*` sibling.
+        let runtimeChildren = try FileManager.default.contentsOfDirectory(atPath: paths.runtimesDir.path)
+        #expect(!runtimeChildren.contains { $0.hasPrefix(".gptk-import-") })
+    }
+
+    @Test("A failure during publish leaves no partial install and no staging dir")
+    func atomicImportNoPartialOnFailure() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let mount = try makeEvalMount(tmp, named: "failMount")
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+
+        // Pre-create the final install dir as a NON-EMPTY, read-only obstacle so the post-copy
+        // `removeItem(installDir)` + `moveItem(staging → installDir)` publish step throws AFTER the copy
+        // and de-quarantine already succeeded — exercising the staging-cleanup guarantee.
+        let installDir = paths.runtimesDir.appendingPathComponent("GPTK-fail", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: installDir.appendingPathComponent("locked"), withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: installDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: installDir.path) }
+
+        let fake = FakeProcessRunner()
+        fake.queueResult(attachPlist(mountPoint: mount.path))
+        do {
+            _ = try await GPTKImporter(runner: fake, paths: paths)
+                .importGPTK(fromDMG: tmp.url.appendingPathComponent("GPTK.dmg"), name: "GPTK-fail")
+            Issue.record("expected the publish step to throw")
+        } catch {
+            // expected — the read-only installDir blocks the remove/move publish.
+        }
+        // Cleanup ran: no `.gptk-import-*` staging sibling left behind.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: installDir.path)
+        let children = try FileManager.default.contentsOfDirectory(atPath: paths.runtimesDir.path)
+        #expect(!children.contains { $0.hasPrefix(".gptk-import-") })
     }
 
     @Test("Throws attachFailed (with stderr) when hdiutil attach fails")

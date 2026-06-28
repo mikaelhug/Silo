@@ -45,6 +45,25 @@ struct SystemProcessRunnerTests {
         #expect(result.stdoutString == "isolated")
     }
 
+    @Test("mergedEnvironment strips loader-injection vars but keeps Silo's DYLD_FALLBACK override")
+    func mergedEnvironmentScrubsInjection() async throws {
+        // Simulate a hostile ambient env carrying a dylib-injection var, then assert the child env.
+        setenv("DYLD_INSERT_LIBRARIES", "/tmp/evil.dylib", 1)
+        setenv("DYLD_FORCE_FLAT_NAMESPACE", "1", 1)
+        defer { unsetenv("DYLD_INSERT_LIBRARIES"); unsetenv("DYLD_FORCE_FLAT_NAMESPACE") }
+
+        let merged = SystemProcessRunner.mergedEnvironment([
+            "DYLD_FALLBACK_LIBRARY_PATH": "/runtime/lib:/usr/lib",
+            "WINEPREFIX": "/p/220",
+        ])
+        // The classic injection vectors are removed from the inherited env...
+        #expect(merged["DYLD_INSERT_LIBRARIES"] == nil)
+        #expect(merged["DYLD_FORCE_FLAT_NAMESPACE"] == nil)
+        // ...while Silo's explicit overrides (fallback path + prefix) survive on top.
+        #expect(merged["DYLD_FALLBACK_LIBRARY_PATH"] == "/runtime/lib:/usr/lib")
+        #expect(merged["WINEPREFIX"] == "/p/220")
+    }
+
     @Test("spawnDetached writes child output to the log file")
     func spawnDetached() async throws {
         let tmp = try TempDir()
