@@ -3,6 +3,26 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M83 — GPTK D3DMetal OVERLAY baked into Silo (native DX11 games render under GPTK on-device).**
+  119 tests / 26 suites green; clean build (no warnings); `dist/Silo.app` reassembled. The load-bearing
+  GPTK activation: Apple's d3d modules must be OVERLAID into the wine runtime's OWN `lib/wine` tree, not
+  merely put on `WINEDLLPATH` (which loads GPTK's PE dll but pairs it with wine's own `wined3d`→OpenGL
+  backend → `D3D11CreateDevice` 0x80004005). This **replaces the M29 WINEDLLPATH/system32-symlink wiring**.
+  - **`GraphicsLinker.overlayGPTK(wineBinary:gptkLibDir:)`** copies GPTK's 6 graphics modules' PE `.dll`
+    into `<wine>/lib/wine/x86_64-windows`, **recreates** each unix `.so` as a relative symlink in
+    `x86_64-unix` (preserved, not dereferenced — keeps D3DMetal.framework's `@rpath` lookup working), and
+    copies `lib/external` (libd3dshared.dylib + D3DMetal.framework) into `<wine>/lib/external`. The runtime
+    is then self-contained for D3DMetal (GPTK not consulted at launch). Idempotent (byte-compares a witness
+    module): no-op when current, re-applies on a runtime re-download or GPTK update — so it survives both.
+  - **`makePlan` GPTK env** now points the DYLD fallbacks at the runtime's own `lib/external` and forces
+    only the GPTK-translated modules builtin (`WINEDLLOVERRIDES=d3d10,d3d11,d3d12,dxgi=b`; no WINEDLLPATH;
+    d3d9/wined3d untouched). Optimally-tuned set confirmed against Apple's GPTK README (documented env is
+    just `ROSETTA_ADVERTISE_AVX` + `D3DM_SUPPORT_DXR`; MetalFX/DXR are per-game, off by default) — all
+    already in `EnvFlags`. The overlay was the only substantive gap.
+  - **Proven on-device:** Bloons TD 6 (native Unity D3D11) creates a real D3DMetal device
+    (`Direct3D 11.0 level 10.1`), renders with sound + fullscreen, co-resident Steamworks connected.
+  - Cleanup: old GPTK-into-`system32` path deleted; `link()`→`linkDXVK()` (crossover-only); dead
+    `gptkExternalDirPath`/`gptkWineDLLDirPath`/`LinkError.backendNotConfigured` removed.
 - **✅ M73–M81 — THE GATE IS CLEARED: bottle Steam RENDERS + LOGS IN on the from-source CrossOver wine
   (on-device, 2026-06-28).** 117 tests / 26 suites green; clean build. Three fixes, each found from live
   logs, finally got the Windows Steam client visible + signed in:
@@ -278,9 +298,10 @@
 - **Cold-start grace:** `play()` waits a flat 10s after cold-starting Steam before launching the game. If
   Steam's first boot (self-update + login) is slower, the game can start before Steamworks is ready — may
   need a readiness probe (Steam pipe/registry) instead of a fixed sleep.
-- **GPTK E2E activation:** whether CrossOver wine-cx-26.2.0 loads GPTK's d3d modules via `WINEDLLPATH` (vs
-  needing an overlay copy into the wine's own `lib/wine`, Whisky's method) can only be confirmed from a
-  real D3D game's launch log.
+- **GPTK E2E activation — RESOLVED (M83).** Confirmed from a real D3D game (Bloons TD 6): `WINEDLLPATH`
+  alone does NOT activate GPTK (wine keeps its own wined3d backend → device-creation failure); the overlay
+  copy into wine's own `lib/wine` (Whisky's method) is required and now automated by
+  `GraphicsLinker.overlayGPTK`. D3DMetal device creation + render verified on-device.
 - Confirm the exact third-party Wine/GPTK runtime repo/release to pin as default (currently placeholder
   `Kegworks-App/Kegworks` in `Silo.defaultRuntimeRepo`; overridable in Settings). Non-blocking.
 

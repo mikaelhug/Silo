@@ -6,85 +6,157 @@ import Testing
 struct GraphicsLinkerTests {
     let linker = GraphicsLinker()
 
-    /// Make a fake source library dir with the given (empty) files.
-    private func makeSource(_ tmp: TempDir, named: String, files: [String]) throws -> URL {
-        let dir = try tmp.makeDir(named)
-        for file in files { try tmp.write("\(named)/\(file)", "binary") }
-        return dir
+    // MARK: - Fixtures
+
+    /// Build a minimal GPTK runtime tree and return its `lib/wine/x86_64-windows` dir (the `gptkLibDir`).
+    /// Each module gets a PE `.dll` + a relative-symlink `.so` (GPTK's real layout); `lib/external` holds
+    /// `libd3dshared.dylib` + a `D3DMetal.framework` directory.
+    @discardableResult
+    private func makeGPTK(_ tmp: TempDir, modules: [String] = ["d3d11.dll", "d3d10.dll", "nvapi64.dll"]) throws -> URL {
+        let win = try tmp.makeDir("gptk/lib/wine/x86_64-windows")
+        let unix = try tmp.makeDir("gptk/lib/wine/x86_64-unix")
+        try tmp.makeDir("gptk/lib/external/D3DMetal.framework")
+        for module in modules {
+            try tmp.write("gptk/lib/wine/x86_64-windows/\(module)", "PE:\(module)")
+            let so = unix.appendingPathComponent((module as NSString).deletingPathExtension + ".so")
+            try FileManager.default.createSymbolicLink(
+                atPath: so.path, withDestinationPath: "../../external/libd3dshared.dylib")
+        }
+        try tmp.write("gptk/lib/external/libd3dshared.dylib", "DYLIB")
+        try tmp.write("gptk/lib/external/D3DMetal.framework/D3DMetal", "FRAMEWORK")
+        return win
     }
 
-    @Test("Symlinks GPTK libraries into system32")
-    func gptkSymlink() throws {
+    /// Build a minimal wine runtime tree (empty d3d dirs) and return its wine binary (`bin/wine64`).
+    private func makeWine(_ tmp: TempDir) throws -> URL {
+        try tmp.makeDir("wine/lib/wine/x86_64-windows")
+        try tmp.makeDir("wine/lib/wine/x86_64-unix")
+        return try tmp.write("wine/bin/wine64", "#!/bin/sh")
+    }
+
+    // MARK: - GPTK overlay
+
+    @Test("overlayGPTK copies GPTK's d3d modules into the wine runtime's lib/wine + lib/external")
+    func overlayCopiesModules() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let gptk = try makeSource(tmp, named: "gptk", files: ["D3DMetal.dll", "dxgi.dll"])
-        let prefix = try tmp.makeDir("prefix")
+        let gptkLibDir = try makeGPTK(tmp)
+        let wine = try makeWine(tmp)
+        let wineLib = wine.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("lib")
 
-        try linker.link(backend: .gptk, into: prefix, gptkLibDir: gptk, dxvkDLLDir: nil, mode: .symlink)
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
 
-        let system32 = PrefixLayout(prefix: prefix).system32
-        for file in ["D3DMetal.dll", "dxgi.dll"] {
-            let link = system32.appendingPathComponent(file)
-            let isLink = try link.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink
-            #expect(isLink == true)
-            #expect(FileManager.default.fileExists(atPath: link.path))   // resolves to a real file
+        // PE dll overlaid byte-for-byte.
+        let d3d11 = wineLib.appendingPathComponent("wine/x86_64-windows/d3d11.dll")
+        #expect(FileManager.default.contentsEqual(
+            atPath: d3d11.path, andPath: gptkLibDir.appendingPathComponent("d3d11.dll").path))
+        // Unix .so recreated AS a relative symlink (not dereferenced into a dylib copy).
+        let so = wineLib.appendingPathComponent("wine/x86_64-unix/d3d11.so")
+        #expect((try so.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true)
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: so.path)
+            == "../../external/libd3dshared.dylib")
+        // The Metal backend (lib/external) is overlaid so those symlinks + DYLD resolve.
+        #expect(FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("external/libd3dshared.dylib").path))
+        #expect(FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("external/D3DMetal.framework/D3DMetal").path))
+    }
+
+    @Test("overlayGPTK is idempotent — a second call is a no-op and does not throw")
+    func overlayIdempotent() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let gptkLibDir = try makeGPTK(tmp)
+        let wine = try makeWine(tmp)
+
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)   // no throw, still correct
+
+        let d3d11 = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-windows/d3d11.dll")
+        #expect(FileManager.default.contentsEqual(
+            atPath: d3d11.path, andPath: gptkLibDir.appendingPathComponent("d3d11.dll").path))
+    }
+
+    @Test("overlayGPTK re-applies when GPTK's modules change (e.g. a GPTK update)")
+    func overlayReappliesOnUpdate() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let gptkLibDir = try makeGPTK(tmp)
+        let wine = try makeWine(tmp)
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+
+        // A GPTK update rewrites d3d11.dll; the overlay must pick up the new bytes.
+        try tmp.write("gptk/lib/wine/x86_64-windows/d3d11.dll", "PE:d3d11.dll v2")
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+
+        let d3d11 = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-windows/d3d11.dll")
+        #expect(try String(contentsOf: d3d11, encoding: .utf8) == "PE:d3d11.dll v2")
+    }
+
+    @Test("overlayGPTK only touches d3d/dxgi/nv modules — unrelated wine dlls are left intact")
+    func overlayScopedToGPTKModules() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let gptkLibDir = try makeGPTK(tmp, modules: ["d3d11.dll"])
+        // A stray non-graphics dll in GPTK's source must NOT clobber the wine runtime's own copy.
+        try tmp.write("gptk/lib/wine/x86_64-windows/kernel32.dll", "GPTK-STRAY")
+        let wine = try makeWine(tmp)
+        try tmp.write("wine/lib/wine/x86_64-windows/kernel32.dll", "WINE-REAL")
+
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+
+        let kernel32 = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-windows/kernel32.dll")
+        #expect(try String(contentsOf: kernel32, encoding: .utf8) == "WINE-REAL")   // untouched
+    }
+
+    @Test("overlayGPTK throws sourceMissing when GPTK's module dir does not exist")
+    func overlaySourceMissing() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let wine = try makeWine(tmp)
+        let missing = tmp.url.appendingPathComponent("nope/lib/wine/x86_64-windows")
+        #expect(throws: GraphicsLinker.LinkError.sourceMissing(missing)) {
+            try linker.overlayGPTK(wineBinary: wine, gptkLibDir: missing)
         }
     }
 
-    @Test("Only graphics DLLs are linked — non-d3d/dxgi files in the source are left alone")
-    func scopedToGraphicsDLLs() throws {
+    // MARK: - DXVK (crossover backend)
+
+    @Test("linkDXVK links only d3d/dxgi DLLs into system32, leaving other files alone")
+    func dxvkScoped() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        // A GPTK wine-DLL dir can hold non-graphics DLLs; those must NOT clobber the shared bottle.
-        let gptk = try makeSource(tmp, named: "gptk", files: ["d3d11.dll", "kernel32.dll", "winegstreamer.dll"])
+        let dxvk = try tmp.makeDir("dxvk")
+        for file in ["d3d11.dll", "dxgi.dll", "version.dll"] { try tmp.write("dxvk/\(file)", "binary") }
         let prefix = try tmp.makeDir("prefix")
-        try linker.link(backend: .gptk, into: prefix, gptkLibDir: gptk, dxvkDLLDir: nil)
+
+        try linker.linkDXVK(into: prefix, dxvkDLLDir: dxvk)
 
         let system32 = PrefixLayout(prefix: prefix).system32
-        #expect(FileManager.default.fileExists(atPath: system32.appendingPathComponent("d3d11.dll").path))
-        #expect(!FileManager.default.fileExists(atPath: system32.appendingPathComponent("kernel32.dll").path))
-        #expect(!FileManager.default.fileExists(atPath: system32.appendingPathComponent("winegstreamer.dll").path))
+        for file in ["d3d11.dll", "dxgi.dll"] {
+            let link = system32.appendingPathComponent(file)
+            #expect((try link.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true)
+            #expect(FileManager.default.fileExists(atPath: link.path))   // resolves to a real file
+        }
+        #expect(!FileManager.default.fileExists(atPath: system32.appendingPathComponent("version.dll").path))
     }
 
-    @Test("Copies DXVK DLLs for the crossover backend")
-    func crossoverCopy() throws {
+    @Test("linkDXVK can copy (not symlink) and re-linking is idempotent")
+    func dxvkCopyIdempotent() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let dxvk = try makeSource(tmp, named: "dxvk", files: ["d3d11.dll", "dxgi.dll"])
+        let dxvk = try tmp.makeDir("dxvk"); try tmp.write("dxvk/d3d11.dll", "binary")
         let prefix = try tmp.makeDir("prefix")
 
-        try linker.link(backend: .crossover, into: prefix, gptkLibDir: nil, dxvkDLLDir: dxvk, mode: .copy)
+        try linker.linkDXVK(into: prefix, dxvkDLLDir: dxvk, mode: .copy)
+        try linker.linkDXVK(into: prefix, dxvkDLLDir: dxvk, mode: .copy)   // no throw
 
         let dest = PrefixLayout(prefix: prefix).system32.appendingPathComponent("d3d11.dll")
-        let isLink = try dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink
-        #expect(isLink == false)                          // a real copy, not a symlink
+        #expect((try dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == false)
         #expect(FileManager.default.fileExists(atPath: dest.path))
     }
 
-    @Test("Re-linking replaces existing entries (idempotent)")
-    func reLink() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let gptk = try makeSource(tmp, named: "gptk", files: ["dxgi.dll"])
-        let prefix = try tmp.makeDir("prefix")
-        try linker.link(backend: .gptk, into: prefix, gptkLibDir: gptk, dxvkDLLDir: nil)
-        try linker.link(backend: .gptk, into: prefix, gptkLibDir: gptk, dxvkDLLDir: nil)   // no throw
-        #expect(FileManager.default.fileExists(
-            atPath: PrefixLayout(prefix: prefix).system32.appendingPathComponent("dxgi.dll").path))
-    }
-
-    @Test("Throws backendNotConfigured when the source dir is nil")
-    func notConfigured() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let prefix = try tmp.makeDir("prefix")
-        #expect(throws: GraphicsLinker.LinkError.backendNotConfigured(.gptk)) {
-            try linker.link(backend: .gptk, into: prefix, gptkLibDir: nil, dxvkDLLDir: nil)
-        }
-    }
-
-    @Test("Throws sourceMissing when the source dir does not exist")
-    func sourceMissing() throws {
+    @Test("linkDXVK throws sourceMissing when the DXVK dir does not exist")
+    func dxvkSourceMissing() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let prefix = try tmp.makeDir("prefix")
         let missing = tmp.url.appendingPathComponent("nope")
         #expect(throws: GraphicsLinker.LinkError.sourceMissing(missing)) {
-            try linker.link(backend: .gptk, into: prefix, gptkLibDir: missing, dxvkDLLDir: nil)
+            try linker.linkDXVK(into: prefix, dxvkDLLDir: missing)
         }
     }
 }

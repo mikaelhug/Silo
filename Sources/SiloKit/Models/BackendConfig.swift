@@ -42,20 +42,6 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     /// Whether games can be launched (a wine binary is set).
     public var isWineConfigured: Bool { wineBinaryPath != nil }
 
-    /// GPTK's `lib/external` dir (D3DMetal.framework + libd3dshared.dylib), derived from the injected
-    /// DLL dir `<root>/lib/wine/x86_64-windows`. Must be on the launch DYLD fallback paths so GPTK's
-    /// d3d unix modules resolve `@rpath/libd3dshared.dylib` and the framework at runtime.
-    public var gptkExternalDirPath: URL? {
-        gptkLibDirPath?.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("external", isDirectory: true)
-    }
-
-    /// GPTK's `lib/wine` dir holding its builtin d3d modules (`x86_64-unix/*.so` + `x86_64-windows/*.dll`),
-    /// added to `WINEDLLPATH` so wine loads GPTK's d3d/D3DMetal instead of the base wine's own.
-    public var gptkWineDLLDirPath: URL? {
-        gptkLibDirPath?.deletingLastPathComponent()
-    }
-
     /// The wine binary to use for a backend, falling back to the primary when a specific one is unset.
     public func wineBinary(for backend: GraphicsBackend) -> URL? {
         switch backend {

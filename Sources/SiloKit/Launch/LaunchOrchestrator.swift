@@ -55,20 +55,18 @@ public struct LaunchOrchestrator: Sendable {
 
         switch config.backend {
         case .gptk:
-            // Activate Apple's GPTK/D3DMetal: load GPTK's builtin d3d modules (via WINEDLLPATH) and let
-            // them resolve D3DMetal.framework + libd3dshared.dylib from GPTK's lib/external on the DYLD
-            // fallback paths (the same mechanism the bundled-deps fix uses for freetype).
-            if let external = backend.gptkExternalDirPath {
+            // GPTK's D3DMetal d3d modules are overlaid into the wine runtime's own lib/wine tree
+            // (GraphicsLinker.overlayGPTK), so wine loads them directly — no WINEDLLPATH needed. Point the
+            // DYLD fallbacks at the runtime's lib/external (where the overlay placed libd3dshared.dylib +
+            // D3DMetal.framework) and force the translated d3d modules to builtin so GPTK's overlaid
+            // versions beat any game-shipped native dll. Only the modules GPTK actually translates are
+            // forced; d3d9 (wined3d) is left untouched.
+            if backend.gptkLibDirPath != nil {
+                let external = wine.wineRuntimeExternalDir
                 environment["DYLD_FALLBACK_LIBRARY_PATH"] = "\(external.path):\(wine.siloDyldFallback)"
                 environment["DYLD_FALLBACK_FRAMEWORK_PATH"] = external.path
-            }
-            if let dllDir = backend.gptkWineDLLDirPath {
-                environment["WINEDLLPATH"] = [dllDir.path, environment["WINEDLLPATH"]]
-                    .compactMap { $0 }.joined(separator: ":")
                 environment["WINEDLLOVERRIDES"] = mergeOverride(
-                    environment["WINEDLLOVERRIDES"],
-                    "d3d9,d3d10,d3d10core,d3d10_1,d3d11,d3d12,d3d12core,dxgi=b"
-                )
+                    environment["WINEDLLOVERRIDES"], "d3d10,d3d11,d3d12,dxgi=b")
             }
         case .crossover:
             environment["WINEDLLOVERRIDES"] = mergeOverride(
@@ -157,14 +155,19 @@ public struct LaunchOrchestrator: Sendable {
         throw LaunchError.executableNotFound(installURL)
     }
 
-    /// Inject graphics libraries only when a source dir is configured (some backends provide their own).
+    /// Wire up the backend's graphics translation before launch. GPTK overlays D3DMetal into the wine
+    /// RUNTIME (idempotent, shared by every co-resident game); DXVK links into this game's prefix. Either
+    /// is skipped when unconfigured — the game then falls back to wine's own wined3d.
     private func linkGraphics(backend: GraphicsBackend, prefix: URL, backendConfig: BackendConfig) throws {
-        let dir = backend == .gptk ? backendConfig.gptkLibDirPath : backendConfig.dxvkDLLDirPath
-        guard dir != nil else { return }
-        try linker.link(
-            backend: backend, into: prefix,
-            gptkLibDir: backendConfig.gptkLibDirPath, dxvkDLLDir: backendConfig.dxvkDLLDirPath
-        )
+        switch backend {
+        case .gptk:
+            guard let wine = backendConfig.wineBinary(for: .gptk),
+                  let gptkLibDir = backendConfig.gptkLibDirPath else { return }
+            try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+        case .crossover:
+            guard let dxvkDir = backendConfig.dxvkDLLDirPath else { return }
+            try linker.linkDXVK(into: prefix, dxvkDLLDir: dxvkDir)
+        }
     }
 
     private static func mergeOverride(_ existing: String?, _ addition: String) -> String {
