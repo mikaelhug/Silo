@@ -45,7 +45,7 @@ public struct SteamBottle: Sendable {
         if isProvisioned { return }
         try fileManager.createDirectory(at: paths.steamBottle, withIntermediateDirectories: true)
         var environment = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
-        environment["WINEDLLOVERRIDES"] = "\(Silo.winePrefixInitOverrides);\(Silo.crashyDriverOverrides)"
+        environment["WINEDLLOVERRIDES"] = Silo.winePrefixInitOverrides
         let result = try await runner.run(
             executable: wine, arguments: ["wineboot", "--init"],
             environment: environment, currentDirectory: nil)
@@ -59,11 +59,10 @@ public struct SteamBottle: Sendable {
         if isSteamInstalled { return }
         try await provision(wine: wine)
         let installer = try await downloadInstaller()
-        var environment = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
-        environment["WINEDLLOVERRIDES"] = Silo.crashyDriverOverrides
         let result = try await runner.run(
             executable: wine, arguments: [installer.path, "/S"],
-            environment: environment, currentDirectory: paths.steamBottle)
+            environment: Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine),
+            currentDirectory: paths.steamBottle)
         guard result.succeeded else { throw BottleError.steamInstallFailed(result.exitCode) }
     }
 
@@ -167,25 +166,22 @@ public struct SteamBottle: Sendable {
 
     // MARK: - Helpers
 
-    /// Environment for launching the Steam client — the verified Vineport recipe. `STEAM_CEF_COMMAND_LINE`
-    /// forces steamwebhelper's Chromium onto its bundled SwiftShader **software GL** renderer (the route
-    /// that actually paints under Wine, rather than Metal/winemac.drv presentation), with `--in-process-gpu`
-    /// (NOT `--single-process`, which breaks Chromium's network service → login Transport Error).
-    /// `STEAM_DISABLE_GPU_PROCESS`/`GALLIUM_DRIVER=llvmpipe` keep all GL software-side. `WINEMSYNC=1` matches
-    /// the per-game launch env so Steam + co-hosted games share one wineserver; the overrides disable the
-    /// in-game overlay injector and the SDL controller bus (`Silo.crashyDriverOverrides`).
+    /// Environment for launching the Steam client — trimmed to what's actually load-bearing (verified
+    /// on-device 2026-06-28). `STEAM_CEF_COMMAND_LINE` forces steamwebhelper's Chromium onto its bundled
+    /// **SwiftShader software GL** (`--use-gl=swiftshader` — confirmed active in the GPU log; the route that
+    /// actually paints under Wine, vs Metal/winemac.drv presentation) with `--in-process-gpu` (NOT
+    /// `--single-process`, which breaks Chromium's network service). The load-bearing flag injection is the
+    /// steamwebhelper wrapper (`installWebHelperWrapper`); this env is the partner that carries SwiftShader.
+    /// `WINEMSYNC=1` matches the per-game launch env so Steam + co-hosted games share one wineserver (the
+    /// co-residency Steamworks relies on). The winebus/SDL crash is fixed by removing libSDL2 (build
+    /// `--without-sdl` + `stripBundledSDL`), NOT a DLL override; CEF presentation is the virtual desktop.
     private func steamEnvironment(wine: URL) -> [String: String] {
         var env = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
         env["WINEMSYNC"] = "1"
-        env["WINEESYNC"] = "1"
         env["STEAM_CEF_COMMAND_LINE"] =
             "--no-sandbox --in-process-gpu --disable-gpu --disable-gpu-compositing "
             + "--use-gl=swiftshader --disable-software-rasterizer"
         env["STEAM_DISABLE_GPU_PROCESS"] = "1"
-        env["GALLIUM_DRIVER"] = "llvmpipe"
-        env["DOTNET_EnableWriteXorExecute"] = "0"
-        env["WINEDLLOVERRIDES"] =
-            "\(Silo.crashyDriverOverrides);gameoverlayrenderer,gameoverlayrenderer64="
         return env
     }
 

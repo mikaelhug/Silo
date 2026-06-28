@@ -41,7 +41,9 @@ struct SteamBottleTests {
         #expect(call.environment["WINEMSYNC"] == "1")                     // co-residency with games
         #expect(call.environment["STEAM_CEF_COMMAND_LINE"]?.contains("--use-gl=swiftshader") == true)
         #expect(call.environment["STEAM_DISABLE_GPU_PROCESS"] == "1")
-        #expect(call.environment["WINEDLLOVERRIDES"]?.contains("winebus") == true)   // SDL bus crash fix
+        // No WINEDLLOVERRIDES on the Steam launch: the winebus/SDL crash is fixed by removing libSDL2
+        // (--without-sdl / stripBundledSDL), not a DLL override (which can't disable a PnP .sys driver).
+        #expect(call.environment["WINEDLLOVERRIDES"] == nil)
     }
 
     @Test("installWebHelperWrapper preserves the real webhelper and drops the wrapper in its place")
