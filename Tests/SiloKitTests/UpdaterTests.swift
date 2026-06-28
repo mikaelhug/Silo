@@ -55,4 +55,51 @@ struct UpdaterTests {
         #expect(!Updater.isVersion("0.2.0", newerThan: "0.2.0"))
         #expect(!Updater.isVersion("0.1.1", newerThan: "0.2.0"))
     }
+
+    // MARK: - Inline apply
+
+    @Test("downloadUpdate saves the release .zip into the target directory")
+    func downloadsZip() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let asset = "https://dl.example.com/silo-dl/Silo-0.3.0.zip"
+        FakeURLProtocol.stub(asset, data: Data("ZIP-BYTES".utf8))
+        let check = Updater.UpdateCheck(latestVersion: "0.3.0", isNewer: true,
+                                        downloadURL: URL(string: asset), releaseName: "Silo 0.3.0")
+        let saved = try await Updater(session: FakeURLProtocol.makeSession()).downloadUpdate(check, into: tmp.url)
+        #expect(saved.lastPathComponent == "Silo-0.3.0.zip")
+        #expect(try Data(contentsOf: saved) == Data("ZIP-BYTES".utf8))
+    }
+
+    @Test("downloadUpdate throws when the release has no downloadable asset")
+    func downloadNoAsset() async throws {
+        let check = Updater.UpdateCheck(latestVersion: "0.3.0", isNewer: true, downloadURL: nil, releaseName: nil)
+        await #expect(throws: Updater.UpdateError.noDownloadAsset) {
+            try await Updater().downloadUpdate(check, into: FileManager.default.temporaryDirectory)
+        }
+    }
+
+    @Test("installUpdate unpacks the .zip and atomically replaces the installed app bundle")
+    func installSwapsBundle() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let runner = SystemProcessRunner()
+        // A "new" Silo.app, zipped with real ditto (exactly the format the release ships).
+        try tmp.write("build/Silo.app/Contents/MacOS/Silo", "NEW BINARY")
+        let zip = tmp.url.appendingPathComponent("Silo.zip")
+        _ = try await runner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/ditto"),
+            arguments: ["-c", "-k", "--keepParent", tmp.url.appendingPathComponent("build/Silo.app").path, zip.path],
+            environment: [:], currentDirectory: nil)
+        // The currently-installed (old) Silo.app gets replaced in place.
+        try tmp.write("Applications/Silo.app/Contents/MacOS/Silo", "OLD BINARY")
+        let installed = tmp.url.appendingPathComponent("Applications/Silo.app")
+
+        try await Updater(runner: runner).installUpdate(zip: zip, replacing: installed)
+
+        let binary = try String(contentsOf: installed.appendingPathComponent("Contents/MacOS/Silo"), encoding: .utf8)
+        #expect(binary == "NEW BINARY")
+        // Staging dir is cleaned up — no leftover `.silo-update-*` sibling.
+        let siblings = try FileManager.default.contentsOfDirectory(
+            atPath: tmp.url.appendingPathComponent("Applications").path)
+        #expect(!siblings.contains { $0.hasPrefix(".silo-update-") })
+    }
 }
