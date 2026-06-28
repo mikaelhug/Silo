@@ -18,6 +18,8 @@ public struct AppPaths: Sendable, Hashable {
     public var runtimesDir: URL { supportDir.appendingPathComponent("Runtimes", isDirectory: true) }
     public var logsDir: URL { supportDir.appendingPathComponent("Logs", isDirectory: true) }
     public var configFile: URL { supportDir.appendingPathComponent("config.json") }
+    /// Scratch dir for downloaded app-update archives (the inline updater stages the `.zip` here).
+    public var updatesDir: URL { supportDir.appendingPathComponent("Updates", isDirectory: true) }
 
     // MARK: - Steam bottle (the shared prefix that hosts a logged-in Windows Steam client + its games)
 

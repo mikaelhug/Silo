@@ -42,12 +42,7 @@ struct AboutView: View {
             Text(Silo.appName).font(.largeTitle.bold())
             Text("Version \(Silo.version)").foregroundStyle(.secondary)
             if let update = env.updateCheck, update.isNewer {
-                if let url = update.downloadURL {
-                    Link("Update available: \(update.latestVersion)", destination: url)
-                        .font(.callout)
-                } else {
-                    Text("Update available: \(update.latestVersion)").font(.callout).foregroundStyle(.tint)
-                }
+                updateSection(update)
             }
             Text("Isolated Wine/GPTK launcher for Windows Steam games.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
@@ -56,5 +51,24 @@ struct AboutView: View {
         }
         .padding(40)
         .navigationTitle("About")
+    }
+
+    /// Inline updater UI: one button downloads, self-replaces, and relaunches (no browser/manual install).
+    @ViewBuilder private func updateSection(_ update: Updater.UpdateCheck) -> some View {
+        VStack(spacing: 6) {
+            Text("Update available: \(update.latestVersion)").font(.callout).foregroundStyle(.tint)
+            switch env.updateState {
+            case .idle:
+                Button("Download & Relaunch") { Task { await env.installUpdate() } }
+                    .buttonStyle(.borderedProminent)
+            case .downloading:
+                ProgressView("Downloading…").controlSize(.small)
+            case .installing:
+                ProgressView("Installing…").controlSize(.small)
+            case .failed(let message):
+                Text(message).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center)
+                Button("Try Again") { Task { await env.installUpdate() } }
+            }
+        }
     }
 }

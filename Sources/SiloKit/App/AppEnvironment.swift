@@ -20,7 +20,14 @@ public final class AppEnvironment {
     public let steamStore = SteamStoreClient()
     private let updater: Updater
     public private(set) var updateCheck: Updater.UpdateCheck?
+    public private(set) var updateState: UpdateState = .idle
     public private(set) var didBootstrap = false
+
+    /// Progress of the inline (download + self-replace + relaunch) update.
+    public enum UpdateState: Sendable, Equatable {
+        case idle, downloading, installing
+        case failed(String)
+    }
 
     public init(
         paths: AppPaths = .standard(),
@@ -96,6 +103,27 @@ public final class AppEnvironment {
     public func refreshLibraryIfReady() async {
         guard didBootstrap, gameLibrary.steamReady else { return }
         await gameLibrary.load()
+    }
+
+    /// Apply the available update **inline** (Velox-style): download the release, swap the running
+    /// `Silo.app` in place, and relaunch — no browser hop or manual install. No-op without a newer
+    /// release; surfaces a recoverable `.failed` state when not running from an `.app` bundle (dev/CLI)
+    /// or on a download/install error. On success it relaunches and never returns. Surfaced by `AboutView`.
+    public func installUpdate() async {
+        guard let check = updateCheck, check.isNewer else { return }
+        guard let appBundle = Updater.runningAppBundle() else {
+            updateState = .failed("Silo isn't running from an installed app bundle.")
+            return
+        }
+        updateState = .downloading
+        do {
+            let zip = try await updater.downloadUpdate(check, into: paths.updatesDir)
+            updateState = .installing
+            try await updater.installUpdate(zip: zip, replacing: appBundle)
+            await updater.relaunch(appBundle)   // launches the new build + exit(0); never returns
+        } catch {
+            updateState = .failed(error.localizedDescription)
+        }
     }
 
     // MARK: - Setup readiness (drives the Library onboarding)
