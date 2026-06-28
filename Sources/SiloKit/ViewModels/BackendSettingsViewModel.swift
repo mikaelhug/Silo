@@ -6,7 +6,6 @@ public final class BackendSettingsViewModel {
     public var config: BackendConfig
     public var statusMessage: String?
 
-    private let resolver: BackendResolver
     private let configStore: ConfigStore
 
     /// Called after a successful save so other view models (e.g. the library) can react.
@@ -14,25 +13,26 @@ public final class BackendSettingsViewModel {
 
     public init(
         config: BackendConfig,
-        resolver: BackendResolver,
         configStore: ConfigStore
     ) {
         self.config = config
-        self.resolver = resolver
         self.configStore = configStore
     }
 
     public var isConfigured: Bool { config.isWineConfigured }
 
-    /// Override param is for tests; production calls with defaults.
-    public func autodetect(homeDirectory: URL? = nil) {
-        let detected = resolver.autodetect(homeDirectory: homeDirectory)
-        if detected.detectedSource != .none {
-            config = detected
-            statusMessage = "Detected \(detected.detectedSource.rawValue)."
-        } else {
-            statusMessage = "No backend found. Install a runtime or set paths manually."
-        }
+    /// Adopt a Wine Manager default as the backend's wine binary and persist.
+    public func applyDefaultWine(_ wine: WineInstall) async {
+        config.wineBinaryPath = wine.wineBinary
+        config.wineRuntimeName = wine.name
+        await save()
+    }
+
+    /// Adopt a GPTK Manager default as the backend's GPTK lib dir and persist.
+    public func applyDefaultGPTK(_ install: GPTKInstall) async {
+        config.gptkLibDirPath = install.gptkLibDir
+        config.gptkRuntimeName = install.name
+        await save()
     }
 
     public func save() async {

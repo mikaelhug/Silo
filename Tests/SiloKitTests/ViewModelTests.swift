@@ -6,24 +6,19 @@ import Testing
 @Suite("View models")
 struct ViewModelTests {
 
-    @Test("BackendSettings autodetect finds Whisky in temp dirs and save fires onChange")
+    @Test("BackendSettings save persists the config and fires onChange")
     func backendSettings() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let home = try tmp.makeDir("home")
-        try tmp.write("home/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin/wine64", "x")
-
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let vm = BackendSettingsViewModel(
-            config: BackendConfig(), resolver: BackendResolver(), configStore: ConfigStore(paths: paths))
+            config: BackendConfig(), configStore: ConfigStore(paths: paths))
         var propagated: BackendConfig?
         vm.onChange = { propagated = $0 }
 
-        vm.autodetect(homeDirectory: home)
-        #expect(vm.config.detectedSource == .whisky)
-
+        vm.config.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
         await vm.save()
-        #expect(propagated?.detectedSource == .whisky)
-        #expect(await ConfigStore(paths: paths).load().backend.detectedSource == .whisky)
+        #expect(propagated?.wineBinaryPath?.path == "/w/wine64")
+        #expect(await ConfigStore(paths: paths).load().backend.wineBinaryPath?.path == "/w/wine64")
     }
 
     @Test("RuntimeViewModel lists installed Wine builds")
@@ -87,7 +82,7 @@ struct ViewModelTests {
     func appEnvironment() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        var backend = BackendConfig(detectedSource: .manual)
+        var backend = BackendConfig()
         backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
         try await ConfigStore(paths: paths).saveBackend(backend)
 
@@ -96,7 +91,7 @@ struct ViewModelTests {
             updater: Updater(repo: "x/y", session: FakeURLProtocol.makeSession()))
         await env.bootstrap()
         #expect(env.didBootstrap)
-        #expect(env.backendSettings.config.detectedSource == .manual)
+        #expect(env.backendSettings.config.wineBinaryPath?.path == "/w/wine64")
         #expect(env.gameLibrary.canLaunch)
         #expect(env.updateCheck == nil)
     }

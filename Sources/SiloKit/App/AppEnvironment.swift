@@ -33,11 +33,11 @@ public final class AppEnvironment {
     public init(
         paths: AppPaths = .standard(),
         runner: ProcessRunning = SystemProcessRunner(),
-        updater: Updater = Updater()
+        updater: Updater? = nil
     ) {
         self.paths = paths
         self.runner = runner
-        self.updater = updater
+        self.updater = updater ?? Updater(runner: runner)
 
         let configStore = ConfigStore(paths: paths)
         let linker = GraphicsLinker()
@@ -53,7 +53,7 @@ public final class AppEnvironment {
 
         let initialBackend = BackendConfig()
         self.backendSettings = BackendSettingsViewModel(
-            config: initialBackend, resolver: BackendResolver(), configStore: configStore)
+            config: initialBackend, configStore: configStore)
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
@@ -65,22 +65,19 @@ public final class AppEnvironment {
         let steamBottleVM = SteamBottleViewModel(bottle: bottle)
         self.steamBottleVM = steamBottleVM
 
-        backendSettings.onChange = { [weak gameLibrary, weak steamBottleVM] config in
-            gameLibrary?.updateBackend(config)
-            steamBottleVM?.updateWine(config.wineBinaryPath)
-        }
+        backendSettings.onChange = { [weak self] in self?.applyBackend($0) }
         gptkManager.onDefaultChanged = { [weak self] install in
-            guard let self else { return }
-            self.backendSettings.config.gptkLibDirPath = install.gptkLibDir
-            self.backendSettings.config.gptkRuntimeName = install.name
-            Task { await self.backendSettings.save() }
+            Task { await self?.backendSettings.applyDefaultGPTK(install) }
         }
         runtime.onDefaultChanged = { [weak self] wine in
-            guard let self else { return }
-            self.backendSettings.config.wineBinaryPath = wine.wineBinary
-            self.backendSettings.config.wineRuntimeName = wine.name
-            Task { await self.backendSettings.save() }
+            Task { await self?.backendSettings.applyDefaultWine(wine) }
         }
+    }
+
+    /// Fan out a backend-config change to the view models that depend on it.
+    private func applyBackend(_ config: BackendConfig) {
+        gameLibrary.updateBackend(config)
+        steamBottleVM.updateWine(config.wineBinaryPath)
     }
 
     /// Load persisted config and populate the UI. Idempotent.
@@ -89,8 +86,7 @@ public final class AppEnvironment {
         isBootstrapping = true
         let state = await configStore.load()
         backendSettings.config = state.backend
-        gameLibrary.updateBackend(state.backend)
-        steamBottleVM.updateWine(state.backend.wineBinaryPath)
+        applyBackend(state.backend)
         gptkManager.defaultName = state.backend.gptkRuntimeName
         gptkManager.refresh()
         runtime.defaultName = state.backend.wineRuntimeName
@@ -146,10 +142,5 @@ public final class AppEnvironment {
     /// A game's launch log (per appID).
     public nonisolated func logURL(forAppID appID: Int) -> URL {
         paths.log(forAppID: appID)
-    }
-
-    /// The log-window target for a game (title + its log URL), opened via `openWindow(id:)`.
-    func logTarget(for game: SteamApp) -> LogTarget {
-        LogTarget(title: "\(game.name) — Log", url: logURL(forAppID: game.appID))
     }
 }

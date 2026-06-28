@@ -49,8 +49,7 @@ extension URL {
     /// For a wine binary at `<root>/bin/wine[64]`, the bundled-dylib dir `<root>/lib/silo-bundled`
     /// (populated by Scripts/bundle-wine-dylibs.sh so the runtime carries its own freetype/gstreamer/…).
     public var siloBundledDylibDir: URL {
-        deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("lib/silo-bundled", isDirectory: true)
+        WineRuntimeLayout(wineBinary: self).bundledDylibDir
     }
 
     /// `DYLD_FALLBACK_LIBRARY_PATH` value so wine resolves missing deps. ONLY the self-contained bundle +
@@ -67,7 +66,6 @@ extension URL {
     /// `.so` modules symlink here (`../../external/libd3dshared.dylib`) and the GPTK launch DYLD fallbacks
     /// point here, so the runtime is self-contained for D3DMetal once overlaid.
     public var wineRuntimeExternalDir: URL {
-        deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("lib/external", isDirectory: true)
+        WineRuntimeLayout(wineBinary: self).externalDir
     }
 }

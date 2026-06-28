@@ -65,8 +65,7 @@ bundle/auto-download an emulator.
 - **Pure & synchronous** (trivially `Sendable`): `ACFTokenizer`, `KeyValuesParser`, `KVNode`,
   decoders, `LaunchPlan` + `makePlan`, `BackendResolver`, `RuntimeRelease` decoding. Keep these
   free of I/O so they unit-test instantly.
-- **`actor`** (owns mutable FS/network state): `DiscoveryEngine`, `RuntimeManager`,
-  `PrefixProvisioner`, `ConfigStore`, `GameLogStore`.
+- **`actor`** (owns mutable FS/network state): `DiscoveryEngine`, `RuntimeManager`, `ConfigStore`.
 - **`struct` + injected deps, `async` methods**: `GraphicsLinker`, `LaunchOrchestrator`,
   `SteamPresenceInstaller`, `Updater`.
 - **`@MainActor @Observable final class`**: all view models.

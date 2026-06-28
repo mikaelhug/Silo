@@ -19,8 +19,6 @@ struct BackendSettingsView: View {
 
             Section {
                 DisclosureGroup("Advanced (manual paths)", isExpanded: $showAdvanced) {
-                    Button("Auto-detect installed backend (Whisky / Kegworks)") { vm.autodetect() }
-                    LabeledContent("Detected source", value: vm.config.detectedSource.rawValue)
                     PathPickerRow(title: "Wine binary (overrides Wine Manager default)",
                                   url: $vm.config.wineBinaryPath, chooseDirectories: false)
                     PathPickerRow(title: "GPTK / D3DMetal lib dir (overrides Wine Manager default)",

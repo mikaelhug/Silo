@@ -50,7 +50,4 @@ public final class NoopObservation: ProcessObservation {
 
 extension ProcessRunning {
     public func terminate(pid: Int32) {}
-    public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
-        NoopObservation()
-    }
 }

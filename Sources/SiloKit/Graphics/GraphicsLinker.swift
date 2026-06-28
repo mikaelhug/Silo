@@ -49,11 +49,10 @@ public struct GraphicsLinker: Sendable {
         let gptkUnixDir = gptkLib.appendingPathComponent("wine/x86_64-unix")
         let gptkExternal = gptkLib.appendingPathComponent("external")
 
-        let wineLib = wineBinary.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("lib")                                                 // <wine>/lib
-        let wineWinDir = wineLib.appendingPathComponent("wine/x86_64-windows")
-        let wineUnixDir = wineLib.appendingPathComponent("wine/x86_64-unix")
-        let wineExternal = wineLib.appendingPathComponent("external")
+        let wineLayout = WineRuntimeLayout(wineBinary: wineBinary)
+        let wineWinDir = wineLayout.windowsModulesDir
+        let wineUnixDir = wineLayout.unixModulesDir
+        let wineExternal = wineLayout.externalDir
 
         let modules = try fileManager.contentsOfDirectory(at: gptkLibDir, includingPropertiesForKeys: nil)
             .filter { Self.isGPTKModule($0.lastPathComponent) }
