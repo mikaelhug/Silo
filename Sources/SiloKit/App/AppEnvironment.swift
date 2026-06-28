@@ -111,7 +111,7 @@ public final class AppEnvironment {
     /// Apply the available update **inline** (Sparkle-style): download the release, swap the running
     /// `Silo.app` in place, and relaunch — no browser hop or manual install. No-op without a newer
     /// release; surfaces a recoverable `.failed` state when not running from an `.app` bundle (dev/CLI)
-    /// or on a download/install error. On success it relaunches and never returns. Surfaced by `AboutView`.
+    /// or on a download/install error. On success it relaunches and never returns. Surfaced by `UpdatesView`.
     public func installUpdate() async {
         guard let check = updateCheck, check.isNewer else { return }
         guard let appBundle = Updater.runningAppBundle() else {

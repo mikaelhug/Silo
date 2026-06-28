@@ -3,6 +3,14 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M94 — UI: single-pane Library + consolidated Advanced Settings.** Removed the sidebar entirely
+  (`RootView` is now just `NavigationStack { LibraryGridView() }`); deleted `SidebarView`/`SidebarItem` and
+  the **About** pane. **Advanced Settings** (Library toolbar → gear) is now a `TabView`: **Backend** (the
+  former `BackendSettingsView`), **Runtimes** (the former Wine Manager — GPTK + Wine tabs), and **Updates**
+  (new `UpdatesView` = version + the inline updater, replacing About). Update availability also surfaces as
+  a small "· Update vX.Y.Z available" note to the right of the "X games" subtitle. 173 tests / 28 suites
+  green; clean build. (Pending: a real Steam logo for the Steam button needs a bundled asset — SF Symbols
+  has none and I won't fabricate Valve's mark; kept the SF Symbol for now.)
 - **✅ M93 — unify the live Steam client under one owner (fixes the double-spawn bug).** The bottle's
   Steam client had TWO uncoordinated owners: `GameLibraryViewModel` tracked it (PID + coalescing +
   cold-start grace), while `SteamBottleViewModel.launchSteam` spawned its OWN untracked copy — so clicking

@@ -1,56 +1,38 @@
 import SwiftUI
 
-enum SidebarItem: Hashable {
-    case library, wine, about
-}
-
+/// The app's single pane: the Library (or first-run onboarding). There's no sidebar — runtime management
+/// (Wine/GPTK) and updates live in **Advanced Settings**, reachable from the Library toolbar.
 struct RootView: View {
-    @State private var selection: SidebarItem? = .library
-
     var body: some View {
-        NavigationSplitView {
-            SidebarView(selection: $selection)
-        } detail: {
-            switch selection ?? .library {
-            case .library: LibraryGridView()
-            case .wine: WineManagerView()
-            case .about: AboutView()
-            }
+        NavigationStack {
+            LibraryGridView()
         }
     }
 }
 
-struct SidebarView: View {
-    @Binding var selection: SidebarItem?
-
-    var body: some View {
-        List(selection: $selection) {
-            Label("Library", systemImage: "square.grid.2x2").tag(SidebarItem.library)
-            Label("Wine Manager", systemImage: "wineglass").tag(SidebarItem.wine)
-            Label("About", systemImage: "info.circle").tag(SidebarItem.about)
-        }
-        .navigationTitle(Silo.appName)
-        .frame(minWidth: 200)
-    }
-}
-
-struct AboutView: View {
+/// App info + the inline updater. Shown as a tab in Advanced Settings (replaces the old About pane).
+struct UpdatesView: View {
     @Environment(AppEnvironment.self) private var env
+
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "shippingbox.fill").font(.system(size: 48)).foregroundStyle(.tint)
-            Text(Silo.appName).font(.largeTitle.bold())
+            Image(systemName: "shippingbox.fill").font(.system(size: 44)).foregroundStyle(.tint)
+            Text(Silo.appName).font(.title.bold())
             Text("Version \(Silo.version)").foregroundStyle(.secondary)
+
             if let update = env.updateCheck, update.isNewer {
                 updateSection(update)
+            } else {
+                Text("You're up to date.").font(.callout).foregroundStyle(.secondary)
             }
-            Text("Isolated Wine/GPTK launcher for Windows Steam games.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Text("Silo never bundles or downloads Wine, GPTK, or any Steam-API emulator.")
+
+            Spacer()
+            Text("Isolated Wine/GPTK launcher for Windows Steam games. Silo never bundles or downloads "
+                 + "Wine, GPTK, or any Steam-API emulator.")
                 .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
         }
-        .padding(40)
-        .navigationTitle("About")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(30)
     }
 
     /// Inline updater UI: one button downloads, self-replaces, and relaunches (no browser/manual install).
