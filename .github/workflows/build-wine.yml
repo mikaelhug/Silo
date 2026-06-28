@@ -63,9 +63,12 @@ jobs:
         run: |
           set -eo pipefail
           # x86_64 Homebrew under Rosetta so deps match the x86_64 Wine we build.
-          $ARCH_PREFIX /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' || true
+          if [ ! -x /usr/local/bin/brew ]; then
+            $ARCH_PREFIX /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+          fi
           BREW=/usr/local/bin/brew
-          $ARCH_PREFIX $BREW install bison mingw-w64 freetype gnutls gstreamer sdl2 molten-vk cmake ccache || true
+          test -x "$BREW"
+          $ARCH_PREFIX "$BREW" install bison mingw-w64 freetype gnutls gstreamer sdl2 molten-vk cmake ccache pkgconf
           echo "BREW=$BREW" >> "$GITHUB_ENV"
 
       - name: Fetch CrossOver source
@@ -84,7 +87,16 @@ jobs:
       - name: Configure + build Wine (wow64, x86_64)
         run: |
           set -eo pipefail
-          export PATH="$($ARCH_PREFIX $BREW --prefix ccache)/libexec:$($ARCH_PREFIX $BREW --prefix bison)/bin:$PATH"
+          BREW_PREFIX="$($ARCH_PREFIX "$BREW" --prefix)"
+          export PATH="$($ARCH_PREFIX "$BREW" --prefix ccache)/libexec:$($ARCH_PREFIX "$BREW" --prefix bison)/bin:$($ARCH_PREFIX "$BREW" --prefix pkgconf)/bin:$PATH"
+          export PKG_CONFIG_PATH="$($ARCH_PREFIX "$BREW" --prefix gnutls)/lib/pkgconfig:$($ARCH_PREFIX "$BREW" --prefix freetype)/lib/pkgconfig:$($ARCH_PREFIX "$BREW" --prefix gstreamer)/lib/pkgconfig:$BREW_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export CPPFLAGS="-I$($ARCH_PREFIX "$BREW" --prefix gnutls)/include -I$($ARCH_PREFIX "$BREW" --prefix freetype)/include ${CPPFLAGS:-}"
+          export LDFLAGS="-L$($ARCH_PREFIX "$BREW" --prefix gnutls)/lib -L$($ARCH_PREFIX "$BREW" --prefix freetype)/lib -L$BREW_PREFIX/lib ${LDFLAGS:-}"
+          export CC="clang -arch x86_64"
+          export CXX="clang++ -arch x86_64"
+          pkg-config --modversion gnutls
+          pkg-config --cflags --libs gnutls
+          file "$($ARCH_PREFIX "$BREW" --prefix gnutls)/lib/libgnutls.dylib"
           mkdir -p build wine-install
           cd build
           # Single wow64 tree (32+64-bit PE) — adjust flags per CrossOver version as CI reveals.
