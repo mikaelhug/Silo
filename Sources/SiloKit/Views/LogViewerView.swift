@@ -68,6 +68,8 @@ private let logTailBytes = 256 * 1024
 final class LogTailer {
     private(set) var contents = ""
     private var watch: FileWatch?
+    private var pendingTail: String?
+    private var flushScheduled = false
 
     /// Begin watching `url` (reads the current tail immediately, then updates on each write).
     func start(url: URL) {
@@ -79,12 +81,28 @@ final class LogTailer {
         }
         contents = url.tailString(maxBytes: logTailBytes)
         watch = FileWatch(url: url) { text in
-            Task { @MainActor [weak self] in self?.contents = text }
+            Task { @MainActor [weak self] in self?.enqueue(text) }
+        }
+    }
+
+    /// Coalesce write bursts: a noisy launch can fire many kqueue events/sec, but re-rendering the 256 KB
+    /// monospaced log Text on every one would stall the main actor. Hold the latest tail and publish at most
+    /// ~7×/sec (trailing), skipping no-op updates. Still event-driven — the throttle adds no polling.
+    private func enqueue(_ text: String) {
+        pendingTail = text
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self else { return }
+            self.flushScheduled = false
+            if let tail = self.pendingTail, tail != self.contents { self.contents = tail }
+            self.pendingTail = nil
         }
     }
 
     /// Stops watching (also happens automatically when this tailer is deallocated, via `FileWatch`).
-    func stop() { watch = nil }
+    func stop() { watch = nil; pendingTail = nil }
 }
 
 /// A self-contained kqueue file-watcher: fires `onChange` with the file's tail on each write, and tears
