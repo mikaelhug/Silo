@@ -30,8 +30,6 @@ public struct EnvFlags: Codable, Sendable, Hashable {
     public var metalFX: Bool
     /// `D3DM_SUPPORT_DXR=1` — expose DirectX Raytracing in D3DMetal's DX12 layer (GPTK; M3+).
     public var dxr: Bool
-    /// `DXVK_HUD` value (e.g. `"fps,memory"`); applied only with the CrossOver/DXVK backend. `nil` = off.
-    public var dxvkHUD: String?
     /// Free-form extra environment variables (override the above; an escape hatch).
     public var extra: [String: String]
 
@@ -41,7 +39,6 @@ public struct EnvFlags: Codable, Sendable, Hashable {
         metalHUD: Bool = false,
         metalFX: Bool = false,
         dxr: Bool = false,
-        dxvkHUD: String? = nil,
         extra: [String: String] = [:]
     ) {
         self.syncMode = syncMode
@@ -49,26 +46,22 @@ public struct EnvFlags: Codable, Sendable, Hashable {
         self.metalHUD = metalHUD
         self.metalFX = metalFX
         self.dxr = dxr
-        self.dxvkHUD = dxvkHUD
         self.extra = extra
     }
 
-    /// Environment variables contributed by these flags for the given backend.
+    /// Environment variables contributed by these flags.
     /// `extra` is merged last so it can override anything.
-    public func environment(for backend: GraphicsBackend) -> [String: String] {
+    public func environment() -> [String: String] {
         var env: [String: String] = [:]
         switch syncMode {
         case .msync: env["WINEMSYNC"] = "1"
         case .esync: env["WINEESYNC"] = "1"
         case .none: break
         }
-        if advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }   // x86 Wine runs under Rosetta on all backends
+        if advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }   // x86 Wine runs under Rosetta
         if metalHUD { env["MTL_HUD_ENABLED"] = "1" }
-        if backend == .gptk {
-            if metalFX { env["D3DM_ENABLE_METALFX"] = "1" }
-            if dxr { env["D3DM_SUPPORT_DXR"] = "1" }
-        }
-        if let dxvkHUD, backend == .crossover { env["DXVK_HUD"] = dxvkHUD }
+        if metalFX { env["D3DM_ENABLE_METALFX"] = "1" }
+        if dxr { env["D3DM_SUPPORT_DXR"] = "1" }
         for (key, value) in extra { env[key] = value }
         return env
     }
@@ -76,7 +69,7 @@ public struct EnvFlags: Codable, Sendable, Hashable {
     // MARK: - Codable (migrates legacy esync/msync bools; tolerates missing perf fields)
 
     private enum CodingKeys: String, CodingKey {
-        case syncMode, advertiseAVX, metalHUD, metalFX, dxr, dxvkHUD, extra
+        case syncMode, advertiseAVX, metalHUD, metalFX, dxr, extra
         case esync, msync   // legacy fields from configs written before the SyncMode enum
     }
 
@@ -93,7 +86,6 @@ public struct EnvFlags: Codable, Sendable, Hashable {
         metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
         metalFX = try c.decodeIfPresent(Bool.self, forKey: .metalFX) ?? false
         dxr = try c.decodeIfPresent(Bool.self, forKey: .dxr) ?? false
-        dxvkHUD = try c.decodeIfPresent(String.self, forKey: .dxvkHUD)
         extra = try c.decodeIfPresent([String: String].self, forKey: .extra) ?? [:]
     }
 
@@ -104,7 +96,6 @@ public struct EnvFlags: Codable, Sendable, Hashable {
         try c.encode(metalHUD, forKey: .metalHUD)
         try c.encode(metalFX, forKey: .metalFX)
         try c.encode(dxr, forKey: .dxr)
-        try c.encodeIfPresent(dxvkHUD, forKey: .dxvkHUD)
         try c.encode(extra, forKey: .extra)
     }
 }

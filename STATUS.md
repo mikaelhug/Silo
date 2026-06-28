@@ -3,6 +3,16 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M87 — removed the dead `.crossover`/DXVK backend (GPTK-only).** The CrossOver/DXVK fallback was
+  advertised across config, UI, and policy but never wired (no DXVK download, no install path) — pure rot
+  (decided with the user, 2026-06-28). Collapsed to a single graphics path: deleted `GraphicsBackend` +
+  `BackendPolicy` (+ their tests), dropped `GameConfig.backend`,
+  `BackendConfig.{crossoverWinePath,dxvkDLLDirPath,wineBinary(for:)}`, `EnvFlags.dxvkHUD`,
+  `GraphicsLinker.linkDXVK`, the backend Picker + the CrossOver/DXVK path rows in Advanced Settings, the
+  per-game DXVK-HUD field, the GameDetail backend recommendation, and the now-dead `applicationsDirectory`
+  autodetect param (it only existed to find CrossOver.app). `makePlan`/`linkGraphics` are GPTK-only.
+  Legit "CrossOver **source**" wine-build references (constraint #8) preserved; CLAUDE.md "Two runtime
+  roles" updated to GPTK-only. 112 tests / 25 suites green; clean build (no warnings).
 - **✅ M86 — agentic codebase audit (17 verified cleanups).** A 5-reviewer multi-agent audit
   (dedup → adversarial verify, 17 of 21 confirmed) → applied: dead code removed (`Asset.size`,
   `AppPaths.steamBottleWebHelper`, `BackendSettingsViewModel.paths`, `GameSettingsViewModel.appName`);

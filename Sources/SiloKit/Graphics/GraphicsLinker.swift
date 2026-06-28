@@ -1,22 +1,17 @@
 import Foundation
 
-/// Wires a graphics-translation backend into the wine runtime / game prefix. The two backends activate
-/// by **different** mechanisms:
+/// Wires GPTK / D3DMetal into the wine runtime so wine loads D3DMetal-backed Direct3D directly.
 ///
-/// - **GPTK / D3DMetal** (`overlayGPTK`) — Apple's D3DMetal d3d modules are *overlaid into the wine
-///   runtime's own `lib/wine` tree*. Wine pairs a PE d3d dll with the unix `.so` it finds in its OWN
-///   `lib/wine/x86_64-unix`, so GPTK's D3DMetal-backed `.so` must physically replace wine's `wined3d`
-///   one there. Merely putting GPTK's PE dll on `WINEDLLPATH` (or symlinking it into `system32`) loads
-///   the dll but keeps wine's OpenGL backend, and `D3D11CreateDevice` fails (`0x80004005`). Verified
-///   on-device: the overlay is what makes a native DX11 game create a real D3DMetal device.
-/// - **DXVK** (`linkDXVK`) — DXVK is plain native PE dlls, linked into the game prefix's `system32`
-///   (the CrossOver/DXVK fallback backend).
+/// **GPTK / D3DMetal** (`overlayGPTK`) — Apple's D3DMetal d3d modules are *overlaid into the wine
+/// runtime's own `lib/wine` tree*. Wine pairs a PE d3d dll with the unix `.so` it finds in its OWN
+/// `lib/wine/x86_64-unix`, so GPTK's D3DMetal-backed `.so` must physically replace wine's `wined3d`
+/// one there. Merely putting GPTK's PE dll on `WINEDLLPATH` (or symlinking it into `system32`) loads
+/// the dll but keeps wine's OpenGL backend, and `D3D11CreateDevice` fails (`0x80004005`). Verified
+/// on-device: the overlay is what makes a native DX11 game create a real D3DMetal device.
 public struct GraphicsLinker: Sendable {
     public init() {}
     // Computed (not stored): FileManager isn't Sendable, but the shared instance is fine to use.
     private var fileManager: FileManager { .default }
-
-    public enum LinkMode: Sendable, Equatable { case symlink, copy }
 
     public enum LinkError: Error, Sendable, Equatable {
         case sourceMissing(URL)
@@ -82,32 +77,6 @@ public struct GraphicsLinker: Sendable {
         for item in (try? fileManager.contentsOfDirectory(at: gptkExternal, includingPropertiesForKeys: nil)) ?? [] {
             try replace(item, in: wineExternal)
         }
-    }
-
-    // MARK: - DXVK (crossover backend)
-
-    /// Link DXVK's native d3d/dxgi DLLs into a prefix's `system32` (the CrossOver/DXVK fallback backend).
-    /// Only `d3d*`/`dxgi*` are linked so unrelated files in the source dir don't disturb the prefix; each
-    /// entry replaces any existing one, so re-linking is idempotent.
-    public func linkDXVK(into prefix: URL, dxvkDLLDir: URL, mode: LinkMode = .symlink) throws {
-        guard fileManager.fileExists(atPath: dxvkDLLDir.path) else { throw LinkError.sourceMissing(dxvkDLLDir) }
-        let system32 = PrefixLayout(prefix: prefix).system32
-        try fileManager.createDirectory(at: system32, withIntermediateDirectories: true)
-        for entry in try fileManager.contentsOfDirectory(at: dxvkDLLDir, includingPropertiesForKeys: nil)
-        where Self.isGraphicsDLL(entry.lastPathComponent) {
-            let dest = system32.appendingPathComponent(entry.lastPathComponent)
-            if fileManager.fileExists(atPath: dest.path) || isSymlink(dest) { try fileManager.removeItem(at: dest) }
-            switch mode {
-            case .symlink: try fileManager.createSymbolicLink(at: dest, withDestinationURL: entry)
-            case .copy: try fileManager.copyItem(at: entry, to: dest)
-            }
-        }
-    }
-
-    /// DXVK's translation DLLs are all `d3d*`/`dxgi*`; anything else in the source dir is left alone.
-    static func isGraphicsDLL(_ name: String) -> Bool {
-        let n = name.lowercased()
-        return n.hasSuffix(".dll") && (n.hasPrefix("d3d") || n.hasPrefix("dxgi"))
     }
 
     // MARK: - Helpers

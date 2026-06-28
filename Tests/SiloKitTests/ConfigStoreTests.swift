@@ -28,12 +28,10 @@ struct ConfigStoreTests {
 
         var backend = BackendConfig(detectedSource: .whisky)
         backend.wineBinaryPath = URL(fileURLWithPath: "/runtimes/gptk/bin/wine64")
-        backend.crossoverWinePath = URL(fileURLWithPath: "/cx/wine")
         try await store.saveBackend(backend)
 
         var game = GameConfig(appID: 220)
-        game.backend = .crossover
-        game.envFlags = EnvFlags(syncMode: .msync, metalHUD: true, dxvkHUD: "fps")
+        game.envFlags = EnvFlags(syncMode: .msync, metalHUD: true)
         game.presence = .none
         game.customArgs = ["-novid", "-high"]
         try await store.saveGame(game)
@@ -43,9 +41,7 @@ struct ConfigStoreTests {
         let reloaded = await store.load()
         #expect(reloaded.backend.detectedSource == .whisky)
         #expect(reloaded.backend.wineBinaryPath?.path == "/runtimes/gptk/bin/wine64")
-        #expect(reloaded.backend.crossoverWinePath?.path == "/cx/wine")
         let g = reloaded.config(for: 220)
-        #expect(g.backend == .crossover)
         #expect(g.envFlags.syncMode == .msync && g.envFlags.metalHUD)
         #expect(g.presence == .none)
         #expect(g.customArgs == ["-novid", "-high"])
@@ -56,10 +52,10 @@ struct ConfigStoreTests {
         let (store, _, tmp) = try makeStore()
         defer { tmp.cleanup() }
         try await store.saveGame(GameConfig(appID: 10))
-        try await store.saveGame(GameConfig(appID: 10, backend: .crossover))
+        try await store.saveGame(GameConfig(appID: 10, presence: .none))
         let state = await store.load()
         #expect(state.games.count == 1)
-        #expect(state.config(for: 10).backend == .crossover)
+        #expect(state.config(for: 10).presence == .none)
     }
 
     @Test("config(for:) returns a fresh default for unknown apps")
@@ -67,7 +63,6 @@ struct ConfigStoreTests {
         let state = AppState()
         let g = state.config(for: 999)
         #expect(g.appID == 999)
-        #expect(g.backend == .gptk)
         #expect(g.presence == .steamAppIDFile)
         #expect(g.envFlags.syncMode == .msync)   // Apple-Silicon default
     }
@@ -81,19 +76,14 @@ struct ConfigStoreTests {
         #expect(paths.steamBottleExe.path.hasSuffix("/SteamBottle/drive_c/Program Files (x86)/Steam/steam.exe"))
     }
 
-    @Test("EnvFlags produces backend-appropriate environment")
+    @Test("EnvFlags produces the launch environment")
     func envFlags() {
-        let flags = EnvFlags(syncMode: .msync, metalHUD: true, dxvkHUD: "fps,memory",
-                             extra: ["WINEDEBUG": "+seh"])
-        let gptk = flags.environment(for: .gptk)
-        #expect(gptk["WINEMSYNC"] == "1")
-        #expect(gptk["WINEESYNC"] == nil)              // mutually exclusive
-        #expect(gptk["MTL_HUD_ENABLED"] == "1")
-        #expect(gptk["DXVK_HUD"] == nil)               // DXVK HUD only for crossover
-        #expect(gptk["WINEDEBUG"] == "+seh")           // extra merged
-
-        let cx = flags.environment(for: .crossover)
-        #expect(cx["DXVK_HUD"] == "fps,memory")
+        let flags = EnvFlags(syncMode: .msync, metalHUD: true, extra: ["WINEDEBUG": "+seh"])
+        let env = flags.environment()
+        #expect(env["WINEMSYNC"] == "1")
+        #expect(env["WINEESYNC"] == nil)              // mutually exclusive
+        #expect(env["MTL_HUD_ENABLED"] == "1")
+        #expect(env["WINEDEBUG"] == "+seh")           // extra merged
     }
 
     @Test("EnvFlags migrates legacy esync/msync configs to SyncMode")
@@ -110,30 +100,17 @@ struct ConfigStoreTests {
         #expect(esyncCfg.advertiseAVX)
     }
 
-    @Test("EnvFlags performance vars: AVX everywhere, MetalFX/DXR only for GPTK")
+    @Test("EnvFlags performance vars: AVX + MetalFX/DXR when their flags are on")
     func perfFlags() {
-        let on = EnvFlags(advertiseAVX: true, metalHUD: true, metalFX: true, dxr: true)
-        let gptk = on.environment(for: .gptk)
-        #expect(gptk["ROSETTA_ADVERTISE_AVX"] == "1")
-        #expect(gptk["MTL_HUD_ENABLED"] == "1")
-        #expect(gptk["D3DM_ENABLE_METALFX"] == "1")
-        #expect(gptk["D3DM_SUPPORT_DXR"] == "1")
+        let on = EnvFlags(advertiseAVX: true, metalHUD: true, metalFX: true, dxr: true).environment()
+        #expect(on["ROSETTA_ADVERTISE_AVX"] == "1")
+        #expect(on["MTL_HUD_ENABLED"] == "1")
+        #expect(on["D3DM_ENABLE_METALFX"] == "1")
+        #expect(on["D3DM_SUPPORT_DXR"] == "1")
 
-        let cx = on.environment(for: .crossover)
-        #expect(cx["ROSETTA_ADVERTISE_AVX"] == "1")        // Rosetta applies on every backend
-        #expect(cx["D3DM_ENABLE_METALFX"] == nil)          // D3DMetal vars are GPTK-only
-
-        #expect(EnvFlags(advertiseAVX: false).environment(for: .gptk)["ROSETTA_ADVERTISE_AVX"] == nil)
-    }
-
-    @Test("BackendConfig wine fallback selection")
-    func wineFallback() {
-        var cfg = BackendConfig()
-        cfg.crossoverWinePath = URL(fileURLWithPath: "/cx/wine")
-        // No GPTK wine set → gptk request falls back to crossover.
-        #expect(cfg.wineBinary(for: .gptk)?.path == "/cx/wine")
-        cfg.wineBinaryPath = URL(fileURLWithPath: "/gptk/wine64")
-        #expect(cfg.wineBinary(for: .gptk)?.path == "/gptk/wine64")
-        #expect(cfg.wineBinary(for: .crossover)?.path == "/cx/wine")
+        let off = EnvFlags(advertiseAVX: false, metalFX: false, dxr: false).environment()
+        #expect(off["ROSETTA_ADVERTISE_AVX"] == nil)
+        #expect(off["D3DM_ENABLE_METALFX"] == nil)
+        #expect(off["D3DM_SUPPORT_DXR"] == nil)
     }
 }

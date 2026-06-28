@@ -4,7 +4,6 @@ import Foundation
 public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
     public var id: Int { appID }
     public let appID: Int
-    public var backend: GraphicsBackend
     public var envFlags: EnvFlags
     public var presence: SteamPresenceStrategy
     /// Game executable relative to the install dir (e.g. `bin/game.exe`). `nil` = auto-detect.
@@ -15,7 +14,6 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
 
     public init(
         appID: Int,
-        backend: GraphicsBackend = .gptk,
         envFlags: EnvFlags = EnvFlags(),
         presence: SteamPresenceStrategy = .steamAppIDFile,
         executableRelativePath: String? = nil,
@@ -23,7 +21,6 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
         lastPlayed: Date? = nil
     ) {
         self.appID = appID
-        self.backend = backend
         self.envFlags = envFlags
         self.presence = presence
         self.executableRelativePath = executableRelativePath

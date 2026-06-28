@@ -104,20 +104,8 @@ struct GameDetailView: View {
             if let metacritic = d.metacritic {
                 LabeledContent("Metacritic", value: "\(metacritic)")
             }
-            backendRecommendation(d)
         }
         .font(.callout)
-    }
-
-    /// Show the recommended graphics backend for this game (with the DirectX signal behind it), so the
-    /// per-game default is transparent and the user can override it in Settings.
-    @ViewBuilder private func backendRecommendation(_ d: SteamStoreDetails) -> some View {
-        let cfg = env.backendSettings.config
-        let recommended = BackendPolicy.recommended(
-            gptkInstalled: cfg.gptkLibDirPath != nil, crossoverInstalled: cfg.crossoverWinePath != nil)
-        LabeledContent("Recommended backend", value: recommended.displayName)
-        Text(BackendPolicy.rationale(directXVersion: d.directXVersion, recommended: recommended))
-            .font(.caption).foregroundStyle(.secondary)
     }
 
     /// Collapsible minimum system requirements (the full spec, incl. storage), shown only when present.

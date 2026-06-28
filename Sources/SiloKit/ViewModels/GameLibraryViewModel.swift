@@ -168,13 +168,7 @@ public final class GameLibraryViewModel {
         do {
             // Steamworks IPC is prefix-scoped: the client must be up + logged in in this same prefix first.
             await ensureSteamRunning()
-            var config = await configStore.load().config(for: game.appID)
-            // Honour the requested backend but fall back when its runtime isn't installed, so a .gptk config
-            // on a GPTK-less machine still launches rather than running with no DirectX translation.
-            config.backend = BackendPolicy.effective(
-                requested: config.backend,
-                gptkInstalled: backend.gptkLibDirPath != nil,
-                crossoverInstalled: backend.crossoverWinePath != nil)
+            let config = await configStore.load().config(for: game.appID)
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: backend,
                 prefix: paths.steamBottle, logURL: paths.log(forAppID: game.appID))

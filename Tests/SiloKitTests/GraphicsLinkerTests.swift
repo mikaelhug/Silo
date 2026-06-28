@@ -115,48 +115,4 @@ struct GraphicsLinkerTests {
             try linker.overlayGPTK(wineBinary: wine, gptkLibDir: missing)
         }
     }
-
-    // MARK: - DXVK (crossover backend)
-
-    @Test("linkDXVK links only d3d/dxgi DLLs into system32, leaving other files alone")
-    func dxvkScoped() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let dxvk = try tmp.makeDir("dxvk")
-        for file in ["d3d11.dll", "dxgi.dll", "version.dll"] { try tmp.write("dxvk/\(file)", "binary") }
-        let prefix = try tmp.makeDir("prefix")
-
-        try linker.linkDXVK(into: prefix, dxvkDLLDir: dxvk)
-
-        let system32 = PrefixLayout(prefix: prefix).system32
-        for file in ["d3d11.dll", "dxgi.dll"] {
-            let link = system32.appendingPathComponent(file)
-            #expect((try link.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true)
-            #expect(FileManager.default.fileExists(atPath: link.path))   // resolves to a real file
-        }
-        #expect(!FileManager.default.fileExists(atPath: system32.appendingPathComponent("version.dll").path))
-    }
-
-    @Test("linkDXVK can copy (not symlink) and re-linking is idempotent")
-    func dxvkCopyIdempotent() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let dxvk = try tmp.makeDir("dxvk"); try tmp.write("dxvk/d3d11.dll", "binary")
-        let prefix = try tmp.makeDir("prefix")
-
-        try linker.linkDXVK(into: prefix, dxvkDLLDir: dxvk, mode: .copy)
-        try linker.linkDXVK(into: prefix, dxvkDLLDir: dxvk, mode: .copy)   // no throw
-
-        let dest = PrefixLayout(prefix: prefix).system32.appendingPathComponent("d3d11.dll")
-        #expect((try dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == false)
-        #expect(FileManager.default.fileExists(atPath: dest.path))
-    }
-
-    @Test("linkDXVK throws sourceMissing when the DXVK dir does not exist")
-    func dxvkSourceMissing() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let prefix = try tmp.makeDir("prefix")
-        let missing = tmp.url.appendingPathComponent("nope")
-        #expect(throws: GraphicsLinker.LinkError.sourceMissing(missing)) {
-            try linker.linkDXVK(into: prefix, dxvkDLLDir: missing)
-        }
-    }
 }
