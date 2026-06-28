@@ -3,6 +3,14 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M91 — Phase 4 performance review (agentic).** 4 lenses (UI re-layout, main-actor blocking,
+  redundant work, I/O) → skeptical verify → only 3 real worth-doing fixes (the codebase was already
+  perf-clean since the 100%-CPU fix + polling removal): (1) roomier `URLCache.shared` (32 MB mem / 128 MB
+  disk) so library cover-art is a cache hit on scroll-back, not a re-fetch; (2) hoisted `GameLibraryVM.
+  filtered` to compute the filter+sort ONCE per `LibraryGridView` body (was twice — subtitle count + grid);
+  (3) `LogTailer` now coalesces log-file write bursts to ~7×/sec (trailing throttle) so a noisy launch
+  doesn't re-lay-out the 256 KB monospaced log Text on every kqueue event. No fix-now/high findings.
+  171 tests / 28 suites green; clean build (no warnings).
 - **✅ M90 — Phase 3 security hardening (agentic adversarial review, 14 findings).** 4 threat lenses
   (download/execute integrity, archive extraction, process-exec injection, error/failure modes) →
   exploitability verification → applied 8 hardenings:

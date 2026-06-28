@@ -11,9 +11,10 @@ struct LibraryGridView: View {
 
     var body: some View {
         @Bindable var lib = env.gameLibrary
+        let shown = lib.filtered   // compute the filter+sort ONCE; reused by the subtitle count + the grid
         Group {
             if env.setupComplete {
-                grid(lib)
+                grid(lib, shown: shown)
             } else {
                 OnboardingView()
             }
@@ -34,7 +35,7 @@ struct LibraryGridView: View {
         .sheet(item: $detailTarget) { game in
             GameDetailView(game: game, onSettings: { detailTarget = nil; settingsTarget = game })
         }
-        .navigationSubtitle(env.setupComplete ? gameCountLabel(lib.filtered.count) : "")
+        .navigationSubtitle(env.setupComplete ? gameCountLabel(shown.count) : "")
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
     }
 
@@ -46,7 +47,7 @@ struct LibraryGridView: View {
     private let columns = [GridItem(.adaptive(minimum: 250), spacing: 16)]
 
     @ViewBuilder
-    private func grid(_ lib: GameLibraryViewModel) -> some View {
+    private func grid(_ lib: GameLibraryViewModel, shown: [SteamApp]) -> some View {
         VStack(spacing: 0) {
             switch lib.loadState {
             case .notReady:
@@ -68,7 +69,7 @@ struct LibraryGridView: View {
             default:
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(lib.filtered) { game in
+                        ForEach(shown) { game in
                             SteamGameTileView(game: game,
                                               onSettings: { settingsTarget = game },
                                               onDetails: { detailTarget = game })

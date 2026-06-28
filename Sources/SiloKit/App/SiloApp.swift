@@ -5,7 +5,11 @@ public struct SiloApp: App {
     @State private var environment = AppEnvironment()
     @Environment(\.scenePhase) private var scenePhase
 
-    public init() {}
+    public init() {
+        // A roomier shared URL cache so library cover-art (Steam header.jpg) is a memory/disk hit on
+        // scroll-back instead of a re-fetch — AsyncImage loads via URLSession.shared, which reads this.
+        URLCache.shared = URLCache(memoryCapacity: 32 << 20, diskCapacity: 128 << 20)
+    }
 
     public var body: some Scene {
         WindowGroup {
