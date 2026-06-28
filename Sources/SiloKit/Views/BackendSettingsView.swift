@@ -40,13 +40,14 @@ struct BackendSettingsView: View {
     /// Stand up a shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
     /// co-resident with a logged-in Steam client.
     @ViewBuilder private var steamBottleSection: some View {
-        @Bindable var bottle = env.steamBottleVM
+        let bottle = env.steamBottleVM
+        @Bindable var session = env.steamClientSession
         Section {
             Button("Set up Steam bottle") { Task { await bottle.setUp() } }
                 .disabled(!bottle.canSetUp)
             Button("Launch Steam") { Task { await bottle.launchSteam() } }
                 .disabled(bottle.busy || !bottle.steamInstalled)
-            Toggle("Hardware-accelerated UI (experimental)", isOn: $bottle.hardwareAccelerated)
+            Toggle("Hardware-accelerated UI (experimental)", isOn: $session.hardwareAccelerated)
                 .help("Render Steam's UI on the GPU (ANGLE→D3DMetal) instead of software. May show a "
                       + "black window — turn off if so. Games are GPU-accelerated either way.")
             Button("Reset Steam login") { Task { await bottle.resetLogin() } }

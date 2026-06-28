@@ -8,17 +8,22 @@ import Foundation
 public final class SteamBottleViewModel {
     public private(set) var status: String = ""
     public private(set) var busy = false
-    /// **Experimental** — try rendering Steam's CEF UI on the GPU (ANGLE→D3DMetal) instead of SwiftShader
-    /// software GL. Default off (the verified path); may show a black window. Games are HW-accelerated
-    /// regardless. See `SteamBottle.cefHardwareArgs`.
-    public var hardwareAccelerated = false
 
     private let bottle: SteamBottle
+    /// The live Steam client is owned by the shared session (not spawned here), so the settings "Launch
+    /// Steam" can't start a second, untracked client behind the Library's back.
+    private let session: SteamClientSession
     private var wineBinary: URL?
 
-    public init(bottle: SteamBottle) { self.bottle = bottle }
+    public init(bottle: SteamBottle, session: SteamClientSession) {
+        self.bottle = bottle
+        self.session = session
+    }
 
-    public func updateWine(_ url: URL?) { wineBinary = url }
+    public func updateWine(_ url: URL?) {
+        wineBinary = url
+        session.updateWine(url)   // the session launches Steam with this wine
+    }
     public var steamInstalled: Bool { bottle.isSteamInstalled }
     public var canSetUp: Bool { wineBinary != nil && !busy }
 
@@ -52,15 +57,13 @@ public final class SteamBottleViewModel {
     public func launchSteam() async {
         guard !busy else { return }
         busy = true; defer { busy = false }
-        do {
-            // Re-apply the CEF wrapper first (a Steam update may have restored the stock webhelper).
-            if let wine = wineBinary { try? bottle.installWebHelperWrapper(wine: wine) }
-            _ = try await bottle.launchSteam(wine: wineBinary, hardwareAccelerated: hardwareAccelerated)
-            let mode = hardwareAccelerated ? " (experimental GPU mode — if the window is black, turn it off)" : ""
-            status = "Launched Steam\(mode). Give it a moment to paint, then check the bottle log."
-        } catch {
-            status = "Launch failed: \(message(error))"
-        }
+        // Route through the shared session so the live client has ONE owner + tracked PID (a game
+        // launch afterwards reuses it instead of spawning a second client).
+        let ok = await session.ensureRunning()
+        let mode = session.hardwareAccelerated ? " (experimental GPU mode — if the window is black, turn it off)" : ""
+        status = ok
+            ? "Launched Steam\(mode). Give it a moment to paint, then check the bottle log."
+            : "Launch failed: \(session.launchError ?? "couldn't start Steam")"
     }
 
     private func message(_ error: Error) -> String { (error as NSError).localizedDescription }
