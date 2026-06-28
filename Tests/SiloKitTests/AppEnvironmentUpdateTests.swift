@@ -6,10 +6,10 @@ import Testing
 @Suite("AppEnvironment update + backend fan-out")
 struct AppEnvironmentUpdateTests {
 
-    /// A release JSON newer than 0.0.1 (so bootstrap's checkForUpdate sees an update).
+    /// A releases LIST with an app release newer than 0.0.1 (so bootstrap's checkForUpdate sees an update).
     private let newerJSON = """
-    {"tag_name":"v9.9.9","name":"Silo 9.9.9","assets":[
-      {"name":"Silo.app.zip","browser_download_url":"https://example.com/Silo.app.zip","size":1}]}
+    [{"tag_name":"v9.9.9","name":"Silo 9.9.9","assets":[
+      {"name":"Silo.app.zip","browser_download_url":"https://example.com/Silo.app.zip","size":1}]}]
     """
 
     // MARK: - installUpdate
@@ -18,7 +18,7 @@ struct AppEnvironmentUpdateTests {
     func installUpdateNoBundle() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        FakeURLProtocol.stub("https://api.github.com/repos/test/env-update-newer/releases/latest",
+        FakeURLProtocol.stub("https://api.github.com/repos/test/env-update-newer/releases?per_page=30",
                              data: Data(newerJSON.utf8))
         let runner = FakeProcessRunner()
         let env = AppEnvironment(
@@ -48,10 +48,10 @@ struct AppEnvironmentUpdateTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let sameJSON = """
-        {"tag_name":"v0.0.1","name":"Silo 0.0.1","assets":[
-          {"name":"Silo.app.zip","browser_download_url":"https://example.com/Silo.app.zip","size":1}]}
+        [{"tag_name":"v0.0.1","name":"Silo 0.0.1","assets":[
+          {"name":"Silo.app.zip","browser_download_url":"https://example.com/Silo.app.zip","size":1}]}]
         """
-        FakeURLProtocol.stub("https://api.github.com/repos/test/env-update-same/releases/latest",
+        FakeURLProtocol.stub("https://api.github.com/repos/test/env-update-same/releases?per_page=30",
                              data: Data(sameJSON.utf8))
         let runner = FakeProcessRunner()
         let env = AppEnvironment(

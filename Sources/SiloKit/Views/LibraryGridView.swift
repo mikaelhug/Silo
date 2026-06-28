@@ -4,9 +4,9 @@ import SwiftUI
 /// GPTK), or the first-run onboarding until Wine + GPTK + the Steam bottle are ready.
 struct LibraryGridView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.openSettings) private var openSettings
     @State private var settingsTarget: SteamApp?
     @State private var detailTarget: SteamApp?
-    @State private var showAdvanced = false
     @State private var showAddGame = false
 
     var body: some View {
@@ -27,9 +27,8 @@ struct LibraryGridView: View {
                 Button { showAddGame = true } label: { Label("Install Game", systemImage: "plus") }
                 Button { Task { await lib.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
             }
-            Button { showAdvanced = true } label: { Label("Advanced", systemImage: "gearshape") }
+            Button { openSettings() } label: { Label("Settings", systemImage: "gearshape") }
         }
-        .sheet(isPresented: $showAdvanced) { AdvancedSettingsSheet() }
         .sheet(isPresented: $showAddGame) { AddGameSheet() }
         .sheet(item: $settingsTarget) { GameSettingsSheet(game: $0) }
         .sheet(item: $detailTarget) { game in
@@ -138,18 +137,14 @@ struct AddGameSheet: View {
 }
 
 /// Advanced settings presented as a sheet (Wine/GPTK paths etc.).
-struct AdvancedSettingsSheet: View {
-    @Environment(\.dismiss) private var dismiss
+/// The Settings window (macOS "Settings…" / ⌘, and the Library toolbar gear), a tabbed pane.
+struct SettingsView: View {
     var body: some View {
-        NavigationStack {
-            TabView {
-                BackendSettingsView().tabItem { Label("Backend", systemImage: "gearshape") }
-                WineManagerView().tabItem { Label("Runtimes", systemImage: "wineglass") }
-                UpdatesView().tabItem { Label("Updates", systemImage: "arrow.down.circle") }
-            }
-            .navigationTitle("Advanced Settings")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        TabView {
+            BackendSettingsView().tabItem { Label("Steam Bottle", systemImage: "shippingbox") }
+            WineManagerView().tabItem { Label("Runtimes", systemImage: "wineglass") }
+            UpdatesView().tabItem { Label("Updates", systemImage: "arrow.down.circle") }
         }
-        .frame(minWidth: 600, minHeight: 600)
+        .frame(minWidth: 600, minHeight: 560)
     }
 }

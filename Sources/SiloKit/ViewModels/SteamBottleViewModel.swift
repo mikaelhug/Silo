@@ -60,9 +60,8 @@ public final class SteamBottleViewModel {
         // Route through the shared session so the live client has ONE owner + tracked PID (a game
         // launch afterwards reuses it instead of spawning a second client).
         let ok = await session.ensureRunning()
-        let mode = session.hardwareAccelerated ? " (experimental GPU mode — if the window is black, turn it off)" : ""
         status = ok
-            ? "Launched Steam\(mode). Give it a moment to paint, then check the bottle log."
+            ? "Launched Steam. Give it a moment to paint, then check the bottle log."
             : "Launch failed: \(session.launchError ?? "couldn't start Steam")"
     }
 

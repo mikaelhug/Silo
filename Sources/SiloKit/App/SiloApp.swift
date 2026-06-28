@@ -31,5 +31,11 @@ public struct SiloApp: App {
                 LogViewerView(title: target.title, url: target.url)
             }
         }
+
+        // The standard macOS Settings window (app menu "Settings…" / ⌘, and the Library toolbar gear,
+        // which calls `openSettings`).
+        Settings {
+            SettingsView().environment(environment)
+        }
     }
 }
