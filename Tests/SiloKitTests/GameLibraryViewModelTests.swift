@@ -14,10 +14,12 @@ struct GameLibraryViewModelTests {
         let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
         var backend = BackendConfig()
         if wine { backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64") }
+        let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        session.updateWine(backend.wineBinaryPath)
+        session.coldStartGraceSeconds = 0   // don't wait for the (fake) Steam to "boot" in tests
         let vm = GameLibraryViewModel(
             bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
-            configStore: ConfigStore(paths: paths), paths: paths, backend: backend)
-        vm.coldStartGraceSeconds = 0   // don't wait for the (fake) Steam to "boot" in tests
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session)
         return (vm, fake, paths)
     }
 
@@ -123,6 +125,31 @@ struct GameLibraryViewModelTests {
             $0.arguments.first == "explorer" && $0.arguments.contains("-cef-in-process-gpu")
         }
         #expect(steamLaunches.count == 1)
+    }
+
+    @Test("settings 'Launch Steam' then a game Play share ONE tracked client (no double-spawn)")
+    func sharedSteamClientNoDoubleSpawn() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        // ONE shared session — exactly how AppEnvironment wires the Library + the settings pane.
+        let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        session.updateWine(backend.wineBinaryPath); session.coldStartGraceSeconds = 0
+        let library = GameLibraryViewModel(
+            bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session)
+        let settings = SteamBottleViewModel(bottle: bottle, session: session)
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+
+        await settings.launchSteam()   // the formerly-untracked spawn path
+        await library.play(game)       // previously this cold-started a SECOND Steam client
+
+        #expect(steamCEFLaunches(fake) == 1)   // ONE client — shared + tracked across both view models
+        #expect(library.isRunning(game))
     }
 
     @Test("play is a no-op without a configured Wine backend")

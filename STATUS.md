@@ -3,6 +3,17 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M93 — unify the live Steam client under one owner (fixes the double-spawn bug).** The bottle's
+  Steam client had TWO uncoordinated owners: `GameLibraryViewModel` tracked it (PID + coalescing +
+  cold-start grace), while `SteamBottleViewModel.launchSteam` spawned its OWN untracked copy — so clicking
+  Advanced → "Launch Steam" then Play on a game could start a second client (the Library's `steamPID` was
+  still nil). Extracted **`SteamClientSession`** (`@MainActor @Observable`) as the single owner of the live
+  client: PID tracking, launch coalescing, cold-start grace, the experimental HW-accel flag, and
+  `ensureRunning()`/`sendURL()`. Both view models now route through it (Library `openSteam`/`play`/install/
+  uninstall and settings `launchSteam` → `session.ensureRunning()`), keeping their distinct roles
+  (operational library vs setup/admin) but with ONE tracked client. New test proves the cross-VM case
+  (settings launch + Play → exactly one client). 173 tests / 28 suites green; clean build (no warnings).
+  (This was the architecture finding I'd deferred at M88; safe to do now with M89's coalescing coverage.)
 - **✅ M92 — Phase 5: hardware-accelerated Steam bottle (experimental opt-in path; on-device test needed).**
   Important framing first: **games launched from the bottle are ALREADY hardware-accelerated** — GPTK
   D3DMetal, proven on-device (Bloons TD 6, M83). Only the **2D Steam *client* UI** is software-rendered

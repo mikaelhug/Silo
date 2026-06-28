@@ -10,7 +10,10 @@ struct SteamBottleViewModelTests {
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
         let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
-        let vm = SteamBottleViewModel(bottle: bottle)
+        let session = SteamClientSession(
+            bottle: bottle, orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
+        session.coldStartGraceSeconds = 0
+        let vm = SteamBottleViewModel(bottle: bottle, session: session)
         return (vm, fake, paths)
     }
 

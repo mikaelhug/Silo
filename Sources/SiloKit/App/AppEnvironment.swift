@@ -17,6 +17,8 @@ public final class AppEnvironment {
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
     public let steamBottleVM: SteamBottleViewModel
+    /// The single owner of the live bottle Steam client (shared by the Library + the settings pane).
+    public let steamClientSession: SteamClientSession
     public let steamStore = SteamStoreClient()
     private let updater: Updater
     public private(set) var updateCheck: Updater.UpdateCheck?
@@ -58,11 +60,13 @@ public final class AppEnvironment {
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
         let bottle = SteamBottle(runner: runner, paths: paths)
+        let steamClientSession = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        self.steamClientSession = steamClientSession
         let gameLibrary = GameLibraryViewModel(
             bottle: bottle, discovery: discovery, orchestrator: orchestrator,
-            configStore: configStore, paths: paths, backend: initialBackend)
+            configStore: configStore, paths: paths, backend: initialBackend, session: steamClientSession)
         self.gameLibrary = gameLibrary
-        let steamBottleVM = SteamBottleViewModel(bottle: bottle)
+        let steamBottleVM = SteamBottleViewModel(bottle: bottle, session: steamClientSession)
         self.steamBottleVM = steamBottleVM
 
         backendSettings.onChange = { [weak self] in self?.applyBackend($0) }

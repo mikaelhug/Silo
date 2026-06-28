@@ -25,14 +25,8 @@ public final class GameLibraryViewModel {
     private let paths: AppPaths
     private var backend: BackendConfig
     private var runObservers: [Int: any ProcessObservation] = [:]
-    /// The bottle's Steam client PID (so we launch it once and don't relaunch per game).
-    private var steamPID: Int32?
-    private var steamObserver: (any ProcessObservation)?
-    /// The in-flight Steam launch, so concurrent callers coalesce onto one instead of each starting Steam.
-    private var steamLaunch: Task<Void, Never>?
-    /// Seconds to wait after cold-starting Steam before launching a game (lets it boot + auto-login).
-    /// Overridden to 0 in tests.
-    var coldStartGraceSeconds: Double = 10
+    /// The single owner of the live bottle Steam client (shared with the settings pane).
+    private let session: SteamClientSession
 
     public init(
         bottle: SteamBottle,
@@ -40,7 +34,8 @@ public final class GameLibraryViewModel {
         orchestrator: LaunchOrchestrator,
         configStore: ConfigStore,
         paths: AppPaths,
-        backend: BackendConfig
+        backend: BackendConfig,
+        session: SteamClientSession
     ) {
         self.bottle = bottle
         self.discovery = discovery
@@ -48,6 +43,7 @@ public final class GameLibraryViewModel {
         self.configStore = configStore
         self.paths = paths
         self.backend = backend
+        self.session = session
     }
 
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
@@ -98,65 +94,26 @@ public final class GameLibraryViewModel {
 
     public func refresh() async { await load() }
 
-    // MARK: - The co-resident Steam client
-
-    /// Bring the bottle's Steam client up (and keep it tracked) if it isn't already running. On a cold
-    /// start, waits briefly for Steam to boot, auto-login from cache, and connect before returning — so a
-    /// game launched right after can actually reach it via Steamworks. Concurrent callers (two quick Play
-    /// clicks, or Play + Open Steam) coalesce onto ONE launch via `steamLaunch` — `steamPID` is only set
-    /// after an `await`, so without this they'd each start a second Steam client.
-    private func ensureSteamRunning() async {
-        if let pid = steamPID, orchestrator.isRunning(pid: pid) { return }   // already up
-        if let inFlight = steamLaunch { await inFlight.value; return }       // a launch is already running
-        let task = Task { @MainActor in await startSteam() }
-        steamLaunch = task
-        await task.value
-        steamLaunch = nil
-    }
-
-    private func startSteam() async {
-        guard let pid = await launchSteamProcess() else { return }
-        steamPID = pid
-        steamObserver = orchestrator.observeExit(pid: pid) { [weak self] in
-            Task { @MainActor in if self?.steamPID == pid { self?.steamPID = nil } }
-        }
-        if coldStartGraceSeconds > 0 { try? await Task.sleep(for: .seconds(coldStartGraceSeconds)) }
-    }
-
-    /// Launch the bottle's Steam client (re-applying the steamwebhelper wrapper first); returns the PID.
-    private func launchSteamProcess() async -> Int32? {
-        do {
-            if let wine = backend.wineBinaryPath { try bottle.installWebHelperWrapper(wine: wine) }
-            return try await bottle.launchSteam(wine: backend.wineBinaryPath)
-        } catch {
-            setStatus("Couldn't launch Steam: \((error as NSError).localizedDescription)")
-            return nil
-        }
-    }
-
-    /// Route a `steam://…` URL to the bottle's Steam, bringing it up first if needed.
-    private func sendSteamURL(_ url: String) async {
-        await ensureSteamRunning()
-        do { try await bottle.sendURL(url, wine: backend.wineBinaryPath) }
-        catch { setStatus("Couldn't reach Steam: \((error as NSError).localizedDescription)") }
-    }
-
-    // MARK: - Install / uninstall (delegated to the bottle's Steam)
+    // MARK: - Install / uninstall (routed through the shared Steam client)
 
     /// Open the bottle's Steam to a game's install dialog (Steam handles the download + DRM).
     public func install(appID: Int) async {
-        await sendSteamURL("steam://install/\(appID)")
-        setStatus("Opening Steam to install… install it there, then Refresh.")
+        do {
+            try await session.sendURL("steam://install/\(appID)")
+            setStatus("Opening Steam to install… install it there, then Refresh.")
+        } catch { setStatus("Couldn't reach Steam: \((error as NSError).localizedDescription)") }
     }
 
     /// Open the bottle's Steam (Store/Library) so the user can browse + install games.
-    public func openSteam() async { await ensureSteamRunning() }
+    public func openSteam() async { await session.ensureRunning() }
 
     /// Ask the bottle's Steam to uninstall a game, then refresh.
     public func uninstall(_ game: SteamApp) async {
         guard !isRunning(game) else { return }
-        await sendSteamURL("steam://uninstall/\(game.appID)")
-        setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
+        do {
+            try await session.sendURL("steam://uninstall/\(game.appID)")
+            setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
+        } catch { setStatus("Couldn't reach Steam: \((error as NSError).localizedDescription)") }
     }
 
     // MARK: - Launch (co-resident in the bottle)
@@ -167,7 +124,7 @@ public final class GameLibraryViewModel {
         busyAppIDs.insert(game.appID); defer { busyAppIDs.remove(game.appID) }
         do {
             // Steamworks IPC is prefix-scoped: the client must be up + logged in in this same prefix first.
-            await ensureSteamRunning()
+            await session.ensureRunning()
             let config = await configStore.load().config(for: game.appID)
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: backend,
