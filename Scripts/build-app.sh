@@ -9,7 +9,7 @@ CONFIG="release"
 APP="dist/$APP_NAME.app"
 
 VERSION=$(grep -m1 'static let version' Sources/SiloKit/Silo.swift | sed -E 's/.*"([^"]+)".*/\1/')
-VERSION=${VERSION:-0.1.0}
+VERSION=${VERSION:-0.1.1}
 BUILD=$(date +%Y%m%d%H%M)
 
 echo "==> swift build -c $CONFIG"
