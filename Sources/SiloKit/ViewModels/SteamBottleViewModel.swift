@@ -8,6 +8,10 @@ import Foundation
 public final class SteamBottleViewModel {
     public private(set) var status: String = ""
     public private(set) var busy = false
+    /// **Experimental** — try rendering Steam's CEF UI on the GPU (ANGLE→D3DMetal) instead of SwiftShader
+    /// software GL. Default off (the verified path); may show a black window. Games are HW-accelerated
+    /// regardless. See `SteamBottle.cefHardwareArgs`.
+    public var hardwareAccelerated = false
 
     private let bottle: SteamBottle
     private var wineBinary: URL?
@@ -51,8 +55,9 @@ public final class SteamBottleViewModel {
         do {
             // Re-apply the CEF wrapper first (a Steam update may have restored the stock webhelper).
             if let wine = wineBinary { try? bottle.installWebHelperWrapper(wine: wine) }
-            _ = try await bottle.launchSteam(wine: wineBinary)
-            status = "Launched Steam. Give it a moment to paint, then check the bottle log."
+            _ = try await bottle.launchSteam(wine: wineBinary, hardwareAccelerated: hardwareAccelerated)
+            let mode = hardwareAccelerated ? " (experimental GPU mode — if the window is black, turn it off)" : ""
+            status = "Launched Steam\(mode). Give it a moment to paint, then check the bottle log."
         } catch {
             status = "Launch failed: \(message(error))"
         }

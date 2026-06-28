@@ -132,6 +132,19 @@ public struct SteamBottle: Sendable {
         "-cef-disable-sandbox", "-no-cef-sandbox", "-noverifyfiles", "-norepairfiles",
     ]
 
+    /// **Experimental** `steam.exe` flags for a *hardware-accelerated* CEF UI: the software set MINUS
+    /// `-cef-disable-gpu`/`-cef-disable-gpu-compositing`, so CEF keeps its GPU process and tries to render
+    /// via ANGLE → D3D11 → GPTK D3DMetal → Metal (the same path the M83 overlay made work for *games*).
+    /// OPT-IN only — the default launch stays on `cefRenderArgs` (SwiftShader software GL), the verified
+    /// route that paints under Wine. CEF's ANGLE D3D11 backend may not initialize under GPTK (our
+    /// Electron/WebGL test failed exactly there), and even if it renders, the surface may not present — so
+    /// this needs on-device validation. NOTE: games launched from the bottle are already HW-accelerated
+    /// (GPTK D3DMetal); this only concerns the 2D Steam *client* UI.
+    public static let cefHardwareArgs = [
+        "-cef-in-process-gpu", "-cef-disable-sandbox", "-no-cef-sandbox",
+        "-noverifyfiles", "-norepairfiles",
+    ]
+
     /// Wine virtual-desktop geometry for the Steam client. On CrossOver's `winemac.drv`, the virtual-desktop
     /// ROOT window presents reliably, whereas a rootless CEF surface (SwiftShader-rendered but composited as
     /// a layered/child window) does NOT paint — it stays black even though rendering succeeds. So Steam is
@@ -140,14 +153,16 @@ public struct SteamBottle: Sendable {
     public static let desktopGeometry = "1440x900"
 
     /// Launch the bottle's Steam client detached, inside a Wine virtual desktop (so CEF presents on
-    /// CrossOver — see `desktopGeometry`), with the CEF software-render flags + env.
+    /// CrossOver — see `desktopGeometry`). Defaults to the verified software-GL CEF flags + env;
+    /// `hardwareAccelerated` switches to the experimental GPU path (see `cefHardwareArgs`).
     @discardableResult
-    public func launchSteam(wine: URL?, extraArgs: [String] = SteamBottle.cefRenderArgs) async throws -> Int32 {
+    public func launchSteam(wine: URL?, hardwareAccelerated: Bool = false) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }
-        let args = ["explorer", "/desktop=Silo,\(Self.desktopGeometry)", paths.steamBottleExe.path] + extraArgs
+        let cefArgs = hardwareAccelerated ? Self.cefHardwareArgs : Self.cefRenderArgs
+        let args = ["explorer", "/desktop=Silo,\(Self.desktopGeometry)", paths.steamBottleExe.path] + cefArgs
         return try await runner.spawnDetached(
             executable: wine, arguments: args,
-            environment: steamEnvironment(wine: wine),
+            environment: steamEnvironment(wine: wine, hardwareAccelerated: hardwareAccelerated),
             currentDirectory: paths.steamBottleClientDir, logURL: paths.steamBottleLog)
     }
 
@@ -174,13 +189,30 @@ public struct SteamBottle: Sendable {
     /// `WINEMSYNC=1` matches the per-game launch env so Steam + co-hosted games share one wineserver (the
     /// co-residency Steamworks relies on). The winebus/SDL crash is fixed by removing libSDL2 (build
     /// `--without-sdl` + `stripBundledSDL`), NOT a DLL override; CEF presentation is the virtual desktop.
-    private func steamEnvironment(wine: URL) -> [String: String] {
+    private func steamEnvironment(wine: URL, hardwareAccelerated: Bool = false) -> [String: String] {
         var env = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
         env["WINEMSYNC"] = "1"
-        env["STEAM_CEF_COMMAND_LINE"] =
-            "--no-sandbox --in-process-gpu --disable-gpu --disable-gpu-compositing "
-            + "--use-gl=swiftshader --disable-software-rasterizer"
-        env["STEAM_DISABLE_GPU_PROCESS"] = "1"
+        guard hardwareAccelerated else {
+            // Default (verified): force steamwebhelper's Chromium onto bundled SwiftShader software GL —
+            // the route that actually paints under Wine (vs Metal/winemac.drv presentation).
+            env["STEAM_CEF_COMMAND_LINE"] =
+                "--no-sandbox --in-process-gpu --disable-gpu --disable-gpu-compositing "
+                + "--use-gl=swiftshader --disable-software-rasterizer"
+            env["STEAM_DISABLE_GPU_PROCESS"] = "1"
+            return env
+        }
+        // EXPERIMENTAL HW path: let CEF use its GPU process (ANGLE → D3D11 → D3DMetal). Point the DYLD
+        // fallbacks at the wine runtime's OVERLAID D3DMetal (same wiring a game launch uses, via
+        // `wineRuntimeExternalDir`) so ANGLE's D3D11 can reach Metal, and force the d3d modules to GPTK's
+        // overlaid builtins. No `--disable-gpu`/`--use-gl=swiftshader`/`STEAM_DISABLE_GPU_PROCESS`.
+        // Unverified — opt-in for on-device testing (see `cefHardwareArgs`).
+        let external = wine.wineRuntimeExternalDir
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = "\(external.path):\(wine.siloDyldFallback)"
+        env["DYLD_FALLBACK_FRAMEWORK_PATH"] = external.path
+        env["WINEDLLOVERRIDES"] = "d3d10,d3d11,d3d12,dxgi=b"
+        // Enable the GPU process and steer ANGLE to the D3D11 backend (the one the GPTK overlay supports),
+        // rather than letting it fall back to GL/SwiftShader.
+        env["STEAM_CEF_COMMAND_LINE"] = "--no-sandbox --in-process-gpu --use-gl=angle --use-angle=d3d11"
         return env
     }
 

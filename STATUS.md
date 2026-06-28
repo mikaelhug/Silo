@@ -3,6 +3,21 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M92 — Phase 5: hardware-accelerated Steam bottle (experimental opt-in path; on-device test needed).**
+  Important framing first: **games launched from the bottle are ALREADY hardware-accelerated** — GPTK
+  D3DMetal, proven on-device (Bloons TD 6, M83). Only the **2D Steam *client* UI** is software-rendered
+  (SwiftShader), a deliberate CEF black-window workaround. That workaround predates the **M83 overlay** that
+  made GPTK's D3D11 actually work, so CEF's GPU path (ANGLE→D3D11→D3DMetal) *might* now render where it
+  couldn't before. Added an **opt-in experimental HW path** to test that:
+  - `SteamBottle.cefHardwareArgs` + `steamEnvironment(hardwareAccelerated:)` — enables CEF's GPU process
+    (`--use-gl=angle --use-angle=d3d11`, drops `--disable-gpu`/`--use-gl=swiftshader`/`STEAM_DISABLE_GPU_PROCESS`)
+    and points the DYLD fallbacks at the runtime's overlaid D3DMetal (same wiring a game launch uses) so
+    ANGLE's D3D11 can reach Metal. Default launch stays software (verified).
+  - Toggle: **Advanced Settings → Steam bottle → "Hardware-accelerated UI (experimental)"**, then Launch Steam.
+  - **Honest caveat:** our own GeoGuessr/Electron test showed ANGLE's D3D11 backend FAILS under GPTK
+    (`eglInitialize D3D11 failed`) even post-overlay, so this may still black-screen; and even if it renders,
+    the surface may not present. It's opt-in precisely so it can't break the working software default.
+  - 172 tests / 28 suites green; clean build; `dist/Silo.app` reassembled.
 - **✅ M91 — Phase 4 performance review (agentic).** 4 lenses (UI re-layout, main-actor blocking,
   redundant work, I/O) → skeptical verify → only 3 real worth-doing fixes (the codebase was already
   perf-clean since the 100%-CPU fix + polling removal): (1) roomier `URLCache.shared` (32 MB mem / 128 MB
@@ -362,6 +377,11 @@
 - `.sharedSteamClient` presence symlinks the master Steam into the prefix but does not yet launch a background `steam.exe` inside the prefix; full live-client wiring is a launch-time follow-up (most DRM cases use `.emulatorStub`).
 
 ## BLOCKED
+- **HW-accelerated Steam *UI* (M92, on-device test):** flip Advanced → Steam bottle → "Hardware-accelerated
+  UI (experimental)" → Launch Steam. If the CEF window renders (not black) and the GPU log shows ANGLE/D3D11
+  (not SwiftShader), GPTK now drives the Steam UI on Metal — report back and it can become the default. If it
+  black-screens / `eglInitialize D3D11 failed`, the ANGLE-D3D11-under-GPTK limit still holds and software GL
+  stays the path (the 2D UI is fine on software; games are HW regardless). Only the user can run this gate.
 - _(none for the build — the items below need a real Wine runtime + on-device launch, not code changes)_
 - **Bottle Steam CEF render + login (M76, verified recipe applied — needs on-device confirm):** deep-research
   (→ MelonForAll/vineport, confirmed working macOS 2026) found the root cause of BOTH the black window AND

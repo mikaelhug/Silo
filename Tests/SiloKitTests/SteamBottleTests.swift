@@ -54,6 +54,24 @@ struct SteamBottleTests {
         #expect(call.environment["WINEDLLOVERRIDES"] == nil)
     }
 
+    @Test("launchSteam(hardwareAccelerated:) uses the GPU CEF path + overlaid-D3DMetal DYLD, no SwiftShader")
+    func launchSteamHardware() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (bottle, fake, _) = make(tmp)
+        _ = try await bottle.launchSteam(wine: URL(fileURLWithPath: "/rt/bin/wine64"), hardwareAccelerated: true)
+        let call = try #require(fake.lastInvocation)
+        #expect(call.arguments.contains("-cef-in-process-gpu"))
+        #expect(!call.arguments.contains("-cef-disable-gpu"))                    // GPU is NOT disabled
+        let cef = call.environment["STEAM_CEF_COMMAND_LINE"] ?? ""
+        #expect(!cef.contains("swiftshader"))                                    // not software GL
+        #expect(!cef.contains("--disable-gpu"))
+        #expect(call.environment["STEAM_DISABLE_GPU_PROCESS"] == nil)            // GPU process kept
+        // DYLD points at the wine runtime's overlaid D3DMetal so CEF's ANGLE D3D11 can reach Metal.
+        #expect(call.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == "/rt/lib/external")
+        #expect(call.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/rt/lib/external:") == true)
+        #expect(call.environment["WINEDLLOVERRIDES"]?.contains("d3d11") == true)
+    }
+
     // MARK: - Install error branches
 
     @Test("provision throws winebootFailed when wineboot --init returns non-zero")
