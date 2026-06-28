@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   app:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     env:
       HAS_NOTARY: ${{ secrets.AC_API_KEY_ID }}
