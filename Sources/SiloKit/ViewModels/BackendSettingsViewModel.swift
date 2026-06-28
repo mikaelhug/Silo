@@ -24,10 +24,9 @@ public final class BackendSettingsViewModel {
 
     public var isConfigured: Bool { config.isWineConfigured }
 
-    /// Override params are for tests; production calls with defaults.
-    public func autodetect(homeDirectory: URL? = nil, applicationsDirectory: URL? = nil) {
-        let detected = resolver.autodetect(
-            homeDirectory: homeDirectory, applicationsDirectory: applicationsDirectory)
+    /// Override param is for tests; production calls with defaults.
+    public func autodetect(homeDirectory: URL? = nil) {
+        let detected = resolver.autodetect(homeDirectory: homeDirectory)
         if detected.detectedSource != .none {
             config = detected
             statusMessage = "Detected \(detected.detectedSource.rawValue)."

@@ -40,33 +40,13 @@ struct GameSettingsSheet: View {
         @Bindable var vm = model
         Form {
             Section {
-                Picker("Backend", selection: $vm.config.backend) {
-                    ForEach(GraphicsBackend.allCases) { Text($0.displayName).tag($0) }
-                }
-            } header: {
-                Text("Graphics backend")
-            } footer: {
-                Text("Game Porting Toolkit (D3DMetal) is the default — it translates DirectX 9–12 (incl. "
-                     + "ray tracing) and is the most capable on Apple Silicon. Switch to CrossOver (DXVK) "
-                     + "only if a game misbehaves under GPTK; Silo also falls back to it automatically when "
-                     + "GPTK isn't installed.")
-            }
-
-            Section {
                 Picker("Sync", selection: $vm.config.envFlags.syncMode) {
                     ForEach(SyncMode.allCases) { Text($0.displayName).tag($0) }
                 }
                 Toggle("Advertise AVX (Rosetta)", isOn: $vm.config.envFlags.advertiseAVX)
                 Toggle("Performance HUD (FPS / frame time)", isOn: $vm.config.envFlags.metalHUD)
-                if vm.config.backend == .gptk {
-                    Toggle("MetalFX upscaling", isOn: $vm.config.envFlags.metalFX)
-                    Toggle("DirectX Raytracing (M3+)", isOn: $vm.config.envFlags.dxr)
-                }
-                if vm.config.backend == .crossover {
-                    TextField("DXVK HUD (e.g. fps,memory)", text: Binding(
-                        get: { vm.config.envFlags.dxvkHUD ?? "" },
-                        set: { vm.config.envFlags.dxvkHUD = $0.isEmpty ? nil : $0 }))
-                }
+                Toggle("MetalFX upscaling", isOn: $vm.config.envFlags.metalFX)
+                Toggle("DirectX Raytracing (M3+)", isOn: $vm.config.envFlags.dxr)
             } header: {
                 Text("Performance")
             } footer: {

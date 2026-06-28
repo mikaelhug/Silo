@@ -10,7 +10,6 @@ struct ViewModelTests {
     func backendSettings() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let home = try tmp.makeDir("home")
-        let apps = try tmp.makeDir("apps")
         try tmp.write("home/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin/wine64", "x")
 
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
@@ -19,7 +18,7 @@ struct ViewModelTests {
         var propagated: BackendConfig?
         vm.onChange = { propagated = $0 }
 
-        vm.autodetect(homeDirectory: home, applicationsDirectory: apps)
+        vm.autodetect(homeDirectory: home)
         #expect(vm.config.detectedSource == .whisky)
 
         await vm.save()

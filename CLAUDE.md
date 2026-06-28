@@ -42,8 +42,9 @@ process with `WINEPREFIX` overridden to the isolated prefix).
 
 ## Two runtime roles
 - `BottleRole.steam` → a **simple/vanilla** Wine bottle (Steam is finicky; no GPTK overrides).
-- `BottleRole.game` → **Apple GPTK / D3DMetal primary**, **CrossOver wine binary fallback**
-  (auto-selected when GPTK is unavailable or a GPTK launch attempt fails).
+- `BottleRole.game` → **Apple GPTK / D3DMetal** is the single graphics path (D3DMetal overlaid into the
+  wine runtime by `GraphicsLinker.overlayGPTK`). No DXVK/CrossOver-backend fallback — when GPTK isn't
+  configured the game simply runs on wine's own wined3d.
 
 ## Steam Presence Strategy (per-game, the DRM answer)
 Steamworks IPC is **prefix-scoped**: a game can only reach a Steam client running in its OWN Wine prefix

@@ -11,17 +11,15 @@ struct MakePlanTests {
     let log = URL(fileURLWithPath: "/p/220.log")
     let gameExe = URL(fileURLWithPath: "/lib/steamapps/common/Half-Life 2/hl2.exe")
 
-    private func backend(gptk: String? = "/w/bin/wine64", cx: String? = "/cx/wine") -> BackendConfig {
+    private func backend(gptk: String? = "/w/bin/wine64") -> BackendConfig {
         var b = BackendConfig()
         b.wineBinaryPath = gptk.map { URL(fileURLWithPath: $0) }
-        b.crossoverWinePath = cx.map { URL(fileURLWithPath: $0) }
         return b
     }
 
-    @Test("GPTK plan: bottle WINEPREFIX, sync flags, no DXVK overrides, custom args, cwd")
+    @Test("GPTK plan: bottle WINEPREFIX, sync flags, no d3d overrides without a GPTK lib dir, custom args, cwd")
     func gptkPlan() throws {
         var cfg = GameConfig(appID: 220)
-        cfg.backend = .gptk
         cfg.envFlags = EnvFlags(syncMode: .msync)
         cfg.customArgs = ["-dev", "-w", "1920"]
         let plan = try LaunchOrchestrator.makePlan(
@@ -32,9 +30,8 @@ struct MakePlanTests {
         #expect(plan.environment["WINEPREFIX"] == "/p/220")        // the shared Steam-bottle prefix
         #expect(plan.environment["WINEMSYNC"] == "1")          // MSync default on Apple Silicon
         #expect(plan.environment["WINEESYNC"] == nil)          // mutually exclusive — not both
-        // GPTK injects D3DMetal and adds no DXVK overrides; with no GPTK lib dir set here there are no
-        // d3d overrides either, so WINEDLLOVERRIDES is unset (the SDL crash is fixed by removing libSDL2,
-        // not a DLL override).
+        // GPTK injects D3DMetal; with no GPTK lib dir set here there are no d3d overrides, so
+        // WINEDLLOVERRIDES is unset (the SDL crash is fixed by removing libSDL2, not a DLL override).
         #expect(plan.environment["WINEDLLOVERRIDES"] == nil)
         #expect(plan.environment["WINEDEBUG"] == "-all")           // quiet default
         #expect(plan.currentDirectory.path == "/lib/steamapps/common/Half-Life 2")
@@ -44,7 +41,6 @@ struct MakePlanTests {
     @Test("Bottle launch forces msync even if the game is configured for esync (one shared wineserver)")
     func forcesMsyncForCoResidency() throws {
         var cfg = GameConfig(appID: 220)
-        cfg.backend = .gptk
         cfg.envFlags = EnvFlags(syncMode: .esync)   // user picked ESync…
         let plan = try LaunchOrchestrator.makePlan(
             app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
@@ -55,8 +51,7 @@ struct MakePlanTests {
 
     @Test("GPTK plan with GPTK configured: D3DMetal resolves from the RUNTIME's lib/external, no WINEDLLPATH")
     func gptkPlanD3DMetalWiring() throws {
-        var cfg = GameConfig(appID: 220)
-        cfg.backend = .gptk
+        let cfg = GameConfig(appID: 220)
         var b = backend()   // wine binary = /w/bin/wine64 → runtime root /w
         b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
         let plan = try LaunchOrchestrator.makePlan(
@@ -73,16 +68,6 @@ struct MakePlanTests {
         #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d10,d3d11,d3d12,dxgi=b")
     }
 
-    @Test("CrossOver plan: selects crossover wine and sets DXVK DLL overrides")
-    func crossoverPlan() throws {
-        var cfg = GameConfig(appID: 220)
-        cfg.backend = .crossover
-        let plan = try LaunchOrchestrator.makePlan(
-            app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
-        #expect(plan.executable.path == "/cx/wine")
-        #expect(plan.environment["WINEDLLOVERRIDES"]?.contains("dxgi=n") == true)
-    }
-
     @Test("User WINEDEBUG via extra flags is preserved")
     func customWineDebug() throws {
         var cfg = GameConfig(appID: 220)
@@ -94,11 +79,10 @@ struct MakePlanTests {
 
     @Test("Throws wineNotConfigured when no wine binary is available")
     func notConfigured() {
-        var cfg = GameConfig(appID: 220)
-        cfg.backend = .gptk
+        let cfg = GameConfig(appID: 220)
         #expect(throws: LaunchOrchestrator.LaunchError.wineNotConfigured) {
             try LaunchOrchestrator.makePlan(
-                app: app, config: cfg, backend: backend(gptk: nil, cx: nil),
+                app: app, config: cfg, backend: backend(gptk: nil),
                 gameExe: gameExe, prefix: prefix, logURL: log)
         }
     }
@@ -136,7 +120,6 @@ struct LaunchPipelineTests {
         let app = SteamApp(appID: 220, name: "HL2", installDir: "Half-Life 2",
                            stateFlags: .fullyInstalled, sizeOnDisk: 1, libraryPath: lib)
         var cfg = GameConfig(appID: 220)
-        cfg.backend = .gptk
         cfg.executableRelativePath = "hl2.exe"
 
         let pid = try await orchestrator.launchInBottle(
