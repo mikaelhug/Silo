@@ -29,16 +29,9 @@ public enum Silo {
 
     /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
+    /// (The winebus/SDL crash is NOT fixed here — `WINEDLLOVERRIDES` can't disable a PnP `.sys` driver;
+    /// the fix is removing libSDL2 from the runtime: build `--without-sdl` + `RuntimeManager.stripBundledSDL`.)
     public static let winePrefixInitOverrides = "mscoree,mshtml="
-
-    /// `WINEDLLOVERRIDES` fragment disabling Wine drivers that crash the whole Wine process on macOS.
-    /// `winebus.sys` (the HID/game-controller bus) `dlopen`s libSDL2 on a Wine worker thread; SDL's macOS
-    /// initializer pops an `NSAlert` off the main thread → "NSWindow should only be instantiated on the
-    /// main thread" → the process aborts before Steam (or a game) ever draws. `winexinput.sys` rides on the
-    /// same path. Disabling them costs in-Wine controller support but lets Steam/games actually launch.
-    /// The trailing `=` is the DISABLED disposition (like `mscoree,mshtml=`); `=d` is NOT valid Wine syntax
-    /// (only `n`/`b`/empty) and silently leaves the driver enabled.
-    public static let crashyDriverOverrides = "winebus,winexinput="
 
     /// The single source of truth for a wine invocation's base environment: the isolated `WINEPREFIX`,
     /// quiet logging, and the bundled-dylib fallback path (so freetype/etc. resolve). Every wine launch

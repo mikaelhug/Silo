@@ -52,9 +52,6 @@ public struct LaunchOrchestrator: Sendable {
         // break Steamworks IPC (the exact failure the shared bottle exists to avoid).
         environment["WINEMSYNC"] = "1"
         environment["WINEESYNC"] = nil
-        // Disable the SDL controller bus that aborts the Wine process on macOS (see crashyDriverOverrides).
-        environment["WINEDLLOVERRIDES"] = mergeOverride(
-            environment["WINEDLLOVERRIDES"], Silo.crashyDriverOverrides)
 
         switch config.backend {
         case .gptk:
