@@ -3,6 +3,32 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M86 — agentic codebase audit (17 verified cleanups).** A 5-reviewer multi-agent audit
+  (dedup → adversarial verify, 17 of 21 confirmed) → applied: dead code removed (`Asset.size`,
+  `AppPaths.steamBottleWebHelper`, `BackendSettingsViewModel.paths`, `GameSettingsViewModel.appName`);
+  duplication collapsed (`GPTKImporter.Result`→`GPTKInstall`, shared `deQuarantine()` +
+  `RuntimeInstallRow`, generic `AppManifestDecoder.opt<T>`); `bootstrap()` re-entrancy fixed
+  (`isBootstrapping`/`didBootstrap` split); **`BackendPolicy.effective` wired into `play()`** (gptk→
+  crossover fallback — was dead code; covered by BackendPolicyTests); four stale M83 GPTK "system32"
+  docs corrected to the overlay mechanism. 122 tests / 26 suites green; clean build (no warnings).
+- **✅ M85 — inline in-app updater (Sparkle-style).** The updater now applies updates **inline**:
+  download the release `.zip` → unpack beside `Silo.app` → atomic `replaceItemAt` → `lsregister` →
+  relaunch — no browser hop / manual install, replacing the old check+download-Link. `Updater`.
+  `downloadUpdate`/`installUpdate`/`relaunch` (binary exec via `ProcessRunning`);
+  `AppEnvironment.installUpdate` + `UpdateState`; `AboutView` "Download & Relaunch" button + progress.
+- **✅ CI(wine) — brew-link crash fixed (follow-up to M84 GnuTLS).** The x86_64-Homebrew step
+  hard-failed on a transitive `python@3.14` link conflict (`idle3 already exists`). Now tolerates link
+  failures (we reference every formula by `brew --prefix`, never the linked name) and asserts the needed
+  formulae are installed. Validated in CI: "Build dependencies" + "Fetch CrossOver source" steps pass;
+  the build proceeds into compiling Wine.
+- **✅ M84 — Wine CI GnuTLS configure fix.**
+  `build-wine.yml` now fails fast if x86_64 Homebrew dependencies do not install, installs `pkgconf`,
+  and exports the x86_64 Homebrew `pkg-config` / include / library paths plus explicit x86_64 clang
+  selection before Wine configure. This should unblock the GitHub runner failure:
+  `libgnutls 64-bit development files not found` while keeping `--with-gnutls` required for schannel.
+  Local verification: workflow YAML parses; `swift build --disable-sandbox` clean; `Scripts/test.sh
+  --disable-sandbox` green (119 tests / 26 suites). The `--disable-sandbox` flag was only needed because
+  this managed local session blocks SwiftPM's manifest sandbox.
 - **✅ M83 — GPTK D3DMetal OVERLAY baked into Silo (native DX11 games render under GPTK on-device).**
   119 tests / 26 suites green; clean build (no warnings); `dist/Silo.app` reassembled. The load-bearing
   GPTK activation: Apple's d3d modules must be OVERLAID into the wine runtime's OWN `lib/wine` tree, not
