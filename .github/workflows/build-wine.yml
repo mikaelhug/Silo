@@ -68,7 +68,18 @@ jobs:
           fi
           BREW=/usr/local/bin/brew
           test -x "$BREW"
-          $ARCH_PREFIX "$BREW" install bison mingw-w64 freetype gnutls gstreamer sdl2 molten-vk cmake ccache pkgconf
+          export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
+          # A transitive dep (python) can fail to LINK on the runner's pre-populated /usr/local
+          # (e.g. "Could not symlink bin/idle3 — already exists"), which `brew install` treats as fatal.
+          # We reference every formula by `brew --prefix` (its Cellar path), never the linked name, so a
+          # link failure is harmless — tolerate it, then ASSERT each formula we actually need is installed
+          # (that is the real gate, and it still fails the build on a genuine install/compile error).
+          $ARCH_PREFIX "$BREW" install bison mingw-w64 freetype gnutls gstreamer molten-vk cmake ccache pkgconf || true
+          missing=""
+          for f in bison mingw-w64 freetype gnutls gstreamer cmake ccache pkgconf; do
+            $ARCH_PREFIX "$BREW" --prefix "$f" >/dev/null 2>&1 || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then echo "::error::required brew formulae failed to install:$missing"; exit 1; fi
           echo "BREW=$BREW" >> "$GITHUB_ENV"
 
       - name: Fetch CrossOver source
