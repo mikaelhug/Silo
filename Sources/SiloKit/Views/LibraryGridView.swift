@@ -34,8 +34,13 @@ struct LibraryGridView: View {
         .sheet(item: $detailTarget) { game in
             GameDetailView(game: game, onSettings: { detailTarget = nil; settingsTarget = game })
         }
-        .navigationSubtitle(env.setupComplete ? "\(lib.filtered.count) games" : "")
+        .navigationSubtitle(env.setupComplete ? gameCountLabel(lib.filtered.count) : "")
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
+    }
+
+    /// "1 game" / "N games" — singular only when exactly one.
+    private func gameCountLabel(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "game" : "games")"
     }
 
     private let columns = [GridItem(.adaptive(minimum: 250), spacing: 16)]
