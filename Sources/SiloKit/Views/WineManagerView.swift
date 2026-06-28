@@ -26,6 +26,5 @@ struct WineManagerView: View {
             case .wine: WineDownloadView()
             }
         }
-        .navigationTitle("Wine Manager")
     }
 }

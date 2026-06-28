@@ -35,8 +35,16 @@ struct LibraryGridView: View {
         .sheet(item: $detailTarget) { game in
             GameDetailView(game: game, onSettings: { detailTarget = nil; settingsTarget = game })
         }
-        .navigationSubtitle(env.setupComplete ? gameCountLabel(shown.count) : "")
+        .navigationSubtitle(env.setupComplete ? subtitle(shown.count) : "")
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
+    }
+
+    /// The subtitle next to the "Library" title: the game count, plus a small "Update available" note to
+    /// its right when a newer release exists (apply it in Advanced Settings → Updates).
+    private func subtitle(_ count: Int) -> String {
+        let games = gameCountLabel(count)
+        guard let update = env.updateCheck, update.isNewer else { return games }
+        return "\(games)   ·   Update \(update.latestVersion) available"
     }
 
     /// "1 game" / "N games" — singular only when exactly one.
@@ -134,9 +142,14 @@ struct AdvancedSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
-            BackendSettingsView()
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            TabView {
+                BackendSettingsView().tabItem { Label("Backend", systemImage: "gearshape") }
+                WineManagerView().tabItem { Label("Runtimes", systemImage: "wineglass") }
+                UpdatesView().tabItem { Label("Updates", systemImage: "arrow.down.circle") }
+            }
+            .navigationTitle("Advanced Settings")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
-        .frame(minWidth: 580, minHeight: 560)
+        .frame(minWidth: 600, minHeight: 600)
     }
 }

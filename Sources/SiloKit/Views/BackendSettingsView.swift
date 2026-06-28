@@ -34,7 +34,6 @@ struct BackendSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Advanced Settings")
     }
 
     /// Stand up a shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
