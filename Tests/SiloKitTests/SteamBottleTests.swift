@@ -72,6 +72,15 @@ struct SteamBottleTests {
         try bottle.installWebHelperWrapper(wine: wine)
         #expect(try String(contentsOf: helper, encoding: .utf8) == "WRAPPER_V2")   // new wrapper in place
         #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")           // real one still intact
+
+        // A Steam update adds a SECOND cef dir (cef.win64) with a fresh real webhelper — it must ALSO get
+        // wrapped, else Steam runs the unwrapped one and the window is black.
+        let cef2 = paths.steamBottleCEFDir.appendingPathComponent("cef.win64")
+        try FileManager.default.createDirectory(at: cef2, withIntermediateDirectories: true)
+        try "REAL2".write(to: cef2.appendingPathComponent("steamwebhelper.exe"), atomically: true, encoding: .utf8)
+        try bottle.installWebHelperWrapper(wine: wine)
+        #expect(try String(contentsOf: cef2.appendingPathComponent("steamwebhelper.exe"), encoding: .utf8) == "WRAPPER_V2")
+        #expect(try String(contentsOf: cef2.appendingPathComponent("steamwebhelper_orig.exe"), encoding: .utf8) == "REAL2")
     }
 
 }
