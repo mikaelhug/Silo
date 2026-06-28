@@ -69,11 +69,19 @@ jobs:
           BREW=/usr/local/bin/brew
           test -x "$BREW"
           export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
-          # A transitive dep (python) can fail to LINK on the runner's pre-populated /usr/local
-          # (e.g. "Could not symlink bin/idle3 — already exists"), which `brew install` treats as fatal.
-          # We reference every formula by `brew --prefix` (its Cellar path), never the linked name, so a
-          # link failure is harmless — tolerate it, then ASSERT each formula we actually need is installed
-          # (that is the real gate, and it still fails the build on a genuine install/compile error).
+          # PREVENT the keg-link conflict at its source: the runner pre-seeds /usr/local/bin with macOS
+          # Python.framework shims (idle3, 2to3, python3.*, …) that block Homebrew's python keg-link
+          # ("Could not symlink bin/idle3 — already exists") when gstreamer pulls python as a dependency.
+          # We don't use the framework Python — remove just those shims (any /usr/local/bin symlink pointing
+          # into Python.framework) so brew links python cleanly and the dependency install is error-free.
+          for shim in /usr/local/bin/*; do
+            if [ -L "$shim" ] && readlink "$shim" 2>/dev/null | grep -q "Python.framework"; then
+              sudo rm -f "$shim"
+            fi
+          done
+          # Install the build deps. `|| true` + the explicit assert below remain a backstop for any other
+          # transient keg-link conflict: we reference every formula by `brew --prefix` (its Cellar path),
+          # never the linked name, so a stray link failure is harmless as long as the formula is installed.
           $ARCH_PREFIX "$BREW" install bison mingw-w64 freetype gnutls gstreamer molten-vk cmake ccache pkgconf || true
           missing=""
           for f in bison mingw-w64 freetype gnutls gstreamer cmake ccache pkgconf; do
