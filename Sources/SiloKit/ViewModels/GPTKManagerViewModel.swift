@@ -35,10 +35,10 @@ public final class GPTKManagerViewModel {
             let result = try await importer.importGPTK(fromDMG: dmgURL)
             refresh()
             // Adopt the newly-imported version as default if none is set yet.
-            if defaultName == nil, let new = installs.first(where: { $0.name == result.runtimeName }) {
+            if defaultName == nil, let new = installs.first(where: { $0.name == result.name }) {
                 setDefault(new)
             }
-            statusMessage = "Imported \(result.runtimeName)."
+            statusMessage = "Imported \(result.name)."
         } catch {
             statusMessage = "Import failed: \((error as NSError).localizedDescription)"
         }

@@ -25,7 +25,7 @@ public actor DiscoveryEngine {
             throw DiscoveryError.steamDirNotFound(primarySteamapps)
         }
 
-        let libraryRoots = collectLibraryRoots(primarySteamRoot: steamRoot, primarySteamapps: primarySteamapps)
+        let libraryRoots = collectLibraryRoots(primarySteamRoot: steamRoot)
 
         var apps: [SteamApp] = []
         var seen = Set<Int>()
@@ -42,11 +42,12 @@ public actor DiscoveryEngine {
     /// Primary library + any host-absolute paths from `libraryfolders.vdf`, de-duplicated.
     /// (Windows-style paths from a Wine bottle are skipped for now — games in the single-downloader
     /// model land in the primary C: library; cross-drive translation is a documented follow-up.)
-    private func collectLibraryRoots(primarySteamRoot: URL, primarySteamapps: URL) -> [URL] {
+    private func collectLibraryRoots(primarySteamRoot: URL) -> [URL] {
         var roots: [URL] = [primarySteamRoot]
         var seenPaths = Set([primarySteamRoot.standardizedFileURL.path])
 
-        let vdf = primarySteamapps.appendingPathComponent("libraryfolders.vdf")
+        let steamapps = primarySteamRoot.appendingPathComponent("steamapps", isDirectory: true)
+        let vdf = steamapps.appendingPathComponent("libraryfolders.vdf")
         if let text = try? String(contentsOf: vdf, encoding: .utf8),
            let folders = try? libraryDecoder.decode(text: text) {
             for folder in folders where folder.path.path.hasPrefix("/") {

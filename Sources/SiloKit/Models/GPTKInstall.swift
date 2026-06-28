@@ -5,7 +5,8 @@ public struct GPTKInstall: Sendable, Equatable, Identifiable {
     public var id: String { name }
     public let name: String              // directory name, e.g. "GPTK-4.0_beta_1"
     public let installDir: URL
-    /// D3DMetal DLLs injected into a game prefix's system32 (`BackendConfig.gptkLibDirPath`).
+    /// D3DMetal d3d modules overlaid into the wine runtime's `lib/wine` tree by
+    /// `GraphicsLinker.overlayGPTK` (`BackendConfig.gptkLibDirPath`).
     public let gptkLibDir: URL
     public let d3dMetalFramework: URL
 

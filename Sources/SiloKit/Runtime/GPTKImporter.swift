@@ -3,8 +3,9 @@ import Foundation
 /// Imports Apple's Game Porting Toolkit from the `.dmg` the user downloads from Apple.
 ///
 /// GPTK ships the D3D→Metal translation layer (D3DMetal.framework + d3d10/11/12.dll, dxgi.dll, …),
-/// NOT a wine binary — so this populates `gptkLibDirPath` (DLLs injected into game prefixes); the
-/// wine binary itself comes from CrossOver or a downloaded wine-crossover build.
+/// NOT a wine binary — so this populates `gptkLibDirPath`; the modules are later overlaid into the
+/// wine runtime's `lib/wine` tree by `GraphicsLinker.overlayGPTK`. The wine binary itself comes from
+/// CrossOver or a downloaded wine-crossover build.
 ///
 /// GPTK 4.x nests the runtime in an inner "Evaluation environment…dmg"; older versions put `redist`
 /// at the top level. Both are handled. `hdiutil` runs through the `ProcessRunning` seam.
@@ -23,14 +24,6 @@ public struct GPTKImporter: Sendable {
         case attachFailed(String)
         case nestedDMGNotFound
         case redistNotFound
-    }
-
-    public struct Result: Sendable, Equatable {
-        public let runtimeName: String
-        public let installDir: URL
-        /// DLL directory to inject into a game prefix's system32 (`BackendConfig.gptkLibDirPath`).
-        public let gptkLibDir: URL
-        public let d3dMetalFramework: URL
     }
 
     /// Derive a versioned runtime name from the DMG filename
@@ -69,7 +62,7 @@ public struct GPTKImporter: Sendable {
         fromDMG dmg: URL,
         name: String? = nil,
         progress: (@Sendable (Stage) -> Void)? = nil
-    ) async throws -> Result {
+    ) async throws -> GPTKInstall {
         let runtimeName = name ?? Self.runtimeName(forDMG: dmg)
         let fileManager = FileManager.default
         var mounted: [URL] = []
@@ -98,15 +91,12 @@ public struct GPTKImporter: Sendable {
             try fileManager.copyItem(at: redistLib, to: destLib)
 
             // Strip quarantine so the libs load; do NOT re-sign (preserve Apple's D3DMetal signature).
-            _ = try? await runner.run(
-                executable: URL(fileURLWithPath: "/usr/bin/xattr"),
-                arguments: ["-dr", "com.apple.quarantine", installDir.path],
-                environment: [:], currentDirectory: nil)
+            await deQuarantine(installDir, reSign: false, using: runner)
 
             await detachAll(mounted)
             progress?(.done)
-            return Result(
-                runtimeName: runtimeName,
+            return GPTKInstall(
+                name: runtimeName,
                 installDir: installDir,
                 gptkLibDir: destLib.appendingPathComponent("wine/x86_64-windows", isDirectory: true),
                 d3dMetalFramework: destLib.appendingPathComponent("external/D3DMetal.framework", isDirectory: true))

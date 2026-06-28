@@ -188,7 +188,6 @@ public struct SteamBottle: Sendable {
     private func downloadInstaller() async throws -> URL {
         let dest = paths.steamBottle.appendingPathComponent("SteamSetup.exe")
         if fileManager.fileExists(atPath: dest.path) { return dest }
-        try fileManager.createDirectory(at: paths.steamBottle, withIntermediateDirectories: true)
         let (tempFile, response) = try await session.download(from: Silo.steamInstallerURL)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw BottleError.installerDownloadFailed(http.statusCode)

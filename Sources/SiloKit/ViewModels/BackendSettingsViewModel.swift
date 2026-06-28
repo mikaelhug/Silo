@@ -8,7 +8,6 @@ public final class BackendSettingsViewModel {
 
     private let resolver: BackendResolver
     private let configStore: ConfigStore
-    private let paths: AppPaths
 
     /// Called after a successful save so other view models (e.g. the library) can react.
     public var onChange: ((BackendConfig) -> Void)?
@@ -16,13 +15,11 @@ public final class BackendSettingsViewModel {
     public init(
         config: BackendConfig,
         resolver: BackendResolver,
-        configStore: ConfigStore,
-        paths: AppPaths
+        configStore: ConfigStore
     ) {
         self.config = config
         self.resolver = resolver
         self.configStore = configStore
-        self.paths = paths
     }
 
     public var isConfigured: Bool { config.isWineConfigured }

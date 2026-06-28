@@ -6,15 +6,15 @@ struct BackendPolicyTests {
 
     @Test("recommends GPTK whenever it's installed (handles DirectX 9–12 on Apple Silicon)")
     func recommendsGPTKWhenInstalled() {
-        #expect(BackendPolicy.recommended(directXVersion: 12, gptkInstalled: true, crossoverInstalled: true) == .gptk)
-        #expect(BackendPolicy.recommended(directXVersion: 9, gptkInstalled: true, crossoverInstalled: false) == .gptk)
-        #expect(BackendPolicy.recommended(directXVersion: nil, gptkInstalled: true, crossoverInstalled: true) == .gptk)
+        #expect(BackendPolicy.recommended(gptkInstalled: true, crossoverInstalled: true) == .gptk)
+        #expect(BackendPolicy.recommended(gptkInstalled: true, crossoverInstalled: false) == .gptk)
+        #expect(BackendPolicy.recommended(gptkInstalled: true, crossoverInstalled: true) == .gptk)
     }
 
     @Test("recommends CrossOver only when GPTK isn't installed")
     func recommendsCrossOverWithoutGPTK() {
-        #expect(BackendPolicy.recommended(directXVersion: 11, gptkInstalled: false, crossoverInstalled: true) == .crossover)
-        #expect(BackendPolicy.recommended(directXVersion: nil, gptkInstalled: false, crossoverInstalled: false) == .gptk)
+        #expect(BackendPolicy.recommended(gptkInstalled: false, crossoverInstalled: true) == .crossover)
+        #expect(BackendPolicy.recommended(gptkInstalled: false, crossoverInstalled: false) == .gptk)
     }
 
     @Test("effective backend falls back to CrossOver when GPTK is requested but not installed")

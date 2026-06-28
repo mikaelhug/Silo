@@ -29,28 +29,14 @@ struct GPTKManagerView: View {
                     Text("No GPTK versions imported yet.").foregroundStyle(.secondary)
                 } else {
                     ForEach(vm.installs) { install in
-                        HStack(spacing: 10) {
-                            Image(systemName: vm.isDefault(install) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(vm.isDefault(install) ? Color.green : Color.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(install.displayName)
-                                Text(install.installDir.path)
-                                    .font(.caption).foregroundStyle(.secondary)
-                                    .lineLimit(1).truncationMode(.middle)
-                            }
-                            Spacer()
-                            if vm.isDefault(install) {
-                                Text("Default").font(.caption2).foregroundStyle(.green)
-                            } else {
-                                Button("Set default") { vm.setDefault(install) }
-                            }
-                            Button(role: .destructive) {
-                                Task { await vm.remove(install) }
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
-                        }
+                        RuntimeInstallRow(
+                            title: install.displayName,
+                            warning: nil,
+                            subtitle: install.installDir.path,
+                            isDefault: vm.isDefault(install),
+                            canSetDefault: true,
+                            onSetDefault: { vm.setDefault(install) },
+                            onRemove: { Task { await vm.remove(install) } })
                     }
                 }
             }

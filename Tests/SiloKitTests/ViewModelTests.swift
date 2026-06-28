@@ -15,8 +15,7 @@ struct ViewModelTests {
 
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let vm = BackendSettingsViewModel(
-            config: BackendConfig(), resolver: BackendResolver(), configStore: ConfigStore(paths: paths),
-            paths: paths)
+            config: BackendConfig(), resolver: BackendResolver(), configStore: ConfigStore(paths: paths))
         var propagated: BackendConfig?
         vm.onChange = { propagated = $0 }
 

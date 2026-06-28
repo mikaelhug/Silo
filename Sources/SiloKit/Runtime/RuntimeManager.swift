@@ -175,15 +175,6 @@ public actor RuntimeManager {
 
     /// De-quarantine (and optionally ad-hoc re-sign) an extracted runtime tree so macOS will run it.
     func harden(_ dir: URL, reSign: Bool) async {
-        _ = try? await runner.run(
-            executable: URL(fileURLWithPath: "/usr/bin/xattr"),
-            arguments: ["-dr", "com.apple.quarantine", dir.path],
-            environment: [:], currentDirectory: nil)
-        if reSign {
-            _ = try? await runner.run(
-                executable: URL(fileURLWithPath: "/usr/bin/codesign"),
-                arguments: ["--force", "--sign", "-", "--deep", dir.path],
-                environment: [:], currentDirectory: nil)
-        }
+        await deQuarantine(dir, reSign: reSign, using: runner)
     }
 }

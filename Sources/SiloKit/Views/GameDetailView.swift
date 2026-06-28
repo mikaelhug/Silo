@@ -114,7 +114,6 @@ struct GameDetailView: View {
     @ViewBuilder private func backendRecommendation(_ d: SteamStoreDetails) -> some View {
         let cfg = env.backendSettings.config
         let recommended = BackendPolicy.recommended(
-            directXVersion: d.directXVersion,
             gptkInstalled: cfg.gptkLibDirPath != nil, crossoverInstalled: cfg.crossoverWinePath != nil)
         LabeledContent("Recommended backend", value: recommended.displayName)
         Text(BackendPolicy.rationale(directXVersion: d.directXVersion, recommended: recommended))

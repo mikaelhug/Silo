@@ -11,7 +11,7 @@ public enum BackendPolicy {
     /// The recommended backend for a game given its DirectX needs and which runtimes are installed.
     /// (DirectX 9–12 are all GPTK territory; the version only shapes the human-readable rationale.)
     public static func recommended(
-        directXVersion: Int?, gptkInstalled: Bool, crossoverInstalled: Bool
+        gptkInstalled: Bool, crossoverInstalled: Bool
     ) -> GraphicsBackend {
         if gptkInstalled { return .gptk }
         if crossoverInstalled { return .crossover }
