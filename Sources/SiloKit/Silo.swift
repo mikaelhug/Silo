@@ -61,4 +61,13 @@ extension URL {
     public var siloDyldFallback: String {
         "\(siloBundledDylibDir.path):/usr/lib"
     }
+
+    /// For a wine binary at `<root>/bin/wine[64]`, the runtime's `lib/external` dir, where Silo overlays
+    /// GPTK's `libd3dshared.dylib` + `D3DMetal.framework` (see `GraphicsLinker.overlayGPTK`). GPTK's unix
+    /// `.so` modules symlink here (`../../external/libd3dshared.dylib`) and the GPTK launch DYLD fallbacks
+    /// point here, so the runtime is self-contained for D3DMetal once overlaid.
+    public var wineRuntimeExternalDir: URL {
+        deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/external", isDirectory: true)
+    }
 }

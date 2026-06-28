@@ -11,7 +11,7 @@ struct MakePlanTests {
     let log = URL(fileURLWithPath: "/p/220.log")
     let gameExe = URL(fileURLWithPath: "/lib/steamapps/common/Half-Life 2/hl2.exe")
 
-    private func backend(gptk: String? = "/w/wine64", cx: String? = "/cx/wine") -> BackendConfig {
+    private func backend(gptk: String? = "/w/bin/wine64", cx: String? = "/cx/wine") -> BackendConfig {
         var b = BackendConfig()
         b.wineBinaryPath = gptk.map { URL(fileURLWithPath: $0) }
         b.crossoverWinePath = cx.map { URL(fileURLWithPath: $0) }
@@ -27,7 +27,7 @@ struct MakePlanTests {
         let plan = try LaunchOrchestrator.makePlan(
             app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
 
-        #expect(plan.executable.path == "/w/wine64")
+        #expect(plan.executable.path == "/w/bin/wine64")
         #expect(plan.arguments == [gameExe.path, "-dev", "-w", "1920"])
         #expect(plan.environment["WINEPREFIX"] == "/p/220")        // the shared Steam-bottle prefix
         #expect(plan.environment["WINEMSYNC"] == "1")          // MSync default on Apple Silicon
@@ -53,23 +53,24 @@ struct MakePlanTests {
         #expect(plan.environment["WINEESYNC"] == nil)
     }
 
-    @Test("GPTK plan with GPTK configured: D3DMetal on DYLD fallbacks + builtin d3d via WINEDLLPATH")
+    @Test("GPTK plan with GPTK configured: D3DMetal resolves from the RUNTIME's lib/external, no WINEDLLPATH")
     func gptkPlanD3DMetalWiring() throws {
         var cfg = GameConfig(appID: 220)
         cfg.backend = .gptk
-        var b = backend()
-        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")  // <root>/lib/wine/x86_64-windows
+        var b = backend()   // wine binary = /w/bin/wine64 → runtime root /w
+        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
         let plan = try LaunchOrchestrator.makePlan(
             app: app, config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
 
-        // libd3dshared.dylib + D3DMetal.framework live in <root>/lib/external — must lead the DYLD paths.
-        #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/g/lib/external:") == true)
+        // After the overlay, GPTK's libd3dshared.dylib + D3DMetal.framework live in the WINE runtime's
+        // own lib/external (/w/lib/external) — that must lead the DYLD paths, ahead of the bundled deps.
+        #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/w/lib/external:") == true)
         #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.contains("/silo-bundled") == true)
-        #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == "/g/lib/external")
-        // GPTK's builtin d3d modules come from <root>/lib/wine, selected as builtin.
-        #expect(plan.environment["WINEDLLPATH"] == "/g/lib/wine")
-        #expect(plan.environment["WINEDLLOVERRIDES"]?.contains("d3d11") == true)
-        #expect(plan.environment["WINEDLLOVERRIDES"]?.contains("=b") == true)
+        #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == "/w/lib/external")
+        // Modules live in wine's own lib/wine now (overlaid), so there is NO WINEDLLPATH; the translated
+        // d3d modules are just forced to builtin so GPTK's overlaid versions win.
+        #expect(plan.environment["WINEDLLPATH"] == nil)
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d10,d3d11,d3d12,dxgi=b")
     }
 
     @Test("CrossOver plan: selects crossover wine and sets DXVK DLL overrides")
@@ -106,23 +107,31 @@ struct MakePlanTests {
 @Suite("LaunchOrchestrator.launch (pipeline)")
 struct LaunchPipelineTests {
 
-    @Test("Links graphics + spawns the game detached into the shared bottle prefix")
+    @Test("Overlays GPTK into the wine runtime + spawns the game detached into the shared bottle prefix")
     func fullPipeline() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
         let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
 
-        // Fake GPTK lib dir + a fake install tree with the exe + the shared (bottle) prefix.
-        let gptkDir = try tmp.makeDir("gptk")
-        try tmp.write("gptk/D3DMetal.dll", "x")
+        // A fake wine runtime + GPTK runtime, a fake install tree with the exe, and the shared bottle prefix.
+        let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
+        try tmp.makeDir("wine/lib/wine/x86_64-windows")
+        try tmp.makeDir("wine/lib/wine/x86_64-unix")
+        let gptkLibDir = try tmp.makeDir("gptk/lib/wine/x86_64-windows")
+        try tmp.write("gptk/lib/wine/x86_64-windows/d3d11.dll", "D3DMETAL-PE")
+        let gptkUnix = try tmp.makeDir("gptk/lib/wine/x86_64-unix")
+        try FileManager.default.createSymbolicLink(
+            atPath: gptkUnix.appendingPathComponent("d3d11.so").path,
+            withDestinationPath: "../../external/libd3dshared.dylib")
+        try tmp.write("gptk/lib/external/libd3dshared.dylib", "DYLIB")
         let lib = try tmp.makeDir("lib")
         try tmp.write("lib/steamapps/common/Half-Life 2/hl2.exe", "MZ")
         let prefix = try tmp.makeDir("bottle")
 
         var backend = BackendConfig()
-        backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
-        backend.gptkLibDirPath = gptkDir
+        backend.wineBinaryPath = wine
+        backend.gptkLibDirPath = gptkLibDir
 
         let app = SteamApp(appID: 220, name: "HL2", installDir: "Half-Life 2",
                            stateFlags: .fullyInstalled, sizeOnDisk: 1, libraryPath: lib)
@@ -134,14 +143,15 @@ struct LaunchPipelineTests {
             app: app, config: cfg, backend: backend, prefix: prefix, logURL: paths.log(forAppID: 220))
         #expect(pid == 4242)
 
-        // Graphics injected into the shared prefix.
-        let injected = PrefixLayout(prefix: prefix).system32.appendingPathComponent("D3DMetal.dll")
-        #expect(FileManager.default.fileExists(atPath: injected.path))
+        // GPTK overlaid into the wine RUNTIME (not the prefix): wine now carries GPTK's d3d11.dll.
+        let overlaid = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-windows/d3d11.dll")
+        #expect(try String(contentsOf: overlaid, encoding: .utf8) == "D3DMETAL-PE")
 
         // The detached spawn used the shared (bottle) prefix and the resolved exe.
         let spawn = try #require(fake.invocations.last { $0.detached })
         #expect(spawn.environment["WINEPREFIX"] == prefix.path)
-        #expect(spawn.executable.path == "/w/wine64")
+        #expect(spawn.executable.path == wine.path)
         #expect(spawn.arguments == [lib.appendingPathComponent("steamapps/common/Half-Life 2/hl2.exe").path])
     }
 
