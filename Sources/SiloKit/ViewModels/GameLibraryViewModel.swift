@@ -172,8 +172,7 @@ public final class GameLibraryViewModel {
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: backend,
                 prefix: paths.steamBottle, logURL: paths.log(forAppID: game.appID))
-            var stamped = config; stamped.lastPlayed = Date()
-            _ = try? await configStore.saveGame(stamped)
+            _ = try? await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
             runningPIDs[game.appID] = pid
             observeRun(appID: game.appID, pid: pid)
             setStatus("Launched \(game.name).")

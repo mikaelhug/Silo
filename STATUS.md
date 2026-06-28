@@ -3,6 +3,18 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M88 — Phase 1 architecture review (agentic, 8 verified fixes).** 4 cross-file lenses (boundaries,
+  abstraction value, dependency direction, concurrency-fit) → adversarial verify → 12 actionable, applied
+  the 8 safe ones: deleted the vestigial **`BackendResolver`** (it adopted an installed Whisky/CrossOver
+  runtime — contradicts #8) + its `detectedSource`; `ProcessRunning.observeExit` now required (dropped the
+  dead Noop default that could silently swallow game-exit); propagated the injected runner into `Updater`
+  (closed a test-seam leak); removed `AppEnvironment.logTarget` view-type leak; added
+  `ConfigStore.updateGame` field-scoped transaction (fixes a `lastPlayed` lost-update vs a concurrent
+  settings save); consolidated the backend-config fan-out (`applyBackend` + `applyDefaultWine/GPTK`);
+  extracted **`WineRuntimeLayout`** (one home for runtime FS-layout math, mirrors `PrefixLayout`). Stale
+  CLAUDE.md actor list fixed. **Deferred** (flagged, regression-risky on validated CEF code): unify the
+  Steam-client lifecycle (two VMs own it → possible double-spawn) and an `UpdaterViewModel` extraction.
+  112 tests / 25 suites green; clean build (no warnings).
 - **✅ M87 — removed the dead `.crossover`/DXVK backend (GPTK-only).** The CrossOver/DXVK fallback was
   advertised across config, UI, and policy but never wired (no DXVK download, no install path) — pure rot
   (decided with the user, 2026-06-28). Collapsed to a single graphics path: deleted `GraphicsBackend` +

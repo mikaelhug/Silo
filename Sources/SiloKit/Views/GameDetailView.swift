@@ -69,7 +69,8 @@ struct GameDetailView: View {
             }
             Button("Settings…", action: onSettings)
             Button("Log") {
-                openWindow(id: LogTarget.windowID, value: env.logTarget(for: game))
+                openWindow(id: LogTarget.windowID,
+                           value: LogTarget(title: "\(game.name) — Log", url: env.logURL(forAppID: game.appID)))
             }
             Spacer()
             Button(role: .destructive) { confirmingUninstall = true } label: {

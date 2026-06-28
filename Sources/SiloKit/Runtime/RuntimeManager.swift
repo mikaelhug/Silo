@@ -137,7 +137,7 @@ public actor RuntimeManager {
     /// Remove any bundled `libSDL2*` from a runtime (see `install`). Idempotent; no-op if absent.
     @discardableResult
     static func stripBundledSDL(in runtimeDir: URL, fileManager: FileManager = .default) -> Int {
-        let bundled = runtimeDir.appendingPathComponent("lib/silo-bundled", isDirectory: true)
+        let bundled = WineRuntimeLayout(root: runtimeDir).bundledDylibDir
         guard let entries = try? fileManager.contentsOfDirectory(at: bundled, includingPropertiesForKeys: nil)
         else { return 0 }
         var removed = 0

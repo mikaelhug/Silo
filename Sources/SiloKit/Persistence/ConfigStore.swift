@@ -46,6 +46,18 @@ public actor ConfigStore {
         return state
     }
 
+    /// Mutate a single game's config in place (load → mutate → upsert → save), so a field-scoped
+    /// update (e.g. `lastPlayed`) can't clobber concurrently-saved fields on the same game config.
+    @discardableResult
+    public func updateGame(appID: Int, _ mutate: @Sendable (inout GameConfig) -> Void) throws -> AppState {
+        var state = load()
+        var config = state.config(for: appID)
+        mutate(&config)
+        state.upsert(config)
+        try save(state)
+        return state
+    }
+
     /// Remove a single game's config (e.g. on uninstall), preserving everything else.
     @discardableResult
     public func removeGame(appID: Int) throws -> AppState {

@@ -87,8 +87,7 @@ public struct SteamBottle: Sendable {
     /// binary, AND a wrapper-VERSION change (e.g. new CEF flags) without corrupting the preserved original.
     /// No-op if the wine runtime doesn't ship the wrapper (older build) or Steam isn't installed yet.
     public func installWebHelperWrapper(wine: URL) throws {
-        let wrapper = wine.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe")
+        let wrapper = WineRuntimeLayout(wineBinary: wine).wrapperExe
         guard fileManager.fileExists(atPath: wrapper.path) else { return }
         // Wrap EVERY CEF dir's webhelper, not just one: a Steam update can add a new dir (e.g. cef.win64)
         // alongside the old (cef.win7x64) and switch to it, stranding a single-dir wrapper in the unused

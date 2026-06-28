@@ -17,7 +17,6 @@ struct ConfigStoreTests {
         defer { tmp.cleanup() }
         let state = await store.load()
         #expect(state.games.isEmpty)
-        #expect(state.backend.detectedSource == .none)
         #expect(!state.backend.isWineConfigured)
     }
 
@@ -26,7 +25,7 @@ struct ConfigStoreTests {
         let (store, paths, tmp) = try makeStore()
         defer { tmp.cleanup() }
 
-        var backend = BackendConfig(detectedSource: .whisky)
+        var backend = BackendConfig()
         backend.wineBinaryPath = URL(fileURLWithPath: "/runtimes/gptk/bin/wine64")
         try await store.saveBackend(backend)
 
@@ -39,7 +38,6 @@ struct ConfigStoreTests {
         #expect(FileManager.default.fileExists(atPath: paths.configFile.path))
 
         let reloaded = await store.load()
-        #expect(reloaded.backend.detectedSource == .whisky)
         #expect(reloaded.backend.wineBinaryPath?.path == "/runtimes/gptk/bin/wine64")
         let g = reloaded.config(for: 220)
         #expect(g.envFlags.syncMode == .msync && g.envFlags.metalHUD)
@@ -56,6 +54,22 @@ struct ConfigStoreTests {
         let state = await store.load()
         #expect(state.games.count == 1)
         #expect(state.config(for: 10).presence == .none)
+    }
+
+    @Test("updateGame field-scoped mutation preserves the rest of the config")
+    func updateGameNoClobber() async throws {
+        let (store, _, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        var game = GameConfig(appID: 440)
+        game.customArgs = ["-novid", "-high"]
+        try await store.saveGame(game)
+
+        let stamp = Date()
+        try await store.updateGame(appID: 440) { $0.lastPlayed = stamp }
+
+        let reloaded = await store.load().config(for: 440)
+        #expect(reloaded.customArgs == ["-novid", "-high"])
+        #expect(reloaded.lastPlayed == stamp)
     }
 
     @Test("config(for:) returns a fresh default for unknown apps")
