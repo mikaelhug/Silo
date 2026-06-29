@@ -19,7 +19,8 @@ struct GameLibraryViewModelTests {
         session.coldStartGraceSeconds = 0   // don't wait for the (fake) Steam to "boot" in tests
         let vm = GameLibraryViewModel(
             bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
-            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session)
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
+            provisioner: WinePrefixProvisioner(runner: fake))
         return (vm, fake, paths)
     }
 
@@ -108,7 +109,7 @@ struct GameLibraryViewModelTests {
         #expect(!vm.isRunning(game))
     }
 
-    @Test("manual games: add, play in the bottle (no Steam needed), then remove")
+    @Test("manual games: add provisions an isolated bottle, play runs in it, remove deletes it")
     func manualGameLifecycle() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, fake, paths) = make(tmp)
@@ -121,14 +122,17 @@ struct GameLibraryViewModelTests {
         let game = try #require(await vm.addManualGame(name: "Cool Game", executable: exe))
         #expect(vm.manualGames.map(\.name) == ["Cool Game"])
         #expect(vm.loadState == .loaded)                 // a manual game makes the library non-empty
+        // Adding provisioned the game's OWN bottle (wineboot --init), not the shared Steam bottle.
+        #expect(fake.invocations.contains { $0.arguments == ["wineboot", "--init"] })
 
         await vm.playManual(game)
         #expect(vm.isRunning(game))
         let pid = try #require(vm.manualRunningPIDs[game.id])
-        // Spawned detached into the SHARED bottle prefix, with the absolute exe — and NO Steam cold-start
-        // (a manual game never calls session.ensureRunning).
+        let ownBottle = paths.manualBottle(game.id).path
+        #expect(ownBottle != paths.steamBottle.path)     // isolated, NOT the shared bottle
+        // Spawned detached into its OWN bottle prefix, with the absolute exe — and NO Steam cold-start.
         #expect(fake.invocations.contains {
-            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
+            $0.detached && $0.environment["WINEPREFIX"] == ownBottle
                 && $0.arguments.first == exe.path
         })
         #expect(!fake.invocations.contains { $0.arguments.first?.hasSuffix("steam.exe") ?? false })
@@ -140,6 +144,25 @@ struct GameLibraryViewModelTests {
         await vm.removeManual(game)
         #expect(vm.manualGames.isEmpty)
         #expect(vm.loadState == .empty)                  // empty again once both lists are empty
+    }
+
+    @Test("discardManualBottle deletes a provisioned-but-unsaved bottle (Add sheet cancel)")
+    func discardDraftBottle() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        let id = UUID()
+        // Simulate wineboot creating the bottle on disk.
+        fake.onRun = { inv in
+            guard inv.arguments == ["wineboot", "--init"] else { return }
+            let layout = PrefixLayout(prefix: paths.manualBottle(id))
+            try? FileManager.default.createDirectory(at: layout.driveC, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: layout.systemReg.path, contents: Data())
+        }
+        #expect(await vm.ensureManualBottle(id))
+        #expect(FileManager.default.fileExists(atPath: paths.manualBottle(id).path))
+
+        await vm.discardManualBottle(id)
+        #expect(!FileManager.default.fileExists(atPath: paths.manualBottle(id).path))
     }
 
     @Test("addManualGame defaults the name to the exe filename and persists across a reload")
@@ -187,7 +210,8 @@ struct GameLibraryViewModelTests {
         session.updateWine(backend.wineBinaryPath); session.coldStartGraceSeconds = 0
         let library = GameLibraryViewModel(
             bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
-            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session)
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
+            provisioner: WinePrefixProvisioner(runner: fake))
         let settings = SteamBottleViewModel(bottle: bottle, session: session)
         try installSteam(paths)
         let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")

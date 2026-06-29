@@ -34,6 +34,8 @@ public final class GameLibraryViewModel {
     private var manualObservers: [UUID: any ProcessObservation] = [:]
     /// The single owner of the live bottle Steam client (shared with the settings pane).
     private let session: SteamClientSession
+    /// Boots the per-game isolated bottles that manual (non-Steam) games run in.
+    private let provisioner: WinePrefixProvisioner
 
     public init(
         bottle: SteamBottle,
@@ -42,7 +44,8 @@ public final class GameLibraryViewModel {
         configStore: ConfigStore,
         paths: AppPaths,
         backend: BackendConfig,
-        session: SteamClientSession
+        session: SteamClientSession,
+        provisioner: WinePrefixProvisioner
     ) {
         self.bottle = bottle
         self.discovery = discovery
@@ -51,6 +54,7 @@ public final class GameLibraryViewModel {
         self.paths = paths
         self.backend = backend
         self.session = session
+        self.provisioner = provisioner
     }
 
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
@@ -176,25 +180,46 @@ public final class GameLibraryViewModel {
         await orchestrator.runWineTool("winecfg", prefix: paths.steamBottle, backend: backend)
     }
 
-    // MARK: - Manual (non-Steam) games
+    // MARK: - Manual (non-Steam) games — each in its OWN isolated bottle (paths.manualBottle(id))
 
-    /// Run an installer `.exe` in the bottle (detached) so it installs into the bottle's `drive_c`. The
-    /// user then picks the installed game `.exe` with `addManualGame`.
-    public func runInstaller(_ installer: URL) async {
-        guard backend.isWineConfigured else { setStatus("Set up Wine + the Steam bottle first."); return }
+    /// Boot a manual game's private bottle (idempotent — fast once booted). Returns whether it's ready.
+    @discardableResult
+    public func ensureManualBottle(_ id: UUID) async -> Bool {
+        guard let wine = backend.wineBinaryPath else { setStatus("Set up Wine first."); return false }
+        do {
+            try await provisioner.provision(prefix: paths.manualBottle(id), wine: wine)
+            return true
+        } catch {
+            setStatus("Couldn't set up the game's bottle: \((error as NSError).localizedDescription)")
+            return false
+        }
+    }
+
+    /// Delete a draft bottle that was provisioned but never added to the library (Add sheet cancel).
+    public func discardManualBottle(_ id: UUID) async {
+        await deleteBottle(id)
+    }
+
+    /// Run an installer `.exe` in a specific game's bottle (detached) so it installs into THAT bottle's
+    /// `drive_c`. The bottle is booted first if needed. The user then picks the installed game `.exe`.
+    public func runInstaller(_ installer: URL, forBottle id: UUID) async {
+        guard await ensureManualBottle(id) else { return }
         do {
             _ = try await orchestrator.runInstaller(
-                exe: installer, backend: backend, prefix: paths.steamBottle, logURL: paths.steamBottleLog)
+                exe: installer, backend: backend, prefix: paths.manualBottle(id), logURL: paths.manualLog(id))
             setStatus("Running installer… finish it, then choose the installed .exe.")
         } catch { setStatus("Installer failed: \((error as NSError).localizedDescription)") }
     }
 
-    /// Add a non-Steam game pointing at an absolute `.exe`. Name defaults to the exe's filename.
+    /// Add a non-Steam game pointing at an absolute `.exe`, provisioning its private bottle. Pass the same
+    /// `id` used for any pre-Add installer run so the game adopts that already-booted bottle. Name defaults
+    /// to the exe's filename.
     @discardableResult
-    public func addManualGame(name: String, executable: URL) async -> ManualGame? {
+    public func addManualGame(id: UUID = UUID(), name: String, executable: URL) async -> ManualGame? {
+        guard await ensureManualBottle(id) else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmed.isEmpty ? executable.deletingPathExtension().lastPathComponent : trimmed
-        let game = ManualGame(name: finalName, executablePath: executable)
+        let game = ManualGame(id: id, name: finalName, executablePath: executable)
         do {
             _ = try await configStore.saveManualGame(game)
             manualGames = sortedManual(manualGames + [game])
@@ -215,23 +240,27 @@ public final class GameLibraryViewModel {
         } catch { setStatus("Couldn't save: \((error as NSError).localizedDescription)") }
     }
 
-    /// Remove a manual game from the library (doesn't delete the on-disk files). Refuses while running.
+    /// Remove a manual game from the library AND delete its isolated bottle. A portable game's original
+    /// files on disk (outside the bottle) are left untouched. Refuses while running.
     public func removeManual(_ game: ManualGame) async {
         guard manualRunningPIDs[game.id] == nil else { return }
         _ = try? await configStore.removeManualGame(id: game.id)
         manualGames.removeAll { $0.id == game.id }
+        await deleteBottle(game.id)
         if games.isEmpty && manualGames.isEmpty { loadState = .empty }
         setStatus("Removed \(game.name).")
     }
 
-    /// Launch a manual game in the bottle under GPTK (no Steam needed).
+    /// Launch a manual game in its OWN bottle under GPTK (no Steam needed). Boots the bottle first if this
+    /// is its first run.
     public func playManual(_ game: ManualGame) async {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id),
               manualRunningPIDs[game.id] == nil else { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
+        guard await ensureManualBottle(game.id) else { return }
         do {
             let pid = try await orchestrator.launchManualGame(
-                game, backend: backend, prefix: paths.steamBottle, logURL: paths.manualLog(game.id))
+                game, backend: backend, prefix: paths.manualBottle(game.id), logURL: paths.manualLog(game.id))
             _ = try? await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
             manualRunningPIDs[game.id] = pid
             observeManualRun(id: game.id, pid: pid)
@@ -241,13 +270,26 @@ public final class GameLibraryViewModel {
         }
     }
 
-    /// Stop a running manual game (taskkill its exe; the shared bottle/Steam stays alive).
+    /// Stop a running manual game (taskkill its exe in its own bottle).
     public func stopManual(_ game: ManualGame) async {
         guard let pid = manualRunningPIDs[game.id] else { return }
         await orchestrator.stopGame(
             pid: pid, exeName: game.executablePath.lastPathComponent,
-            prefix: paths.steamBottle, backend: backend)
+            prefix: paths.manualBottle(game.id), backend: backend)
         clearManualRun(game.id)
+    }
+
+    /// Open `winecfg` for a manual game's OWN bottle (Windows version, libraries — isolated per game).
+    public func openManualWinecfg(_ game: ManualGame) async {
+        guard backend.isWineConfigured else { setStatus("No Wine configured."); return }
+        guard await ensureManualBottle(game.id) else { return }
+        await orchestrator.runWineTool("winecfg", prefix: paths.manualBottle(game.id), backend: backend)
+    }
+
+    /// Remove a manual game's bottle directory off the main actor (it can be large once a game is installed).
+    private func deleteBottle(_ id: UUID) async {
+        let url = paths.manualBottle(id)
+        await Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: url) }.value
     }
 
     private func observeManualRun(id: UUID, pid: Int32) {
