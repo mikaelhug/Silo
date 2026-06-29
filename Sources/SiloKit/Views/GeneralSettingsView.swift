@@ -5,8 +5,8 @@ struct GeneralSettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
 
-    /// Local "a check is running" flag, kept up for a short minimum so the spinner is always perceptible
-    /// (the GitHub call alone can return faster than the eye registers). Drives the row animation.
+    /// Local "an update check is running" flag — drives the row's spinner/animation for the duration of
+    /// the GitHub call.
     @State private var isChecking = false
 
     var body: some View {

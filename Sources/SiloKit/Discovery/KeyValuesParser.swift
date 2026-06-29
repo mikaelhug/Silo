@@ -13,7 +13,13 @@ public struct KeyValuesParser: Sendable {
         case unexpectedEOF
         case missingValue(key: String)
         case unexpectedCloseBrace
+        case tooDeep
     }
+
+    /// Bounds the recursive descent so a pathologically nested file (thousands of `{`) throws instead of
+    /// overflowing the stack. Real Steam manifests nest only a handful of levels; 100 is far beyond any
+    /// legitimate input.
+    private static let maxDepth = 100
 
     /// Convenience: tokenize then parse.
     public func parse(text: String) throws -> KVNode {
@@ -23,15 +29,16 @@ public struct KeyValuesParser: Sendable {
 
     public func parse(_ tokens: [KVToken]) throws -> KVNode {
         var index = 0
-        let pairs = try parseObjectBody(tokens, &index, topLevel: true)
+        let pairs = try parseObjectBody(tokens, &index, topLevel: true, depth: 0)
         return .object(pairs)
     }
 
     /// Parses pairs until a `}` (nested) or end of input (top level).
     /// On return for a nested object, `index` points AT the closing `}` (caller consumes it).
     private func parseObjectBody(
-        _ tokens: [KVToken], _ index: inout Int, topLevel: Bool
+        _ tokens: [KVToken], _ index: inout Int, topLevel: Bool, depth: Int
     ) throws -> [KVPair] {
+        if depth > Self.maxDepth { throw ParseError.tooDeep }
         var pairs: [KVPair] = []
 
         while index < tokens.count {
@@ -50,7 +57,7 @@ public struct KeyValuesParser: Sendable {
                 switch tokens[index] {
                 case .openBrace:
                     index += 1   // consume `{`
-                    let body = try parseObjectBody(tokens, &index, topLevel: false)
+                    let body = try parseObjectBody(tokens, &index, topLevel: false, depth: depth + 1)
                     guard index < tokens.count, tokens[index] == .closeBrace else {
                         throw ParseError.unexpectedEOF
                     }

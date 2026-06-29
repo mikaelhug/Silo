@@ -33,11 +33,6 @@ public struct SteamBottle: Sendable {
     /// Steam is installed in the bottle once `steam.exe` exists.
     public var isSteamInstalled: Bool { fileManager.fileExists(atPath: paths.steamBottleExe.path) }
 
-    /// The bottle prefix is booted once it has a `system.reg` + `drive_c`.
-    public var isProvisioned: Bool {
-        WinePrefixProvisioner(runner: runner).isProvisioned(paths.steamBottle)
-    }
-
     // MARK: - Provision + install
 
     /// Boot the bottle prefix (idempotent). Delegates to the shared `WinePrefixProvisioner`, re-mapping its
