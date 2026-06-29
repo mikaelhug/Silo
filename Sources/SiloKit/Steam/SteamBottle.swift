@@ -32,24 +32,21 @@ public struct SteamBottle: Sendable {
 
     /// The bottle prefix is booted once it has a `system.reg` + `drive_c`.
     public var isProvisioned: Bool {
-        let layout = PrefixLayout(prefix: paths.steamBottle)
-        return fileManager.fileExists(atPath: layout.systemReg.path)
-            && fileManager.fileExists(atPath: layout.driveC.path)
+        WinePrefixProvisioner(runner: runner).isProvisioned(paths.steamBottle)
     }
 
     // MARK: - Provision + install
 
-    /// Boot the bottle prefix (idempotent).
+    /// Boot the bottle prefix (idempotent). Delegates to the shared `WinePrefixProvisioner`, re-mapping its
+    /// errors to `BottleError` so callers keep one error domain.
     public func provision(wine: URL?) async throws {
-        guard let wine else { throw BottleError.wineNotConfigured }
-        if isProvisioned { return }
-        try fileManager.createDirectory(at: paths.steamBottle, withIntermediateDirectories: true)
-        var environment = Silo.wineEnvironment(prefix: paths.steamBottle, wine: wine)
-        environment["WINEDLLOVERRIDES"] = Silo.winePrefixInitOverrides
-        let result = try await runner.run(
-            executable: wine, arguments: ["wineboot", "--init"],
-            environment: environment, currentDirectory: nil)
-        guard result.succeeded else { throw BottleError.winebootFailed(result.exitCode) }
+        do {
+            try await WinePrefixProvisioner(runner: runner).provision(prefix: paths.steamBottle, wine: wine)
+        } catch WinePrefixProvisioner.ProvisionError.wineNotConfigured {
+            throw BottleError.wineNotConfigured
+        } catch WinePrefixProvisioner.ProvisionError.winebootFailed(let code) {
+            throw BottleError.winebootFailed(code)
+        }
     }
 
     /// Provision the bottle and run a silent Windows Steam install into it (idempotent — no-op if Steam

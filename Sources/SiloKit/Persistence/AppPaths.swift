@@ -26,6 +26,14 @@ public struct AppPaths: Sendable, Hashable {
     /// The single shared Wine prefix that runs the Windows Steam client and the games co-resident with it.
     public var steamBottle: URL { supportDir.appendingPathComponent("SteamBottle", isDirectory: true) }
 
+    /// Parent of the per-game isolated bottles used by manual (non-Steam) games.
+    public var manualBottlesDir: URL { supportDir.appendingPathComponent("ManualBottles", isDirectory: true) }
+
+    /// A manual game's own isolated Wine prefix (its private registry + `drive_c`), keyed by its id.
+    public func manualBottle(_ id: UUID) -> URL {
+        manualBottlesDir.appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
     /// The Windows Steam install inside the bottle (`drive_c/Program Files (x86)/Steam`).
     public var steamBottleClientDir: URL {
         steamBottle
