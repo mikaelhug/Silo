@@ -104,8 +104,9 @@ struct LibraryGridView: View {
     }
 }
 
-/// Add a **non-Steam** game: optionally run its installer in the bottle, then point at the game's `.exe`.
-/// (Steam games come in through "Open Steam" instead — this is for `.exe` games you have on disk.)
+/// Add a **non-Steam** game: point at the game's `.exe` (a portable/extracted game needs only this), or
+/// first run a setup `.exe` in the bottle for games that ship an installer. (Steam games come in through
+/// "Open Steam" instead — this is for `.exe` games you have on disk.)
 struct AddGameSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
@@ -118,30 +119,11 @@ struct AddGameSheet: View {
             Form {
                 Section {
                     Button {
-                        if let installer = chooseExecutable(
-                            message: "Choose an installer (setup .exe) to run inside the Steam bottle.") {
-                            ranInstaller = true
-                            Task { await env.gameLibrary.runInstaller(installer) }
-                        }
-                    } label: {
-                        Label("Run Installer…", systemImage: "shippingbox")
-                    }
-                    if ranInstaller {
-                        Label("Installer launched — finish its setup window, then choose the game's .exe below.",
-                              systemImage: "arrow.down.forward.circle")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("1 · Installer (optional)")
-                } footer: {
-                    Text("If the game ships an installer, run it here — it installs into the bottle's Windows "
-                         + "drive. Skip this for a portable game you can point at directly.")
-                }
-
-                Section {
-                    Button {
+                        // After running an installer the game lands in the bottle's drive_c; otherwise
+                        // (a portable game) start at the last-used location, near the extracted folder.
                         if let exe = chooseExecutable(
-                            message: "Choose the game's .exe.", directory: bottleDriveC) {
+                            message: "Choose the game's .exe.",
+                            directory: ranInstaller ? bottleDriveC : nil) {
                             chosenExe = exe
                             if name.trimmingCharacters(in: .whitespaces).isEmpty {
                                 name = exe.deletingPathExtension().lastPathComponent
@@ -158,10 +140,32 @@ struct AddGameSheet: View {
                     }
                     TextField("Name", text: $name)
                 } header: {
-                    Text("2 · Game")
+                    Text("Game")
                 } footer: {
-                    Text("Point at the game's main executable — often under the bottle's "
-                         + "drive_c/Program Files after installing.")
+                    Text("Point at the game's main .exe. For a portable game (a .zip you extracted), this is "
+                         + "all you need — just keep the folder somewhere it won't move.")
+                }
+
+                Section {
+                    Button {
+                        if let installer = chooseExecutable(
+                            message: "Choose an installer (setup .exe) to run inside the Steam bottle.") {
+                            ranInstaller = true
+                            Task { await env.gameLibrary.runInstaller(installer) }
+                        }
+                    } label: {
+                        Label("Run Installer…", systemImage: "shippingbox")
+                    }
+                    if ranInstaller {
+                        Label("Installer launched — finish its setup window, then choose the game's .exe above.",
+                              systemImage: "arrow.up.forward.circle")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Installer (only if needed)")
+                } footer: {
+                    Text("Skip this for a portable game. Use it only if your game has a separate setup .exe — "
+                         + "it runs in the bottle and installs into its Windows drive, then choose that .exe above.")
                 }
             }
             .formStyle(.grouped)
