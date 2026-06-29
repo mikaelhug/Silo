@@ -100,6 +100,51 @@ struct BottlesLocationTests {
         }
         #expect(FileManager.default.fileExists(atPath: old.appendingPathComponent("SteamBottle/x").path)) // intact
     }
+
+    @Test("relocator rolls back a partial cross-volume copy on failure, leaving sources intact")
+    func relocatorRollsBackPartialCopy() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let old = try tmp.makeDir("old")
+        let new = tmp.url.appendingPathComponent("new")
+        try tmp.write("old/SteamBottle/drive_c/a.txt", "data")    // first name: copies fine
+        try tmp.write("old/ManualBottles/b.bin", "data2")         // second name: we make it unreadable
+        // Make ManualBottles unreadable so its copy throws mid-sequence (after SteamBottle already copied).
+        let unreadable = old.appendingPathComponent("ManualBottles")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: unreadable.path) }
+
+        let thrown = await #expect(throws: BottleRelocator.RelocateError.self) {
+            try await BottleRelocator().move(
+                ["SteamBottle", "ManualBottles"], from: old, to: new, forceCopy: true)
+        }
+        guard case .moveFailed = thrown else {
+            Issue.record("expected .moveFailed, got \(String(describing: thrown))"); return
+        }
+        // Sources untouched — the move deletes originals only after EVERY dir copies (the safety promise).
+        #expect(FileManager.default.fileExists(atPath: old.appendingPathComponent("SteamBottle/drive_c/a.txt").path))
+        #expect(FileManager.default.fileExists(atPath: unreadable.path))
+        // The partial destination was rolled back — neither bottle remains at the new root.
+        #expect(!FileManager.default.fileExists(atPath: new.appendingPathComponent("SteamBottle").path))
+        #expect(!FileManager.default.fileExists(atPath: new.appendingPathComponent("ManualBottles").path))
+    }
+
+    @Test("relocator refuses a non-writable destination, leaving the source intact")
+    func relocatorRefusesUnwritableDestination() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let old = try tmp.makeDir("old")
+        try tmp.write("old/SteamBottle/x", "1")
+        let new = try tmp.makeDir("readonly")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: new.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: new.path) }
+
+        let thrown = await #expect(throws: BottleRelocator.RelocateError.self) {
+            try await BottleRelocator().move(["SteamBottle"], from: old, to: new)
+        }
+        guard case .destinationNotWritable = thrown else {
+            Issue.record("expected .destinationNotWritable, got \(String(describing: thrown))"); return
+        }
+        #expect(FileManager.default.fileExists(atPath: old.appendingPathComponent("SteamBottle/x").path)) // intact
+    }
 }
 
 /// Lock-guarded Double for capturing the latest value from a `@Sendable` progress callback in tests.

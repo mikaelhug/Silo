@@ -88,6 +88,31 @@ struct MakePlanTests {
         #expect(plan.environment["WINEDEBUG"] == "+seh,+tid")
     }
 
+    @Test("GPTK appends its d3d overrides to a user's pre-existing WINEDLLOVERRIDES (semicolon-merged, not clobbered)")
+    func mergesPreExistingWineDllOverrides() throws {
+        var cfg = GameConfig(appID: 220)
+        // Power user forces their own DLL override via the extra escape hatch, WITH GPTK configured.
+        cfg.envFlags = EnvFlags(extra: ["WINEDLLOVERRIDES": "winemenubuilder.exe=d"])
+        var b = backend()
+        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
+        // GPTK's d3d overrides are APPENDED (semicolon-joined), not overwriting the user's.
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "winemenubuilder.exe=d;d3d10,d3d11,d3d12,dxgi=b")
+    }
+
+    @Test("Perf env-flags (MetalHUD / MetalFX / DXR / AVX) propagate into the launch plan's environment")
+    func perfFlagsPropagate() throws {
+        var cfg = GameConfig(appID: 220)
+        cfg.envFlags = EnvFlags(advertiseAVX: true, metalHUD: true, metalFX: true, dxr: true)
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+        #expect(plan.environment["MTL_HUD_ENABLED"] == "1")
+        #expect(plan.environment["D3DM_ENABLE_METALFX"] == "1")
+        #expect(plan.environment["D3DM_SUPPORT_DXR"] == "1")
+        #expect(plan.environment["ROSETTA_ADVERTISE_AVX"] == "1")
+    }
+
     @Test("Throws wineNotConfigured when no wine binary is available")
     func notConfigured() {
         let cfg = GameConfig(appID: 220)

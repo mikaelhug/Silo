@@ -134,7 +134,13 @@ public final class GameLibraryViewModel {
         busyAppIDs.insert(game.appID); defer { busyAppIDs.remove(game.appID) }
         do {
             // Steamworks IPC is prefix-scoped: the client must be up + logged in in this same prefix first.
-            await session.ensureRunning()
+            // If it can't start, surface why rather than launching the game against a dead Steam (which would
+            // just fail SteamAPI_Init with no explanation).
+            guard await session.ensureRunning() else {
+                let why = session.launchError.map { ": \($0)" } ?? ""
+                setStatus("\(game.name) needs the Steam client, but it couldn't start\(why).")
+                return
+            }
             let config = await configStore.load().config(for: game.appID)
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: backend,
