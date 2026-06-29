@@ -3,6 +3,16 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M111 — bottle move now has a progress bar + refuses exFAT/FAT.** Building on M109–M110:
+  - **Progress bar.** `BottleRelocator` now does a byte-counting recursive copy for cross-volume moves
+    (same-volume stays an instant rename) — preserves symlinks (a Wine prefix is full of them), sums total
+    bytes up front, and reports a throttled `0...1` fraction. `AppEnvironment.bottlesProgress` drives a
+    determinate `ProgressView` with a % label in Settings → Bottles (indeterminate spinner until the first
+    fraction). Rollback unchanged (sources removed only after every dir copies).
+  - **exFAT guard.** `Filesystem.isFATFamily` (via `statfs` `f_fstypename`) — `moveBottles` refuses an
+    exFAT/`msdos`/`vfat` destination ("can't hold a Wine bottle, no symlink support — reformat as APFS / Mac
+    OS Extended") rather than silently creating a broken prefix. Injectable check for tests.
+  - 195 tests / 30 suites green; clean build (no warnings); app reassembled.
 - **✅ M109–M110 — bottles are relocatable (move to another disk / external drive).** App state
   (config/logs/runtimes) stays under Application Support, but the **bottles** (Steam + every manual game's)
   now live under a configurable `AppPaths.bottlesRoot` (default = supportDir).

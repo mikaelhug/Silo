@@ -114,6 +114,10 @@ public final class AppEnvironment {
 
     public private(set) var bottlesBusy = false
     public private(set) var bottlesMessage: String?
+    /// Copy progress during a cross-volume move (`0...1`), or nil when indeterminate / not moving.
+    public private(set) var bottlesProgress: Double?
+    /// Rejects a destination whose filesystem can't hold a Wine bottle (exFAT/FAT). Injectable for tests.
+    var bottlesFilesystemRejects: @Sendable (URL) -> Bool = { Filesystem.isFATFamily($0) }
 
     /// True while any game OR the bottle Steam client is live — relocation is refused then (we'd be moving
     /// prefixes out from under running wineservers).
@@ -123,8 +127,14 @@ public final class AppEnvironment {
     }
 
     /// Move all bottles into a `Silo Bottles` folder inside `chosen` (a directory the user picked — e.g. an
-    /// external drive), so we never scatter prefixes directly into a shared location.
+    /// external drive), so we never scatter prefixes directly into a shared location. Refuses an exFAT/FAT
+    /// destination — a Wine prefix needs POSIX symlinks.
     public func moveBottles(to chosen: URL) async {
+        guard !bottlesFilesystemRejects(chosen) else {
+            bottlesMessage = "That location is exFAT/FAT, which can't hold a Wine bottle (no symlink "
+                + "support). Reformat the drive as APFS or Mac OS Extended, then try again."
+            return
+        }
         await relocateBottles(to: chosen.appendingPathComponent("Silo Bottles", isDirectory: true))
     }
 
@@ -148,14 +158,18 @@ public final class AppEnvironment {
             return
         }
         bottlesBusy = true
+        bottlesProgress = 0
         bottlesMessage = "Moving bottles… this can take a while for installed games."
-        defer { bottlesBusy = false }
+        defer { bottlesBusy = false; bottlesProgress = nil }
 
         let names = AppPaths.bottleDirNames
         do {
             // Off the main actor — a cross-volume move is a full copy of (potentially huge) game data.
-            try await Task.detached(priority: .userInitiated) {
-                try await BottleRelocator().move(names, from: old, to: newRoot)
+            // The progress callback hops back to the main actor to update the determinate bar.
+            try await Task.detached(priority: .userInitiated) { [weak self] in
+                try await BottleRelocator().move(names, from: old, to: newRoot) { fraction in
+                    Task { @MainActor in self?.bottlesProgress = fraction }
+                }
             }.value
         } catch {
             bottlesMessage = "Couldn't move bottles: \((error as NSError).localizedDescription)"

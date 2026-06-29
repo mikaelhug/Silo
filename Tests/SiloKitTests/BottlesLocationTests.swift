@@ -57,6 +57,32 @@ struct BottlesLocationTests {
         #expect(!FileManager.default.fileExists(atPath: new.appendingPathComponent("ManualBottles").path)) // skipped
     }
 
+    @Test("relocator cross-volume copy preserves files + symlinks and reports progress to 100%")
+    func relocatorCopyProgress() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let old = try tmp.makeDir("old")
+        let new = tmp.url.appendingPathComponent("new")
+        try tmp.write("old/SteamBottle/drive_c/a.txt", "hello")
+        try tmp.write("old/SteamBottle/drive_c/sub/b.bin", "world!!")
+        // A symlink inside the bottle (Wine prefixes are full of these — must survive, not be dereferenced).
+        let dosdevices = try tmp.makeDir("old/SteamBottle/dosdevices")
+        try FileManager.default.createSymbolicLink(
+            atPath: dosdevices.appendingPathComponent("z:").path, withDestinationPath: "/")
+
+        let last = LockedDouble()
+        // forceCopy → exercise the cross-volume copy path even though tmp is one volume.
+        try await BottleRelocator().move(["SteamBottle"], from: old, to: new, forceCopy: true,
+                                         onProgress: { last.set($0) })
+
+        #expect(try String(contentsOf: new.appendingPathComponent("SteamBottle/drive_c/a.txt"), encoding: .utf8) == "hello")
+        #expect(try String(contentsOf: new.appendingPathComponent("SteamBottle/drive_c/sub/b.bin"), encoding: .utf8) == "world!!")
+        let z = new.appendingPathComponent("SteamBottle/dosdevices/z:")
+        #expect((try z.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true)   // link preserved
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: z.path) == "/")
+        #expect(!FileManager.default.fileExists(atPath: old.appendingPathComponent("SteamBottle").path)) // source removed
+        #expect(last.value == 1.0)                                                              // reached 100%
+    }
+
     @Test("relocator refuses the same location and an occupied destination (source untouched)")
     func relocatorRefuses() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -74,4 +100,12 @@ struct BottlesLocationTests {
         }
         #expect(FileManager.default.fileExists(atPath: old.appendingPathComponent("SteamBottle/x").path)) // intact
     }
+}
+
+/// Lock-guarded Double for capturing the latest value from a `@Sendable` progress callback in tests.
+private final class LockedDouble: @unchecked Sendable {   // safe: every access is lock-guarded
+    private let lock = NSLock()
+    private var stored = 0.0
+    var value: Double { lock.withLock { stored } }
+    func set(_ v: Double) { lock.withLock { stored = v } }
 }

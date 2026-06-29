@@ -110,6 +110,24 @@ struct AppEnvironmentUpdateTests {
         #expect(!env.bottlesBusy)
     }
 
+    @Test("moveBottles refuses an exFAT/FAT destination (no move, no persist)")
+    func moveBottlesRefusesFAT() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        env.bottlesFilesystemRejects = { _ in true }   // simulate the destination being exFAT
+        try FileManager.default.createDirectory(at: paths.steamBottle, withIntermediateDirectories: true)
+        let dest = try tmp.makeDir("FATDrive")
+
+        await env.moveBottles(to: dest)
+
+        #expect(env.bottlesMessage?.lowercased().contains("exfat") == true)
+        #expect(!FileManager.default.fileExists(           // not moved
+            atPath: dest.appendingPathComponent("Silo Bottles/SteamBottle").path))
+        #expect(BottlesLocation.read(supportDir: paths.supportDir) == nil)   // not persisted
+        #expect(!env.bottlesBusy)
+    }
+
     @Test("resetBottlesLocation moves bottles back to the default and clears the override")
     func resetBottles() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

@@ -32,9 +32,17 @@ struct GeneralSettingsView: View {
                     .font(.caption).foregroundStyle(.orange)
             }
             if env.bottlesBusy {
-                HStack(spacing: 10) {
-                    ProgressView().controlSize(.small)
-                    Text(env.bottlesMessage ?? "Moving bottles…").foregroundStyle(.secondary)
+                if let fraction = env.bottlesProgress, fraction > 0 {
+                    ProgressView(value: fraction) {
+                        Text("Moving bottles…")
+                    } currentValueLabel: {
+                        Text("\(Int(fraction * 100))%").foregroundStyle(.secondary)
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        ProgressView().controlSize(.small)
+                        Text(env.bottlesMessage ?? "Moving bottles…").foregroundStyle(.secondary)
+                    }
                 }
             } else {
                 HStack {
