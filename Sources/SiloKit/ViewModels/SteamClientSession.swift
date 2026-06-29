@@ -30,6 +30,11 @@ public final class SteamClientSession {
         self.orchestrator = orchestrator
     }
 
+    /// Defensive teardown: the live VMs are process-lifetime singletons, so this normally never fires, but
+    /// it ensures the exit observation + any in-flight launch don't outlive the session if that ever changes.
+    /// `isolated` so it can touch the `@MainActor` state it's cleaning up.
+    isolated deinit { steamObserver?.cancel(); steamLaunch?.cancel() }
+
     public func updateWine(_ url: URL?) { wineBinary = url }
 
     /// Whether the bottle's Steam client is live right now (its tracked PID is still alive).
@@ -49,6 +54,9 @@ public final class SteamClientSession {
         let task = Task { @MainActor in await startSteam() }
         steamLaunch = task
         await task.value
+        // Safe to clear unconditionally: while `steamLaunch` is non-nil every other caller joins it via the
+        // `if let inFlight` branch above instead of starting a new launch, so no newer launch can have
+        // replaced this slot by the time we resume here.
         steamLaunch = nil
         return steamPID != nil
     }
@@ -86,6 +94,10 @@ public final class SteamClientSession {
             gate.watch = FileWatch(url: SteamReadiness.userReg(prefix: prefix)) {
                 if SteamReadiness.isReady(prefix: prefix) { Task { @MainActor in gate.finish() } }
             }
+            // Arm-then-check: kqueue is edge-triggered (it fires only on writes AFTER the watch is armed),
+            // so a pid written in the window between the pre-check above and arming here would be missed
+            // and stall the launch on the failsafe. Re-checking once after arming closes that gap.
+            if SteamReadiness.isReady(prefix: prefix) { gate.finish(); return }
             // Failsafe only — guards against a never-arriving signal (or Steam dying mid-boot).
             gate.failsafe = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(timeout))
