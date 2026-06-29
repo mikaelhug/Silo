@@ -6,6 +6,8 @@ struct GameSettingsSheet: View {
     let game: SteamApp
     @State private var vm: GameSettingsViewModel?
     @State private var executables: [String] = []
+    /// Edited as free text (seeded when the VM loads); parsed into `envFlags.extra` on Save.
+    @State private var envText = ""
 
     var body: some View {
         NavigationStack {
@@ -23,14 +25,18 @@ struct GameSettingsSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        if let vm { Task { await vm.save(); dismiss() } }
+                        guard let vm else { return }
+                        vm.config.envFlags.extraEnvironmentString = envText
+                        Task { await vm.save(); dismiss() }
                     }
                 }
             }
         }
         .frame(width: 480, height: 540)
         .task {
-            vm = await env.makeGameSettings(appID: game.appID)
+            let model = await env.makeGameSettings(appID: game.appID)
+            envText = model.config.envFlags.extraEnvironmentString
+            vm = model
             executables = ExecutableResolver.allExecutables(in: game.installURL)
         }
     }
@@ -65,6 +71,20 @@ struct GameSettingsSheet: View {
                 Text("Extra arguments passed to the game executable (space-separated). Electron/Chromium "
                      + "games that fail with “Could not create D3D11 device” / “No available renderers”: "
                      + "try --use-angle=gl, then --disable-gpu --in-process-gpu.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
+                TextField("KEY=VALUE (one per line)", text: $envText, axis: .vertical)
+                    .lineLimit(2...6)
+                    .autocorrectionDisabled()
+                    .font(.system(.body, design: .monospaced))
+            } header: {
+                Text("Environment variables")
+            } footer: {
+                Text("Per-game env vars. For an ANGLE/Electron game that fails with shader / D3D11 errors, "
+                     + "try ANGLE_DEFAULT_PLATFORM=opengl (or swiftshader) to steer it off the unsupported "
+                     + "D3D11 backend.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
