@@ -324,4 +324,31 @@ struct GameLibraryViewModelTests {
             $0.detached && ($0.arguments.first?.hasSuffix("Nope.exe") ?? false)
         })
     }
+
+    @Test("play aborts with a status (and never spawns the game) when the Steam client can't start")
+    func playAbortsWhenSteamCantStart() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")   // backend configured → play's guard passes
+        let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        session.readinessTimeout = 0
+        // Deliberately leave the session WITHOUT a wine binary → bottle.launchSteam throws → ensureRunning false.
+        let vm = GameLibraryViewModel(
+            bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
+            provisioner: WinePrefixProvisioner(runner: fake))
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+
+        await vm.play(game)
+
+        #expect(!vm.isRunning(game))
+        #expect(vm.runningPIDs[220] == nil)
+        #expect(vm.statusMessage?.contains("Steam") == true)         // surfaced WHY, not a misleading "Launched"
+        #expect(!fake.invocations.contains { $0.detached })          // nothing spawned — not even the game
+    }
 }
