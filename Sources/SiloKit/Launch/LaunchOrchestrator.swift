@@ -26,8 +26,9 @@ public struct LaunchOrchestrator: Sendable {
 
     // MARK: - Pure plan builder
 
+    /// Build the launch plan for ANY executable in the bottle (a Steam game's resolved exe or a manual
+    /// game's `.exe`) — it's keyed off `gameExe` + `config`, not the app identity, so it serves both.
     public static func makePlan(
-        app: SteamApp,
         config: GameConfig,
         backend: BackendConfig,
         gameExe: URL,
@@ -92,12 +93,51 @@ public struct LaunchOrchestrator: Sendable {
         try linkGraphics(backendConfig: backend)
         try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)
         let plan = try Self.makePlan(
-            app: app, config: config, backend: backend, gameExe: gameExe, prefix: prefix, logURL: logURL
+            config: config, backend: backend, gameExe: gameExe, prefix: prefix, logURL: logURL
         )
-        return try await runner.spawnDetached(
+        return try await spawn(plan)
+    }
+
+    // MARK: - Manual (non-Steam) games
+
+    /// Launch a user-added non-Steam game in the bottle prefix under GPTK. No Steam presence (these don't
+    /// use Steamworks) and no Steam client requirement — just wine + the absolute `.exe` path. Returns PID.
+    @discardableResult
+    public func launchManualGame(
+        _ game: ManualGame, backend: BackendConfig, prefix: URL, logURL: URL
+    ) async throws -> Int32 {
+        guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
+        guard FileManager.default.fileExists(atPath: game.executablePath.path) else {
+            throw LaunchError.executableNotFound(game.executablePath)
+        }
+        try linkGraphics(backendConfig: backend)
+        let config = GameConfig(appID: 0, envFlags: game.envFlags, presence: .none, customArgs: game.customArgs)
+        let plan = try Self.makePlan(
+            config: config, backend: backend, gameExe: game.executablePath, prefix: prefix, logURL: logURL)
+        return try await spawn(plan)
+    }
+
+    /// Run an arbitrary installer `.exe` in the bottle prefix (detached, so the user drives its GUI). It
+    /// installs into the bottle's `drive_c`; the user then points the game at the installed executable.
+    @discardableResult
+    public func runInstaller(
+        exe: URL, backend: BackendConfig, prefix: URL, logURL: URL
+    ) async throws -> Int32 {
+        guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
+        guard FileManager.default.fileExists(atPath: exe.path) else {
+            throw LaunchError.executableNotFound(exe)
+        }
+        try linkGraphics(backendConfig: backend)
+        let plan = try Self.makePlan(
+            config: GameConfig(appID: 0, presence: .none), backend: backend,
+            gameExe: exe, prefix: prefix, logURL: logURL)
+        return try await spawn(plan)
+    }
+
+    private func spawn(_ plan: LaunchPlan) async throws -> Int32 {
+        try await runner.spawnDetached(
             executable: plan.executable, arguments: plan.arguments,
-            environment: plan.environment, currentDirectory: plan.currentDirectory, logURL: plan.logURL
-        )
+            environment: plan.environment, currentDirectory: plan.currentDirectory, logURL: plan.logURL)
     }
 
     public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
