@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Silo - Windows Steam games on Apple Silicon</title>
+    <meta
+      name="description"
+      content="Silo is a native, open-source macOS launcher for your Windows Steam library. It runs games through Wine and Apple's Game Porting Toolkit (D3DMetal), each in its own isolated runtime, with a real Steam client so Steamworks works."
+    >
+    <meta name="theme-color" content="#0a0c10">
+    <link rel="canonical" href="https://mikaelhug.github.io/Silo/">
+    <meta property="og:title" content="Silo - Windows Steam games on Apple Silicon">
+    <meta
+      property="og:description"
+      content="A native macOS launcher for Windows Steam games: Wine + Apple GPTK/D3DMetal graphics, isolated per-game runtimes, and a co-resident Steam client so Steamworks works."
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://mikaelhug.github.io/Silo/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Silo - Windows Steam games on Apple Silicon">
+    <meta
+      name="twitter:description"
+      content="A native, open-source macOS launcher for Windows Steam games via Wine + Apple's Game Porting Toolkit."
+    >
+    <link rel="stylesheet" href="styles.css">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Silo",
+        "applicationCategory": "GameApplication",
+        "operatingSystem": "macOS 15+ on Apple Silicon",
+        "description": "A native, open-source macOS launcher for Windows Steam games via Wine and Apple's Game Porting Toolkit (D3DMetal).",
+        "url": "https://mikaelhug.github.io/Silo/",
+        "downloadUrl": "https://github.com/mikaelhug/Silo/releases",
+        "codeRepository": "https://github.com/mikaelhug/Silo",
+        "programmingLanguage": ["Swift"]
+      }
+    </script>
+  </head>
+  <body>
+    <nav class="nav" aria-label="Main navigation">
+      <div class="nav-inner">
+        <a class="brand" href="#top" aria-label="Silo home">
+          <svg class="brand-mark" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <rect x="1" y="1" width="26" height="26" rx="8" fill="url(#mark)" stroke="rgba(255,255,255,0.14)"></rect>
+            <path d="M11 9 L20 14 L11 19 Z" fill="#04101f"></path>
+            <defs>
+              <linearGradient id="mark" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#84b6ff"></stop>
+                <stop offset="1" stop-color="#4f93ff"></stop>
+              </linearGradient>
+            </defs>
+          </svg>
+          <span>Silo</span>
+        </a>
+        <div class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#graphics">Graphics</a>
+          <a href="#install">Install</a>
+          <a class="nav-cta" href="https://github.com/mikaelhug/Silo">GitHub</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero" id="top">
+      <div class="hero-inner">
+        <p class="badge">Open source · Windows Steam games on Apple Silicon</p>
+        <h1>Silo</h1>
+        <p class="lede">
+          A native macOS launcher for your Windows Steam library — run games
+          through Wine and Apple's Game Porting Toolkit, each in its own isolated
+          runtime, with a real Steam client so Steamworks just works.
+        </p>
+        <div class="actions" aria-label="Primary actions">
+          <a class="button primary" href="#install">Install Silo</a>
+          <a class="button secondary" href="#how">How it works</a>
+        </div>
+      </div>
+      <div class="hero-shot">
+        <svg viewBox="0 0 1100 680" role="img" aria-label="The Silo library window: a grid of game cards under a title bar, with one game selected and ready to launch" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="cardA" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#3b82d6"></stop>
+              <stop offset="0.62" stop-color="#1e477f"></stop>
+              <stop offset="1" stop-color="#0d1626"></stop>
+            </linearGradient>
+            <linearGradient id="cardB" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#8a6ef0"></stop>
+              <stop offset="0.62" stop-color="#4a3a86"></stop>
+              <stop offset="1" stop-color="#161226"></stop>
+            </linearGradient>
+            <linearGradient id="cardC" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#2bb6c4"></stop>
+              <stop offset="0.62" stop-color="#1a5e6e"></stop>
+              <stop offset="1" stop-color="#0d2026"></stop>
+            </linearGradient>
+            <linearGradient id="cardD" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#d6633b"></stop>
+              <stop offset="0.62" stop-color="#7a3a1e"></stop>
+              <stop offset="1" stop-color="#261410"></stop>
+            </linearGradient>
+          </defs>
+
+          <!-- window -->
+          <rect x="8" y="8" width="1084" height="664" rx="18" fill="#11141b" stroke="rgba(255,255,255,0.10)"></rect>
+          <!-- title bar -->
+          <circle cx="40" cy="44" r="7" fill="#ff5f57"></circle>
+          <circle cx="62" cy="44" r="7" fill="#febc2e"></circle>
+          <circle cx="84" cy="44" r="7" fill="#28c840"></circle>
+          <text x="550" y="50" text-anchor="middle" fill="#eef1f6" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="700" letter-spacing="-0.01em">Silo</text>
+          <rect x="856" y="31" width="200" height="26" rx="13" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.10)"></rect>
+          <circle cx="874" cy="44" r="5" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.6"></circle>
+          <line x1="878" y1="48" x2="882" y2="52" stroke="rgba(255,255,255,0.5)" stroke-width="1.6" stroke-linecap="round"></line>
+          <line x1="8" y1="84" x2="1092" y2="84" stroke="rgba(255,255,255,0.07)"></line>
+
+          <!-- row 1 -->
+          <g>
+            <rect x="50" y="120" width="232" height="244" rx="14" fill="url(#cardA)"></rect>
+            <rect x="68" y="316" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
+            <rect x="68" y="336" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
+          </g>
+          <!-- selected card -->
+          <g>
+            <rect x="306" y="120" width="232" height="244" rx="14" fill="url(#cardB)" stroke="#84b6ff" stroke-width="2.5"></rect>
+            <circle cx="422" cy="208" r="27" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.55)" stroke-width="1.5"></circle>
+            <path d="M414 195 L437 208 L414 221 Z" fill="#ffffff"></path>
+            <rect x="324" y="316" width="130" height="10" rx="5" fill="rgba(255,255,255,0.92)"></rect>
+            <rect x="324" y="336" width="78" height="7" rx="3.5" fill="rgba(132,182,255,0.7)"></rect>
+          </g>
+          <g>
+            <rect x="562" y="120" width="232" height="244" rx="14" fill="url(#cardC)"></rect>
+            <rect x="580" y="316" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
+            <rect x="580" y="336" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
+          </g>
+          <g>
+            <rect x="818" y="120" width="232" height="244" rx="14" fill="url(#cardD)"></rect>
+            <rect x="836" y="316" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
+            <rect x="836" y="336" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
+          </g>
+
+          <!-- row 2 -->
+          <g>
+            <rect x="50" y="388" width="232" height="244" rx="14" fill="url(#cardC)"></rect>
+            <rect x="68" y="584" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
+            <rect x="68" y="604" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
+          </g>
+          <g>
+            <rect x="306" y="388" width="232" height="244" rx="14" fill="url(#cardD)"></rect>
+            <rect x="324" y="584" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
+            <rect x="324" y="604" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
+          </g>
+          <g>
+            <rect x="562" y="388" width="232" height="244" rx="14" fill="url(#cardA)"></rect>
+            <rect x="580" y="584" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
+            <rect x="580" y="604" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
+          </g>
+          <g>
+            <rect x="818" y="388" width="232" height="244" rx="14" fill="url(#cardB)"></rect>
+            <rect x="836" y="584" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
+            <rect x="836" y="604" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
+          </g>
+        </svg>
+      </div>
+    </header>
+
+    <main>
+      <section class="section" style="padding-top: clamp(48px, 7vw, 84px)">
+        <div class="metric-band" aria-label="Silo at a glance">
+          <div class="metric">
+            <span class="metric-value">GPTK</span>
+            <span class="metric-label">Apple D3DMetal maps DirectX 10/11/12 straight to Metal</span>
+          </div>
+          <div class="metric">
+            <span class="metric-value">One prefix</span>
+            <span class="metric-label">Steam + its games co-resident, so Steamworks works</span>
+          </div>
+          <div class="metric">
+            <span class="metric-value">Isolated</span>
+            <span class="metric-label">each non-Steam game in its own Wine bottle</span>
+          </div>
+          <div class="metric">
+            <span class="metric-value">Self-contained</span>
+            <span class="metric-label">downloads its own Wine and self-updates — no Homebrew</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <div class="section-heading">
+          <p class="eyebrow">Built for the Mac</p>
+          <h2>Your Windows Steam library, in a native launcher</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+                <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+                <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+                <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+              </svg>
+            </div>
+            <h3>Your real Steam library</h3>
+            <p>
+              Silo discovers the games installed in its Steam bottle and launches
+              each one under GPTK — co-resident with a logged-in Steam client, so
+              Steamworks and DRM titles run.
+            </p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="5" y="5" width="14" height="14" rx="2.5"></rect>
+                <rect x="9" y="9" width="6" height="6" rx="1"></rect>
+                <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"></path>
+              </svg>
+            </div>
+            <h3>Apple GPTK graphics</h3>
+            <p>
+              D3DMetal maps DirectX 10/11/12 and DXGI straight to Metal; DirectX 9,
+              8, and OpenGL fall back to Wine's own renderer. No DXVK, no Homebrew.
+            </p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7l9-4 9 4-9 4-9-4z"></path>
+                <path d="M3 12l9 4 9-4"></path>
+                <path d="M3 17l9 4 9-4"></path>
+              </svg>
+            </div>
+            <h3>A bottle per game</h3>
+            <p>
+              Add any Windows <code>.exe</code> — an installer or a portable build —
+              and Silo provisions a dedicated, isolated Wine prefix for it. Relocate
+              every bottle to an external drive anytime.
+            </p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v12"></path>
+                <path d="M8 11l4 4 4-4"></path>
+                <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path>
+              </svg>
+            </div>
+            <h3>Self-contained &amp; updating</h3>
+            <p>
+              Silo fetches its own Wine runtime (built only from CrossOver's FOSS
+              source) and updates itself from GitHub Releases. No package manager,
+              no external dependencies.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="split" id="how">
+        <div>
+          <p class="eyebrow">How a launch works</p>
+          <h2>Single downloader, isolated runtimes</h2>
+          <p>
+            Steam is installed once into a single master bottle that only downloads
+            games. Each game then launches in its own runtime — graphics backend and
+            environment injected at launch — so one finicky title can't disturb the
+            rest of your library.
+          </p>
+        </div>
+        <div class="flow" aria-label="The launch pipeline">
+          <div class="flow-step">
+            <span class="n" aria-hidden="true">1</span>
+            <div>
+              <h4>Discover</h4>
+              <p>Parse the bottle's <code>appmanifest_*.acf</code> for installed games, skipping Steam's redistributables.</p>
+            </div>
+          </div>
+          <div class="flow-step">
+            <span class="n" aria-hidden="true">2</span>
+            <div>
+              <h4>Provision</h4>
+              <p>Seed the game's Wine prefix with an idempotent <code>wineboot</code>.</p>
+            </div>
+          </div>
+          <div class="flow-step">
+            <span class="n" aria-hidden="true">3</span>
+            <div>
+              <h4>Link graphics</h4>
+              <p>Overlay Apple GPTK / D3DMetal into the runtime for DirectX&nbsp;→&nbsp;Metal.</p>
+            </div>
+          </div>
+          <div class="flow-step">
+            <span class="n" aria-hidden="true">4</span>
+            <div>
+              <h4>Launch</h4>
+              <p>Spawn the game detached, with <code>WINEPREFIX</code> pointed at its isolated bottle.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="graphics">
+        <div class="section-heading">
+          <p class="eyebrow">What runs, and how</p>
+          <h2>Modern DirectX on Metal, the rest on Wine</h2>
+        </div>
+        <div class="comparison">
+          <div class="comparison-row">
+            <span>DirectX 12 / 11 / 10 + DXGI</span>
+            <strong>GPTK · D3DMetal → Metal</strong>
+          </div>
+          <div class="comparison-row">
+            <span>DirectX 9 / 8 / DirectDraw</span>
+            <strong>Wine wined3d → OpenGL</strong>
+          </div>
+          <div class="comparison-row">
+            <span>OpenGL</span>
+            <strong>Wine → macOS OpenGL</strong>
+          </div>
+          <div class="comparison-row trail">
+            <span>Vulkan (native)</span>
+            <strong>not supported</strong>
+          </div>
+        </div>
+        <p class="note">
+          Apple's Game Porting Toolkit accelerates modern DirectX; Wine's own stack
+          covers the rest. The game drives the API — Silo picks the translation.
+        </p>
+      </section>
+
+      <section class="install" id="install">
+        <div>
+          <p class="eyebrow">Get Silo</p>
+          <h2>Install the current release</h2>
+          <p>
+            Silo runs on macOS 15 or newer on Apple Silicon, outside the App Sandbox
+            so it can drive Wine. It is not yet notarized, so a manual install needs
+            the quarantine step shown in the README.
+          </p>
+        </div>
+        <div class="install-actions">
+          <a class="button primary" href="https://github.com/mikaelhug/Silo/releases">Download release</a>
+          <a class="button secondary" href="https://github.com/mikaelhug/Silo">View source</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <a class="brand" href="#top" aria-label="Silo home">
+        <svg class="brand-mark" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="26" height="26" rx="8" fill="url(#markf)" stroke="rgba(255,255,255,0.14)"></rect>
+          <path d="M11 9 L20 14 L11 19 Z" fill="#04101f"></path>
+          <defs>
+            <linearGradient id="markf" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#84b6ff"></stop>
+              <stop offset="1" stop-color="#4f93ff"></stop>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span>Silo</span>
+      </a>
+      <a href="https://github.com/mikaelhug/Silo">GitHub</a>
+      <a href="https://github.com/mikaelhug/Silo/issues">Issues</a>
+    </footer>
+  </body>
+</html>
