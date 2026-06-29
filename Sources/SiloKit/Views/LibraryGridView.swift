@@ -232,6 +232,8 @@ struct SettingsView: View {
             GPTKManagerView().tabItem { Label("GPTK", systemImage: "cpu") }
             WineDownloadView().tabItem { Label("Wine", systemImage: "wineglass") }
         }
-        .frame(minWidth: 600, minHeight: 560)
+        // A standard, compact macOS settings size — wide enough for the forms (paths truncate) without
+        // taking more room than the content needs. Still resizable larger.
+        .frame(minWidth: 480, minHeight: 520)
     }
 }
