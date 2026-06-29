@@ -4,9 +4,6 @@ import Testing
 
 @Suite("LaunchOrchestrator.makePlan (pure)")
 struct MakePlanTests {
-    let app = SteamApp(appID: 220, name: "HL2", installDir: "Half-Life 2",
-                       stateFlags: .fullyInstalled, sizeOnDisk: 1,
-                       libraryPath: URL(fileURLWithPath: "/lib"))
     let prefix = URL(fileURLWithPath: "/p/220")
     let log = URL(fileURLWithPath: "/p/220.log")
     let gameExe = URL(fileURLWithPath: "/lib/steamapps/common/Half-Life 2/hl2.exe")
@@ -23,7 +20,7 @@ struct MakePlanTests {
         cfg.envFlags = EnvFlags(syncMode: .msync)
         cfg.customArgs = ["-dev", "-w", "1920"]
         let plan = try LaunchOrchestrator.makePlan(
-            app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+            config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
 
         #expect(plan.executable.path == "/w/bin/wine64")
         #expect(plan.arguments == [gameExe.path, "-dev", "-w", "1920"])
@@ -43,7 +40,7 @@ struct MakePlanTests {
         var cfg = GameConfig(appID: 220)
         cfg.envFlags = EnvFlags(syncMode: .esync)   // user picked ESync…
         let plan = try LaunchOrchestrator.makePlan(
-            app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+            config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
         // …but a bottle game MUST match Steam's msync or it gets its own wineserver and loses Steamworks.
         #expect(plan.environment["WINEMSYNC"] == "1")
         #expect(plan.environment["WINEESYNC"] == nil)
@@ -57,7 +54,7 @@ struct MakePlanTests {
         cfg.envFlags = EnvFlags(syncMode: .msync,
                                 extra: ["WINEESYNC": "1", "WINEMSYNC": "0", "MTL_HUD_ENABLED": "1"])
         let plan = try LaunchOrchestrator.makePlan(
-            app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+            config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
         #expect(plan.environment["WINEMSYNC"] == "1")        // forced override beats extra:["WINEMSYNC":"0"]
         #expect(plan.environment["WINEESYNC"] == nil)        // forced override strips extra:["WINEESYNC":"1"]
         #expect(plan.environment["MTL_HUD_ENABLED"] == "1")  // non-sync extras still survive
@@ -69,7 +66,7 @@ struct MakePlanTests {
         var b = backend()   // wine binary = /w/bin/wine64 → runtime root /w
         b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
         let plan = try LaunchOrchestrator.makePlan(
-            app: app, config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
+            config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
 
         // After the overlay, GPTK's libd3dshared.dylib + D3DMetal.framework live in the WINE runtime's
         // own lib/external (/w/lib/external) — that must lead the DYLD paths, ahead of the bundled deps.
@@ -87,7 +84,7 @@ struct MakePlanTests {
         var cfg = GameConfig(appID: 220)
         cfg.envFlags = EnvFlags(extra: ["WINEDEBUG": "+seh,+tid"])
         let plan = try LaunchOrchestrator.makePlan(
-            app: app, config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+            config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
         #expect(plan.environment["WINEDEBUG"] == "+seh,+tid")
     }
 
@@ -96,7 +93,7 @@ struct MakePlanTests {
         let cfg = GameConfig(appID: 220)
         #expect(throws: LaunchOrchestrator.LaunchError.wineNotConfigured) {
             try LaunchOrchestrator.makePlan(
-                app: app, config: cfg, backend: backend(gptk: nil),
+                config: cfg, backend: backend(gptk: nil),
                 gameExe: gameExe, prefix: prefix, logURL: log)
         }
     }
@@ -169,6 +166,61 @@ struct LaunchPipelineTests {
                 app: app, config: GameConfig(appID: 9), backend: backend,
                 prefix: tmp.url, logURL: paths.log(forAppID: 9))
         }
+    }
+
+    @Test("launchManualGame spawns the absolute .exe into the bottle prefix (no Steam presence)")
+    func manualGameLaunch() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        let exe = try tmp.write("Games/My Game/game.exe", "MZ")
+        let prefix = try tmp.makeDir("bottle")
+        let game = ManualGame(name: "My Game", executablePath: exe, customArgs: ["-windowed"])
+
+        let pid = try await orchestrator.launchManualGame(
+            game, backend: backend, prefix: prefix, logURL: tmp.url.appendingPathComponent("m.log"))
+        #expect(pid == 4242)
+
+        let spawn = try #require(fake.invocations.last { $0.detached })
+        #expect(spawn.executable.path == "/w/wine64")
+        #expect(spawn.arguments == [exe.path, "-windowed"])         // absolute exe + custom args
+        #expect(spawn.environment["WINEPREFIX"] == prefix.path)     // co-located in the shared bottle
+        #expect(spawn.environment["WINEMSYNC"] == "1")
+        // No steam_appid.txt next to the exe — manual games don't use Steamworks.
+        #expect(!FileManager.default.fileExists(atPath: exe.deletingLastPathComponent()
+            .appendingPathComponent("steam_appid.txt").path))
+    }
+
+    @Test("launchManualGame throws when the .exe is missing")
+    func manualGameMissingExe() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let orchestrator = LaunchOrchestrator(runner: FakeProcessRunner(), linker: GraphicsLinker())
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        let game = ManualGame(name: "Gone", executablePath: tmp.url.appendingPathComponent("nope.exe"))
+        await #expect(throws: LaunchOrchestrator.LaunchError.self) {
+            try await orchestrator.launchManualGame(
+                game, backend: backend, prefix: tmp.url, logURL: tmp.url.appendingPathComponent("m.log"))
+        }
+    }
+
+    @Test("runInstaller spawns the installer .exe in the bottle prefix")
+    func installerRun() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        let installer = try tmp.write("setup.exe", "MZ")
+        let prefix = try tmp.makeDir("bottle")
+
+        _ = try await orchestrator.runInstaller(
+            exe: installer, backend: backend, prefix: prefix, logURL: tmp.url.appendingPathComponent("i.log"))
+        let spawn = try #require(fake.invocations.last { $0.detached })
+        #expect(spawn.arguments == [installer.path])
+        #expect(spawn.environment["WINEPREFIX"] == prefix.path)
     }
 }
 

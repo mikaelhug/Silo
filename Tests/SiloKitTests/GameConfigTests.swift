@@ -24,15 +24,13 @@ struct GameConfigTests {
 
     @Test("Round-trips through makePlan as game arguments")
     func feedsLaunchPlan() throws {
-        let app = SteamApp(appID: 7, name: "G", installDir: "G", stateFlags: .fullyInstalled,
-                           sizeOnDisk: 1, libraryPath: URL(fileURLWithPath: "/lib"))
         var cfg = GameConfig(appID: 7)
         cfg.launchOptionsString = "-foo -bar"
         var backend = BackendConfig()
         backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
         let exe = URL(fileURLWithPath: "/lib/g.exe")
         let plan = try LaunchOrchestrator.makePlan(
-            app: app, config: cfg, backend: backend, gameExe: exe,
+            config: cfg, backend: backend, gameExe: exe,
             prefix: URL(fileURLWithPath: "/p"), logURL: URL(fileURLWithPath: "/p.log"))
         #expect(plan.arguments == [exe.path, "-foo", "-bar"])
     }
