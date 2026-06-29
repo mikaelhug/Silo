@@ -141,9 +141,9 @@ struct AddGameSheet: View {
 struct SettingsView: View {
     var body: some View {
         TabView {
-            BackendSettingsView().tabItem { Label("Steam Bottle", systemImage: "shippingbox") }
-            WineManagerView().tabItem { Label("Runtimes", systemImage: "wineglass") }
-            UpdatesView().tabItem { Label("Updates", systemImage: "arrow.down.circle") }
+            GeneralSettingsView().tabItem { Label("General", systemImage: "gearshape") }
+            GPTKManagerView().tabItem { Label("GPTK", systemImage: "cpu") }
+            WineDownloadView().tabItem { Label("Wine", systemImage: "wineglass") }
         }
         .frame(minWidth: 600, minHeight: 560)
     }
