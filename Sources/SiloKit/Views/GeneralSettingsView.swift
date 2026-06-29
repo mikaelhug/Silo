@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// The Steam-bottle setup pane (a tab in Settings): install Windows Steam into the shared bottle, launch
-/// it for a one-time sign-in, reset the login, and open its log. Runtime defaults (Wine/GPTK) are managed
-/// in the Runtimes tab, not here.
-struct BackendSettingsView: View {
+/// The **General** settings tab: Steam-bottle setup, with the app version + inline updater at the bottom.
+struct GeneralSettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Form {
             steamBottleSection
+            updatesSection
         }
         .formStyle(.grouped)
     }
@@ -39,6 +38,35 @@ struct BackendSettingsView: View {
             Text("For Steamworks/DRM games that need a running Steam client. “Set up” installs Windows "
                  + "Steam into a shared prefix; “Launch Steam” starts it — sign in once (it caches the "
                  + "login), then run a game and it shares this prefix.")
+                .font(.caption)
+        }
+    }
+
+    /// App version + the inline updater (download → in-place self-replace → relaunch).
+    @ViewBuilder private var updatesSection: some View {
+        Section {
+            LabeledContent("Version", value: Silo.version)
+            switch env.updateState {
+            case .downloading:
+                LabeledContent("Updating") { ProgressView("Downloading…").controlSize(.small) }
+            case .installing:
+                LabeledContent("Updating") { ProgressView("Installing…").controlSize(.small) }
+            case .failed(let message):
+                Button("Retry update") { Task { await env.installUpdate() } }
+                Text(message).font(.caption).foregroundStyle(.red)
+            case .idle:
+                if let update = env.updateCheck, update.isNewer {
+                    Button("Update to \(update.latestVersion) & Relaunch") { Task { await env.installUpdate() } }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    LabeledContent("Status", value: "Up to date")
+                }
+            }
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("Silo updates itself in place from its GitHub releases. It never bundles or downloads "
+                 + "Wine, GPTK, or any Steam-API emulator.")
                 .font(.caption)
         }
     }

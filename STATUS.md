@@ -3,6 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M96 — Settings tabs restructured to General / GPTK / Wine.** The Settings window now has three
+  top-level tabs: **General** (the former Steam-bottle pane, with the app version + inline updater moved to
+  a "Updates" section at the bottom — `GeneralSettingsView`, renamed from `BackendSettingsView`), **GPTK**
+  (`GPTKManagerView`), and **Wine** (`WineDownloadView`). Removed the combined "Runtimes" tab + its
+  `WineManagerView` wrapper (the GPTK/Wine segmented sub-tabs are now top-level tabs), and the standalone
+  `UpdatesView` (folded into General). 173 tests / 28 suites green; clean build (no warnings).
 - **✅ M95 — UI refinements (6 changes).** (1) Renamed "Advanced Settings" → **Settings** and made it the
   standard macOS **Settings window** (app-menu "Settings…" / ⌘, via a `Settings` scene + `openSettings`;
   the Library toolbar gear now opens it). Tabs: **Steam Bottle**, **Runtimes**, **Updates**. (2) Removed the
