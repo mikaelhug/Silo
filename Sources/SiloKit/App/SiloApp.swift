@@ -33,9 +33,12 @@ public struct SiloApp: App {
         }
 
         // The standard macOS Settings window (app menu "Settings…" / ⌘, and the Library toolbar gear,
-        // which calls `openSettings`).
+        // which calls `openSettings`). `.contentSize` makes the WINDOW hug `SettingsView`'s frame —
+        // without it the window floats at a default/restored size and the content sits centered inside it
+        // (the grey side-columns), and a content-level frame can't shrink it.
         Settings {
             SettingsView().environment(environment)
         }
+        .windowResizability(.contentSize)
     }
 }

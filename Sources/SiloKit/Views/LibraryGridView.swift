@@ -232,8 +232,8 @@ struct SettingsView: View {
             GPTKManagerView().tabItem { Label("GPTK", systemImage: "cpu") }
             WineDownloadView().tabItem { Label("Wine", systemImage: "wineglass") }
         }
-        // Opens at a compact size (the forms fit; paths truncate) but stays resizable larger. The window's
-        // saved frame is what makes the default "stick" — a stale larger one was cleared when this shipped.
-        .frame(minWidth: 480, idealWidth: 480, minHeight: 520, idealHeight: 540)
+        // Definite compact size; with the scene's `.windowResizability(.contentSize)` the WINDOW becomes
+        // exactly this (no grey side-columns), a fixed-size settings pane per macOS convention.
+        .frame(width: 480, height: 540)
     }
 }
