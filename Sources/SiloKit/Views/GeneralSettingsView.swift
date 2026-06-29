@@ -12,9 +12,57 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             steamBottleSection
+            bottlesSection
             updatesSection
         }
         .formStyle(.grouped)
+    }
+
+    /// Where Silo keeps its Wine bottles — movable to another disk / external drive.
+    @ViewBuilder private var bottlesSection: some View {
+        Section {
+            LabeledContent("Location") {
+                Text(env.paths.bottlesRelocated ? env.paths.bottlesRoot.path : "Application Support (default)")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+            }
+            if env.paths.bottlesRelocated && !env.paths.bottlesRootReachable {
+                Label("This location isn't reachable — is the drive connected?",
+                      systemImage: "externaldrive.badge.exclamationmark")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if env.bottlesBusy {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(env.bottlesMessage ?? "Moving bottles…").foregroundStyle(.secondary)
+                }
+            } else {
+                HStack {
+                    Button("Move…") {
+                        if let dir = chooseDirectory(
+                            message: "Choose where to keep Silo's bottles (e.g. an external drive).") {
+                            Task { await env.moveBottles(to: dir) }
+                        }
+                    }
+                    .disabled(env.anythingRunning)
+                    if env.paths.bottlesRelocated {
+                        Button("Reset to Default") { Task { await env.resetBottlesLocation() } }
+                            .disabled(env.anythingRunning)
+                    }
+                }
+                if env.anythingRunning {
+                    Text("Stop running games and Steam to move bottles.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if let message = env.bottlesMessage {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Bottles")
+        } footer: {
+            Text("Where Silo keeps its Wine bottles (the Steam bottle + each manual game's bottle). Moving "
+                 + "copies the existing data, then Silo relaunches to use the new location.")
+        }
     }
 
     /// Stand up a shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
