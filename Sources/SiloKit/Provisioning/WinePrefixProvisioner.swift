@@ -32,5 +32,16 @@ public struct WinePrefixProvisioner: Sendable {
             executable: wine, arguments: ["wineboot", "--init"],
             environment: environment, currentDirectory: nil)
         guard result.succeeded else { throw ProvisionError.winebootFailed(result.exitCode) }
+
+        // Settle the boot wineserver before returning. `wineboot` leaves a transient server in its
+        // shutdown window; a launch fired immediately after (e.g. the installer right after the Add sheet
+        // provisions the bottle) races it — the process spawns but can't attach, so it dies with no window,
+        // and only a second launch (boot server now gone) works. Killing it leaves a clean prefix so the
+        // very first launch attaches cleanly. Best-effort: no server to kill is success. Only runs on the
+        // initial boot of a fresh prefix (guarded by `isProvisioned` above).
+        let wineserver = WineRuntimeLayout(wineBinary: wine).wineserver
+        _ = try? await runner.run(
+            executable: wineserver, arguments: ["-k"],
+            environment: Silo.wineEnvironment(prefix: prefix, wine: wine), currentDirectory: nil)
     }
 }

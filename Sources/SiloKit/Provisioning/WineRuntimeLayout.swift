@@ -11,4 +11,6 @@ public struct WineRuntimeLayout: Sendable {
     public var windowsModulesDir: URL { root.appendingPathComponent("lib/wine/x86_64-windows", isDirectory: true) }
     public var unixModulesDir: URL { root.appendingPathComponent("lib/wine/x86_64-unix", isDirectory: true) }
     public var wrapperExe: URL { root.appendingPathComponent("share/silo/steamwebhelper-wrapper.exe") }
+    /// The runtime's `wineserver` (next to the wine loader) — used to settle a prefix's server after boot.
+    public var wineserver: URL { root.appendingPathComponent("bin/wineserver") }
 }

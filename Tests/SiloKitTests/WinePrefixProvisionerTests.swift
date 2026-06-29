@@ -24,10 +24,13 @@ struct WinePrefixProvisionerTests {
         try await provisioner.provision(prefix: prefix, wine: URL(fileURLWithPath: "/w/wine64"))
         #expect(provisioner.isProvisioned(prefix))
         #expect(fake.invocations.filter { $0.arguments == ["wineboot", "--init"] }.count == 1)
+        // The boot server is settled (wineserver -k) so the first launch right after doesn't race it.
+        #expect(fake.invocations.filter { $0.arguments == ["-k"] }.count == 1)
 
-        // Already booted → second call must NOT wineboot again.
+        // Already booted → second call must NOT wineboot (or re-kill) again.
         try await provisioner.provision(prefix: prefix, wine: URL(fileURLWithPath: "/w/wine64"))
         #expect(fake.invocations.filter { $0.arguments == ["wineboot", "--init"] }.count == 1)
+        #expect(fake.invocations.filter { $0.arguments == ["-k"] }.count == 1)
     }
 
     @Test("provision throws wineNotConfigured on nil wine, winebootFailed on non-zero")
