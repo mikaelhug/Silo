@@ -108,6 +108,53 @@ struct GameLibraryViewModelTests {
         #expect(!vm.isRunning(game))
     }
 
+    @Test("manual games: add, play in the bottle (no Steam needed), then remove")
+    func manualGameLifecycle() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        await vm.load()                                  // an empty Steam library
+        #expect(vm.loadState == .empty)
+
+        // The user points at an installed/portable .exe anywhere on disk.
+        let exe = try tmp.write("Games/Cool/Cool.exe", "MZ")
+        let game = try #require(await vm.addManualGame(name: "Cool Game", executable: exe))
+        #expect(vm.manualGames.map(\.name) == ["Cool Game"])
+        #expect(vm.loadState == .loaded)                 // a manual game makes the library non-empty
+
+        await vm.playManual(game)
+        #expect(vm.isRunning(game))
+        let pid = try #require(vm.manualRunningPIDs[game.id])
+        // Spawned detached into the SHARED bottle prefix, with the absolute exe — and NO Steam cold-start
+        // (a manual game never calls session.ensureRunning).
+        #expect(fake.invocations.contains {
+            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
+                && $0.arguments.first == exe.path
+        })
+        #expect(!fake.invocations.contains { $0.arguments.first?.hasSuffix("steam.exe") ?? false })
+
+        await vm.stopManual(game)
+        #expect(!vm.isRunning(game))
+        #expect(fake.terminatedPIDs.contains(pid))
+
+        await vm.removeManual(game)
+        #expect(vm.manualGames.isEmpty)
+        #expect(vm.loadState == .empty)                  // empty again once both lists are empty
+    }
+
+    @Test("addManualGame defaults the name to the exe filename and persists across a reload")
+    func manualGameDefaultNameAndPersistence() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        try installSteam(paths)
+        let exe = try tmp.write("Portable/Witness.exe", "MZ")
+        _ = await vm.addManualGame(name: "   ", executable: exe)   // blank → default to filename
+        #expect(vm.manualGames.first?.name == "Witness")
+
+        await vm.load()                                  // reload from config.json
+        #expect(vm.manualGames.map(\.name) == ["Witness"])   // persisted
+    }
+
     @Test("two games launched at once start the bottle Steam only once")
     func concurrentPlayLaunchesSteamOnce() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
