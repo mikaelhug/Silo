@@ -114,14 +114,6 @@ public final class GameLibraryViewModel {
 
     // MARK: - Install / uninstall (routed through the shared Steam client)
 
-    /// Open the bottle's Steam to a game's install dialog (Steam handles the download + DRM).
-    public func install(appID: Int) async {
-        do {
-            try await session.sendURL("steam://install/\(appID)")
-            setStatus("Opening Steam to install… install it there, then Refresh.")
-        } catch { setStatus("Couldn't reach Steam: \((error as NSError).localizedDescription)") }
-    }
-
     /// Open the bottle's Steam (Store/Library) so the user can browse + install games.
     public func openSteam() async { await session.ensureRunning() }
 

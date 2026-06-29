@@ -234,16 +234,6 @@ struct GameLibraryViewModelTests {
         #expect(!fake.invocations.contains { $0.detached })   // nothing launched
     }
 
-    @Test("install opens the bottle's Steam to the game's install dialog")
-    func installViaSteam() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, _) = make(tmp)
-        await vm.install(appID: 730)
-        let call = try #require(fake.lastInvocation)
-        #expect(call.detached)
-        #expect(call.arguments.contains("steam://install/730"))
-    }
-
     @Test("uninstall asks the bottle's Steam to remove the game")
     func uninstallViaSteam() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
