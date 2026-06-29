@@ -174,7 +174,7 @@ struct ConfigStoreTests {
         let original = EnvFlags(
             syncMode: .esync, advertiseAVX: false, metalHUD: true,
             metalFX: true, dxr: true,
-            extra: ["WINEDEBUG": "+seh", "DXVK_HUD": "fps"])
+            extra: ["WINEDEBUG": "+seh", "CUSTOM_VAR": "1"])
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(EnvFlags.self, from: data)
         #expect(decoded == original)   // Hashable/Equatable: proves extra + all fields survive
