@@ -1,8 +1,8 @@
 import Foundation
 
-/// Drives the experimental Steam-bottle setup + launch (the revert path for Steamworks/DRM games):
-/// install Windows Steam into the shared bottle and launch it (in a Wine virtual desktop with the
-/// software-GL CEF env + wrapper) for a one-time sign-in, after which games run co-resident with it.
+/// Drives the Steam-bottle setup + launch (the path for Steamworks/DRM games): install Windows Steam into
+/// the shared bottle and launch it (in a Wine virtual desktop with the software-GL CEF env + wrapper) for
+/// a one-time sign-in, after which games run co-resident with it.
 @MainActor
 @Observable
 public final class SteamBottleViewModel {

@@ -1,7 +1,7 @@
 import Foundation
 
-/// Drives the Wine tab of the Wine Manager: installs the latest prebuilt Wine from Silo's CI releases
-/// and tracks the default Wine used to launch games.
+/// Drives the **Wine** settings tab: installs the latest prebuilt Wine from Silo's CI releases and tracks
+/// the default Wine used to launch games.
 @MainActor
 @Observable
 public final class RuntimeViewModel {
