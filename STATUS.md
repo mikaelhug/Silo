@@ -3,6 +3,17 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🏷️ Release v0.2.1 (2026-06-29).** Patch over v0.2.0. (a) **Adversarial multi-agent quality audit**
+  closed in four tiers — P0: readiness **TOCTOU** fixed (kqueue is edge-triggered; re-check after arming) +
+  the M114 event-driven gate now tested **live** (`FileWatch` + readiness, previously never run with
+  `readinessTimeout>0`); P1: `makePlan` exhaustiveness gaps (WINEDLLOVERRIDES `;`-merge, perf-flag
+  propagation) + `BottleRelocator` failure paths (rollback, non-writable dest) covered, `play()` now
+  surfaces a Steam-couldn't-start failure instead of launching against a dead client; P2: stale docs fixed +
+  dead public surface removed (`installLocation`, `SteamBottle.isProvisioned`, `SteamStoreDetails.categories`
+  /`.directXVersion`) + `KeyValuesParser` depth cap (no stack-overflow on hostile `.acf`) + manifest size
+  guard; P3: PID maps encapsulated, denylist also strips `extra`, `..`-escape guard on relative exe, store
+  fetch via `requireHTTPS`, new `RuntimeHardening`/`Filesystem` tests. **216 tests / 36 suites green; clean
+  build.** (b) **GitHub Pages site** (`docs/`, Velox-style) — landing page at mikaelhug.github.io/Silo.
 - **🏷️ Release v0.2.0 (2026-06-29).** Minor bump from 0.1.1 via `versions.env`. Highlights since 0.1.1:
   **manual non-Steam .exe games** (each in its **own isolated bottle**), **redistributables hidden**
   (`LastOwner==0`), **relocatable bottles** (move to another disk/external drive — % progress, exFAT guard),
