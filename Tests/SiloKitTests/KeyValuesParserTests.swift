@@ -65,4 +65,13 @@ struct KeyValuesParserTests {
             try parser.parse(text: #""r" { "appid" "220""#)
         }
     }
+
+    @Test("Throws tooDeep on pathologically nested input instead of overflowing the stack")
+    func tooDeep() {
+        let depth = 200   // well past the parser's maxDepth (100)
+        let text = String(repeating: #""k" {"#, count: depth) + String(repeating: "}", count: depth)
+        #expect(throws: KeyValuesParser.ParseError.tooDeep) {
+            try parser.parse(text: text)
+        }
+    }
 }

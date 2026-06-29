@@ -17,10 +17,6 @@ public struct SteamStoreDetails: Sendable, Equatable {
     public let diskSpace: String?
     /// Metacritic score (0–100), when the store provides one.
     public let metacritic: Int?
-    /// Store capabilities/categories, e.g. "Single-player", "Full controller support".
-    public let categories: [String]
-    /// Major DirectX version parsed from the minimum requirements (e.g. 11, 12), for backend guidance.
-    public let directXVersion: Int?
 }
 
 /// Fetches `SteamStoreDetails` from the public `store.steampowered.com/api/appdetails` endpoint
@@ -42,7 +38,6 @@ public struct SteamStoreClient: Sendable {
               entry["success"] as? Bool == true,
               let d = entry["data"] as? [String: Any] else { return nil }
         let genres = (d["genres"] as? [[String: Any]])?.compactMap { $0["description"] as? String } ?? []
-        let categories = (d["categories"] as? [[String: Any]])?.compactMap { $0["description"] as? String } ?? []
         // `pc_requirements` is a dict when present, or an empty array when the store lists none.
         let minRaw = (d["pc_requirements"] as? [String: Any])?["minimum"] as? String
         let minText = minRaw.map(stripHTML).flatMap { $0.isEmpty ? nil : $0 }
@@ -56,18 +51,7 @@ public struct SteamStoreClient: Sendable {
             releaseDate: (d["release_date"] as? [String: Any])?["date"] as? String,
             minimumRequirements: minText,
             diskSpace: minText.flatMap(diskSpace),
-            metacritic: (d["metacritic"] as? [String: Any])?["score"] as? Int,
-            categories: categories,
-            directXVersion: minText.flatMap(directXVersion))
-    }
-
-    /// Parse the major DirectX version from requirements text, e.g. "DirectX: Version 12" → 12,
-    /// "DirectX 9.0c" → 9. Returns nil when the requirements don't mention DirectX.
-    static func directXVersion(in requirements: String) -> Int? {
-        guard let r = requirements.range(of: #"directx[^0-9]*([0-9]+)"#,
-                                         options: [.regularExpression, .caseInsensitive]) else { return nil }
-        let digits = requirements[r].drop { !$0.isNumber }.prefix { $0.isNumber }
-        return Int(digits)
+            metacritic: (d["metacritic"] as? [String: Any])?["score"] as? Int)
     }
 
     /// Pull the storage requirement out of the minimum-requirements text (the disk-size signal).

@@ -72,10 +72,18 @@ public actor DiscoveryEngine {
         var apps: [SteamApp] = []
         for entry in entries
         where entry.lastPathComponent.hasPrefix("appmanifest_") && entry.pathExtension == "acf" {
+            // Skip a pathologically large file: the tokenizer reads the whole manifest into memory, and a
+            // real appmanifest is a few KB — anything over the cap isn't a manifest worth parsing.
+            let size = (try? entry.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard size <= Self.maxManifestBytes else { continue }
             guard let text = try? String(contentsOf: entry, encoding: .utf8),
                   let app = try? manifestDecoder.decode(text: text, libraryPath: root) else { continue }
             apps.append(app)
         }
         return apps
     }
+
+    /// Upper bound on an `appmanifest_*.acf` we'll read (real ones are a few KB; 8 MB is far beyond any
+    /// legitimate manifest) — bounds the tokenizer's whole-file allocation against a hostile local file.
+    private static let maxManifestBytes = 8 * 1024 * 1024
 }

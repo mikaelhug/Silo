@@ -30,7 +30,9 @@ public struct EnvFlags: Codable, Sendable, Hashable {
     public var metalFX: Bool
     /// `D3DM_SUPPORT_DXR=1` — expose DirectX Raytracing in D3DMetal's DX12 layer (GPTK; M3+).
     public var dxr: Bool
-    /// Free-form extra environment variables (override the above; an escape hatch).
+    /// Free-form extra environment variables — a config.json-only escape hatch (no UI). Merged last in
+    /// `environment()`, so it overrides the flags above — EXCEPT the sync keys (`WINEMSYNC`/`WINEESYNC`),
+    /// which `LaunchOrchestrator.makePlan` force-overrides afterward for shared-bottle co-residency.
     public var extra: [String: String]
 
     public init(
