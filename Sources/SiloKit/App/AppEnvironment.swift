@@ -24,6 +24,9 @@ public final class AppEnvironment {
     public private(set) var updateCheck: Updater.UpdateCheck?
     public private(set) var updateState: UpdateState = .idle
     public private(set) var isCheckingForUpdate = false
+    /// Result of the last update check, for the UI (e.g. "You're on the latest version."); nil when an
+    /// update IS available (the install button speaks for itself) or the check hasn't run / failed.
+    public private(set) var updateMessage: String?
     public private(set) var didBootstrap = false
     private var isBootstrapping = false
 
@@ -98,7 +101,7 @@ public final class AppEnvironment {
         await runtime.refresh()
         // Library = games installed in the Steam bottle.
         await gameLibrary.load()
-        updateCheck = try? await updater.checkForUpdate()   // best-effort; nil on failure/offline
+        await checkForUpdate()   // best-effort; sets updateCheck + the "up to date" message (nil on offline)
         didBootstrap = true
         isBootstrapping = false
     }
@@ -115,6 +118,13 @@ public final class AppEnvironment {
         guard !isCheckingForUpdate else { return }
         isCheckingForUpdate = true
         updateCheck = try? await updater.checkForUpdate()
+        // Quiet confirmation when current (mirrors the Wine tab's "already installed"); nil when an update
+        // is available (the install button says it) or the check couldn't reach GitHub.
+        if let check = updateCheck {
+            updateMessage = check.isNewer ? nil : "You're on the latest version (\(Silo.version))."
+        } else {
+            updateMessage = nil
+        }
         isCheckingForUpdate = false
     }
 

@@ -17,10 +17,6 @@ struct WineDownloadView: View {
                 if vm.isInstalling { ProgressView().controlSize(.small) }
             } header: {
                 Text("Wine")
-            } footer: {
-                Text("Downloads the latest Wine build from Silo's releases (CrossOver-based, ~250 MB) "
-                     + "and checks its SHA-256 digest to detect corruption or tampering in transit.")
-                    .font(.caption)
             }
 
             Section("Installed Wine") {
