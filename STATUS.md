@@ -3,6 +3,15 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M112 — single source of truth for versions (`versions.env`, Velox-style).** The app version (0.1.1)
+  was hard-coded in `Silo.swift` AND duplicated as a fallback in `build-app.sh`. Now `versions.env` (repo
+  root) is the ONLY place a version is edited — `SILO_VERSION`, `SILO_GITHUB_REPO`, `CROSSOVER_VERSION`
+  (the CrossOver FOSS wine-build input). `Scripts/gen-versions.sh` mirrors it into the committed
+  `Sources/SiloKit/Versions.swift` (`Versions` enum); `Silo.version`/`updateRepo`/`wineRepo` read from it.
+  `build-app.sh` regenerates + sources `versions.env` (dropped the grep + hard-coded `0.1.1` fallback);
+  `build-wine.sh` defaults its CrossOver version to `CROSSOVER_VERSION`. A unit test fails if
+  `Versions.swift` drifts from `versions.env` (verified: editing the env without regenerating turns it
+  red). 197 tests / 31 suites green; clean build; app reassembled (Info.plist 0.1.1 flows from the env).
 - **✅ M111 — bottle move now has a progress bar + refuses exFAT/FAT.** Building on M109–M110:
   - **Progress bar.** `BottleRelocator` now does a byte-counting recursive copy for cross-volume moves
     (same-volume stays an instant rename) — preserves symlinks (a Wine prefix is full of them), sums total

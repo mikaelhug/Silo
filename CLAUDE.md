@@ -84,11 +84,20 @@ bundle/auto-download an emulator.
 `swift build` clean (no warnings) **AND** `swift test` green **AND** the new code has tests.
 Then update `STATUS.md` and `git commit`.
 
+## Versions — single source of truth
+**`versions.env` (repo root) is the ONLY place a version number is edited** (app version, GitHub repo,
+CrossOver wine source version). It's shell-sourceable; `Scripts/gen-versions.sh` mirrors it into the
+*committed* `Sources/SiloKit/Versions.swift` (`Versions.silo`/`.githubRepo`/`.crossoverVersion`), which
+`Silo.swift` reads. `build-app.sh` + `build-wine.sh` source it directly. **After editing `versions.env`, run
+`Scripts/gen-versions.sh`** (build-app.sh does it for you) — a unit test fails if the two drift. Never
+hard-code a version anywhere else.
+
 ## Commands
 - Build:        `swift build`
 - Test:         `Scripts/test.sh`  (wraps `swift test`; adds the Swift Testing framework search
   path needed under Command Line Tools — plain `swift test` fails with "no such module 'Testing'")
 - Release build:`swift build -c release`
+- Bump version: edit `versions.env` → `Scripts/gen-versions.sh`
 - Assemble app: `Scripts/build-app.sh`   → `dist/Silo.app`
 - Run app:      `Scripts/run.sh`
 - Fast UI dev:  `Scripts/dev.sh`          (`swift run silo`)
