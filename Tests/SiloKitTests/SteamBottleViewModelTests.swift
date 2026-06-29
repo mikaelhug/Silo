@@ -12,7 +12,7 @@ struct SteamBottleViewModelTests {
         let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
         let session = SteamClientSession(
             bottle: bottle, orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
-        session.coldStartGraceSeconds = 0
+        session.readinessTimeout = 0
         let vm = SteamBottleViewModel(bottle: bottle, session: session)
         return (vm, fake, paths)
     }

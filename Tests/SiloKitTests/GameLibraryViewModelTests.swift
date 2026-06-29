@@ -16,7 +16,7 @@ struct GameLibraryViewModelTests {
         if wine { backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64") }
         let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
         session.updateWine(backend.wineBinaryPath)
-        session.coldStartGraceSeconds = 0   // don't wait for the (fake) Steam to "boot" in tests
+        session.readinessTimeout = 0   // no readiness wait for the (fake) Steam in tests
         let vm = GameLibraryViewModel(
             bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
             configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
@@ -207,7 +207,7 @@ struct GameLibraryViewModelTests {
         var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
         // ONE shared session — exactly how AppEnvironment wires the Library + the settings pane.
         let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
-        session.updateWine(backend.wineBinaryPath); session.coldStartGraceSeconds = 0
+        session.updateWine(backend.wineBinaryPath); session.readinessTimeout = 0
         let library = GameLibraryViewModel(
             bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
             configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,

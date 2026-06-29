@@ -27,6 +27,9 @@ public struct SteamBottle: Sendable {
         case steamInstallFailed(Int32)
     }
 
+    /// The bottle's Wine prefix.
+    public var prefix: URL { paths.steamBottle }
+
     /// Steam is installed in the bottle once `steam.exe` exists.
     public var isSteamInstalled: Bool { fileManager.fileExists(atPath: paths.steamBottleExe.path) }
 

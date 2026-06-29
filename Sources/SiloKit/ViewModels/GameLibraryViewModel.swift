@@ -21,8 +21,9 @@ public final class GameLibraryViewModel {
     public private(set) var manualRunningPIDs: [UUID: Int32] = [:]
     public private(set) var manualBusyIDs: Set<UUID> = []
     public var searchText: String = ""
+    /// The most recent action result, shown in the library's status bar. Persists until the next action
+    /// replaces it (no timed auto-dismiss — nothing in the app waits).
     public private(set) var statusMessage: String?
-    private var statusDismiss: Task<Void, Never>?
 
     private let bottle: SteamBottle
     private let discovery: DiscoveryEngine
@@ -84,16 +85,7 @@ public final class GameLibraryViewModel {
         return ByteCountFormatter.string(fromByteCount: game.sizeOnDisk, countStyle: .file)
     }
 
-    private func setStatus(_ message: String?) {
-        statusMessage = message
-        statusDismiss?.cancel()
-        guard message != nil else { return }
-        statusDismiss = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(6))
-            guard !Task.isCancelled else { return }
-            self?.statusMessage = nil
-        }
-    }
+    private func setStatus(_ message: String?) { statusMessage = message }
 
     // MARK: - Library
 
