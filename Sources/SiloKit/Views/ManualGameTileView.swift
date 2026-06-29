@@ -1,16 +1,15 @@
 import SwiftUI
 import AppKit
 
-/// A library tile for a game installed in the Steam bottle (`SteamApp`). Play launches it co-resident
-/// with the bottle's Steam client; the menu exposes Settings, Log, Wine config, Finder, Uninstall.
-struct SteamGameTileView: View {
+/// A library tile for a manual (non-Steam) game. Play launches its `.exe` in the bottle under GPTK; the
+/// menu exposes Settings, Log, Wine config, Finder, and Remove (which forgets the entry, not the files).
+struct ManualGameTileView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
-    let game: SteamApp
+    let game: ManualGame
     let onSettings: () -> Void
-    let onDetails: () -> Void
     @State private var hovering = false
-    @State private var confirmingUninstall = false
+    @State private var confirmingRemove = false
 
     var body: some View {
         let lib = env.gameLibrary
@@ -18,19 +17,16 @@ struct SteamGameTileView: View {
         let busy = lib.isBusy(game)
 
         VStack(alignment: .leading, spacing: 0) {
-            AsyncImage(url: game.headerArtURL) { phase in
-                switch phase {
-                case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
-                default: GameArtworkPlaceholder()
-                }
+            ZStack {
+                GameArtworkPlaceholder()
+                Image(systemName: "gamecontroller.fill")
+                    .font(.largeTitle).foregroundStyle(.white.opacity(0.85))
             }
             .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92).clipped()
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(game.name).font(.headline).lineLimit(1)
-                if let size = lib.sizeString(game) {
-                    Text(size).font(.caption).foregroundStyle(.secondary)
-                }
+                Text("Non-Steam game").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     primaryButton(running: running, busy: busy)
                     Spacer()
@@ -47,18 +43,23 @@ struct SteamGameTileView: View {
         .scaleEffect(hovering ? 1.015 : 1)
         .animation(.easeOut(duration: 0.12), value: hovering)
         .contentShape(RoundedRectangle(cornerRadius: 12))
-        .onTapGesture { onDetails() }
+        .onTapGesture { onSettings() }
         .onHover { hovering = $0 }
-        .help("Show details")
+        .help("Edit settings")
         .contextMenu { menuItems() }
-        .uninstallConfirmation(game: game, isPresented: $confirmingUninstall, library: env.gameLibrary)
+        .confirmationDialog("Remove \(game.name)?", isPresented: $confirmingRemove, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) { Task { await env.gameLibrary.removeManual(game) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Removes it from your library. The installed files on disk are left untouched.")
+        }
     }
 
     @ViewBuilder
     private func primaryButton(running: Bool, busy: Bool) -> some View {
         let lib = env.gameLibrary
         if running {
-            Button(role: .destructive) { Task { await lib.stop(game) } } label: {
+            Button(role: .destructive) { Task { await lib.stopManual(game) } } label: {
                 Label("Stop", systemImage: "stop.fill")
             }.buttonStyle(.borderedProminent).tint(.red)
         } else if busy {
@@ -66,27 +67,23 @@ struct SteamGameTileView: View {
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Launching…") }
             }.buttonStyle(.borderedProminent).disabled(true)
         } else {
-            Button { Task { await lib.play(game) } } label: { Label("Play", systemImage: "play.fill") }
+            Button { Task { await lib.playManual(game) } } label: { Label("Play", systemImage: "play.fill") }
                 .buttonStyle(.borderedProminent).disabled(!lib.canLaunch)
         }
     }
 
     @ViewBuilder private func menuItems() -> some View {
-        Button("Details…", action: onDetails)
         Button("Settings…", action: onSettings)
         Button("View Log") {
             openWindow(id: LogTarget.windowID,
-                       value: LogTarget(title: "\(game.name) — Log", url: env.logURL(forAppID: game.appID)))
+                       value: LogTarget(title: "\(game.name) — Log", url: env.paths.manualLog(game.id)))
         }
         Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg() } }
             .disabled(!env.gameLibrary.canLaunch)
         Button("View in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([game.installURL])
-        }
-        if let store = game.storePageURL {
-            Button("View on Steam Store") { NSWorkspace.shared.open(store) }
+            NSWorkspace.shared.activateFileViewerSelecting([game.executablePath])
         }
         Divider()
-        Button("Uninstall…", role: .destructive) { confirmingUninstall = true }
+        Button("Remove…", role: .destructive) { confirmingRemove = true }
     }
 }
