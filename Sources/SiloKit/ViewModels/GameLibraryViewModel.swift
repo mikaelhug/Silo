@@ -1,9 +1,10 @@
 import Foundation
 
-/// The library = games installed in the shared **Steam bottle** (a Wine prefix running a logged-in
-/// Windows Steam client). Silo discovers them from the bottle's `appmanifest_*.acf`, launches each
-/// **co-resident** with the Steam client (so Steamworks/DRM works) under GPTK/D3DMetal, and triggers
-/// installs/uninstalls through the bottle's Steam. No SteamCMD: the bottle's Steam is the downloader.
+/// The library: Steam games installed in the shared **Steam bottle** (a Wine prefix running a logged-in
+/// Windows Steam client) — discovered from the bottle's `appmanifest_*.acf` and launched **co-resident**
+/// with the Steam client (so Steamworks/DRM works) under GPTK/D3DMetal — plus user-added **manual**
+/// non-Steam `.exe` games, which run in the same bottle prefix under GPTK without needing Steam. No
+/// SteamCMD: the bottle's Steam is the downloader for Steam titles.
 @MainActor
 @Observable
 public final class GameLibraryViewModel {
