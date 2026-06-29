@@ -65,7 +65,8 @@ public final class AppEnvironment {
         self.steamClientSession = steamClientSession
         let gameLibrary = GameLibraryViewModel(
             bottle: bottle, discovery: discovery, orchestrator: orchestrator,
-            configStore: configStore, paths: paths, backend: initialBackend, session: steamClientSession)
+            configStore: configStore, paths: paths, backend: initialBackend, session: steamClientSession,
+            provisioner: WinePrefixProvisioner(runner: runner))
         self.gameLibrary = gameLibrary
         let steamBottleVM = SteamBottleViewModel(bottle: bottle, session: steamClientSession)
         self.steamBottleVM = steamBottleVM

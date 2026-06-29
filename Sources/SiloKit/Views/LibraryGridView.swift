@@ -104,22 +104,27 @@ struct LibraryGridView: View {
     }
 }
 
-/// Add a **non-Steam** game: point at the game's `.exe` (a portable/extracted game needs only this), or
-/// first run a setup `.exe` in the bottle for games that ship an installer. (Steam games come in through
-/// "Open Steam" instead — this is for `.exe` games you have on disk.)
+/// Add a **non-Steam** game. Each manual game gets its **own isolated bottle** (Wine prefix): point at the
+/// game's `.exe` (a portable/extracted game needs only this), or first run a setup `.exe` into the new
+/// bottle. (Steam games come in through "Open Steam" instead — this is for `.exe` games you have on disk.)
 struct AddGameSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
+    /// The draft game's id — also its bottle path — fixed for this presentation so the installer and the
+    /// final Add land in the same fresh bottle.
+    @State private var draftID = UUID()
     @State private var name = ""
     @State private var chosenExe: URL?
     @State private var ranInstaller = false
+    @State private var bottleCreated = false   // a bottle was provisioned this session (cancel → discard)
+    @State private var working = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     Button {
-                        // After running an installer the game lands in the bottle's drive_c; otherwise
+                        // After running an installer the game lands in this bottle's drive_c; otherwise
                         // (a portable game) start at the last-used location, near the extracted folder.
                         if let exe = chooseExecutable(
                             message: "Choose the game's .exe.",
@@ -133,6 +138,7 @@ struct AddGameSheet: View {
                         Label(chosenExe == nil ? "Choose Game .exe…" : "Change .exe…",
                               systemImage: "gamecontroller")
                     }
+                    .disabled(working)
                     if let chosenExe {
                         Text(chosenExe.path)
                             .font(.caption).foregroundStyle(.secondary)
@@ -149,13 +155,19 @@ struct AddGameSheet: View {
                 Section {
                     Button {
                         if let installer = chooseExecutable(
-                            message: "Choose an installer (setup .exe) to run inside the Steam bottle.") {
-                            ranInstaller = true
-                            Task { await env.gameLibrary.runInstaller(installer) }
+                            message: "Choose an installer (setup .exe) to run in this game's new bottle.") {
+                            Task {
+                                working = true
+                                await env.gameLibrary.runInstaller(installer, forBottle: draftID)
+                                bottleCreated = true
+                                ranInstaller = true
+                                working = false
+                            }
                         }
                     } label: {
                         Label("Run Installer…", systemImage: "shippingbox")
                     }
+                    .disabled(working)
                     if ranInstaller {
                         Label("Installer launched — finish its setup window, then choose the game's .exe above.",
                               systemImage: "arrow.up.forward.circle")
@@ -165,31 +177,49 @@ struct AddGameSheet: View {
                     Text("Installer (only if needed)")
                 } footer: {
                     Text("Skip this for a portable game. Use it only if your game has a separate setup .exe — "
-                         + "it runs in the bottle and installs into its Windows drive, then choose that .exe above.")
+                         + "it runs in this game's own bottle, then choose that .exe above.")
+                }
+
+                if working {
+                    Section {
+                        HStack(spacing: 10) {
+                            ProgressView().controlSize(.small)
+                            Text("Setting up this game's bottle…").foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .formStyle(.grouped)
             .navigationTitle("Add a Game")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        if bottleCreated { Task { await env.gameLibrary.discardManualBottle(draftID) } }
+                        dismiss()
+                    }
+                    .disabled(working)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         guard let chosenExe else { return }
                         Task {
-                            await env.gameLibrary.addManualGame(name: name, executable: chosenExe)
-                            dismiss()
+                            working = true
+                            let game = await env.gameLibrary.addManualGame(
+                                id: draftID, name: name, executable: chosenExe)
+                            working = false
+                            if game != nil { dismiss() }
                         }
                     }
-                    .disabled(chosenExe == nil)
+                    .disabled(chosenExe == nil || working)
                 }
             }
         }
-        .frame(width: 540, height: 480)
+        .frame(width: 540, height: 500)
     }
 
-    /// Initial folder for the "choose game .exe" panel — the bottle's Windows drive, where installers land.
+    /// Initial folder for the "choose game .exe" panel — this game's bottle drive, where its installer lands.
     private var bottleDriveC: URL {
-        env.paths.steamBottle.appendingPathComponent("drive_c", isDirectory: true)
+        env.paths.manualBottle(draftID).appendingPathComponent("drive_c", isDirectory: true)
     }
 }
 

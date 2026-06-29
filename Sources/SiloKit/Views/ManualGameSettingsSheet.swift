@@ -1,7 +1,8 @@
 import SwiftUI
+import AppKit
 
-/// Edit a manual (non-Steam) game: name, executable, performance flags, and launch options. Saving
-/// persists the edited copy through the library view model.
+/// Edit a manual (non-Steam) game: name, executable, its isolated bottle, performance flags, and launch
+/// options. Saving persists the edited copy through the library view model.
 struct ManualGameSettingsSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
@@ -26,6 +27,23 @@ struct ManualGameSettingsSheet: View {
                             game.executablePath = exe
                         }
                     }
+                }
+
+                Section {
+                    Button("Run Installer in this bottle…") {
+                        if let installer = chooseExecutable(
+                            message: "Choose a setup .exe to run in this game's bottle.") {
+                            Task { await env.gameLibrary.runInstaller(installer, forBottle: game.id) }
+                        }
+                    }
+                    Button("Show bottle in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([env.paths.manualBottle(game.id)])
+                    }
+                } header: {
+                    Text("Bottle")
+                } footer: {
+                    Text("This game runs in its own isolated Wine prefix — install runtimes or patch it "
+                         + "here without affecting other games.")
                 }
 
                 Section("Performance") {

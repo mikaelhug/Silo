@@ -3,6 +3,18 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M107–M108 — each manual (non-Steam) game now runs in its OWN isolated bottle.** Steam games still
+  share the one Steam bottle (Steamworks needs co-residency), but manual games no longer do — each gets a
+  private Wine prefix at `~/Library/Application Support/Silo/ManualBottles/<uuid>` (own registry/drive_c/
+  winecfg), so they can't pollute each other or Steam.
+  - `WinePrefixProvisioner` (M107) = reusable `wineboot --init` for any prefix; `SteamBottle` delegates to
+    it (DRY). `AppPaths.manualBottle(id)`.
+  - VM (M108): `ensureManualBottle` (idempotent boot), play/install/stop/winecfg use `paths.manualBottle(id)`,
+    `removeManual` deletes the bottle, `discardManualBottle` cleans up an unsaved draft.
+  - UI: **Add Game** provisions the game's bottle (installer runs into it; a "Setting up…" spinner; Cancel
+    discards a draft bottle). Manual settings sheet gains a **Bottle** section ("Run Installer in this
+    bottle…", "Show bottle in Finder"); the tile's Wine Config opens the game's own bottle.
+  - 187 tests / 29 suites green; clean build (no warnings); app reassembled.
 - **✅ M101–M105 — non-Steam (.exe) games + hide Steam's redistributables.** Two core-app changes:
   - **Redistributables no longer surface as a game (M101).** Root cause: discovery parsed every
     `appmanifest_*.acf`; "Steamworks Common Redistributables" (228980) looks like a normal manifest. The

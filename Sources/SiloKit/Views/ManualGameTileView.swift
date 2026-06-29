@@ -78,7 +78,7 @@ struct ManualGameTileView: View {
             openWindow(id: LogTarget.windowID,
                        value: LogTarget(title: "\(game.name) — Log", url: env.paths.manualLog(game.id)))
         }
-        Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg() } }
+        Button("Wine Config…") { Task { await env.gameLibrary.openManualWinecfg(game) } }
             .disabled(!env.gameLibrary.canLaunch)
         Button("View in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([game.executablePath])
