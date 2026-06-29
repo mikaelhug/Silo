@@ -3,6 +3,15 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M99 — code-rot sweep after the settings reshape (M94–M98).** Audited every file the settings
+  reshaping touched. Removed **dead code**: `PathPickerRow` (the manual-paths picker, orphaned when the
+  "Advanced (manual paths)" disclosure was dropped) and `BackendSettingsViewModel.isConfigured` (declared,
+  never read). Fixed **stale references**: a user-visible onboarding string and a doc comment still said
+  "Advanced → …" (now "Settings → General"); a leftover duplicate doc line called the Settings window "a
+  sheet (Wine/GPTK paths)"; and "Wine Manager" / "GPTK Manager" doc mentions across `RuntimeViewModel`,
+  `BackendSettingsViewModel`, `BackendConfig`, `WineInstall` (+ a test) now say "the Wine/GPTK settings
+  tab". Dropped the stale "experimental" framing on `SteamBottleViewModel`. Verified all readiness flags,
+  VM members, and picker helpers are still live. 175 tests green; clean build (no warnings).
 - **✅ M98 — dropped settings explanatory footers + "already latest" update message.** Removed the
   descriptive footer `Text` under **Steam bottle**, **Updates** (General tab), **Wine**, and **GPTK** —
   the sections speak for themselves. Added an "already latest" confirmation to the app updater: a manual

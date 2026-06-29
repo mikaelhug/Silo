@@ -1,6 +1,6 @@
 import Foundation
 
-/// A Wine build installed under the Runtimes dir (downloaded via the Wine Manager).
+/// A Wine build installed under the Runtimes dir (downloaded via the Wine settings tab).
 public struct WineInstall: Sendable, Equatable, Identifiable {
     public var id: String { name }
     public let name: String              // directory name, usually the release tag

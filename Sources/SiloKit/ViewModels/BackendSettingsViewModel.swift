@@ -19,16 +19,14 @@ public final class BackendSettingsViewModel {
         self.configStore = configStore
     }
 
-    public var isConfigured: Bool { config.isWineConfigured }
-
-    /// Adopt a Wine Manager default as the backend's wine binary and persist.
+    /// Adopt the Wine tab's default as the backend's wine binary and persist.
     public func applyDefaultWine(_ wine: WineInstall) async {
         config.wineBinaryPath = wine.wineBinary
         config.wineRuntimeName = wine.name
         await save()
     }
 
-    /// Adopt a GPTK Manager default as the backend's GPTK lib dir and persist.
+    /// Adopt the GPTK tab's default as the backend's GPTK lib dir and persist.
     public func applyDefaultGPTK(_ install: GPTKInstall) async {
         config.gptkLibDirPath = install.gptkLibDir
         config.gptkRuntimeName = install.name

@@ -116,7 +116,7 @@ struct AppEnvironmentUpdateTests {
         #expect(env.gptkManager.onDefaultChanged != nil)
         #expect(!env.steamBottleVM.canSetUp)
 
-        // Simulate the Wine Manager publishing a new default. AppEnvironment.init wired
+        // Simulate the Wine tab publishing a new default. AppEnvironment.init wired
         // runtime.onDefaultChanged -> applyDefaultWine -> save() -> onChange -> applyBackend.
         let install = WineInstall(
             name: "wine-cx-26",

@@ -39,7 +39,7 @@ struct LibraryGridView: View {
     }
 
     /// The subtitle next to the "Library" title: the game count, plus a small "Update available" note to
-    /// its right when a newer release exists (apply it in Advanced Settings → Updates).
+    /// its right when a newer release exists (apply it in Settings → General → Updates).
     private func subtitle(_ count: Int) -> String {
         let games = gameCountLabel(count)
         guard let update = env.updateCheck, update.isNewer else { return games }
@@ -59,7 +59,7 @@ struct LibraryGridView: View {
             switch lib.loadState {
             case .notReady:
                 ContentUnavailableView("Set up the Steam bottle", systemImage: "shippingbox",
-                    description: Text("Open Advanced → Steam bottle → Set up, then launch Steam and sign in."))
+                    description: Text("Open Settings → General → Steam bottle → Set up, then launch Steam and sign in."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .empty:
                 ContentUnavailableView {
@@ -136,8 +136,8 @@ struct AddGameSheet: View {
     }
 }
 
-/// Advanced settings presented as a sheet (Wine/GPTK paths etc.).
-/// The Settings window (macOS "Settings…" / ⌘, and the Library toolbar gear), a tabbed pane.
+/// The Settings window (macOS "Settings…" / ⌘, and the Library toolbar gear), a tabbed pane:
+/// **General** (Steam bottle + updates), **GPTK**, **Wine**.
 struct SettingsView: View {
     var body: some View {
         TabView {
