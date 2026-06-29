@@ -3,6 +3,20 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M101–M105 — non-Steam (.exe) games + hide Steam's redistributables.** Two core-app changes:
+  - **Redistributables no longer surface as a game (M101).** Root cause: discovery parsed every
+    `appmanifest_*.acf`; "Steamworks Common Redistributables" (228980) looks like a normal manifest. The
+    principled signal (verified on-device): Steam auto-installs shared packages with `LastOwner == 0`,
+    while user-owned games carry the owner's SteamID64. `SteamApp.isSharedSystemApp` + a DiscoveryEngine
+    filter — not a name match. (An exe-presence heuristic would wrongly drop real games like Split Fiction,
+    whose exe is nested.)
+  - **Add non-Steam .exe games (M102–M105).** New `ManualGame` model persisted in `config.json`
+    (backward-compatible tolerant decoder so a new key never wipes existing config); `LaunchOrchestrator.
+    launchManualGame` + `runInstaller` (reuse `makePlan`, which lost its long-dead `app:` param); a
+    UUID-keyed manual run-state in `GameLibraryViewModel` (Steam path untouched); and the UI: an
+    **Add Game** wizard (Run Installer → Choose .exe → Add), `ManualGameTileView`, and a manual settings
+    sheet. Manual games launch in the shared bottle prefix under GPTK without needing Steam.
+  - 184 tests / 28 suites green; clean build (no warnings); app reassembled. Commits M101–M105.
 - **✅ M100 — polished, stateful Updates UI in Settings → General.** Replaced the bare
   version/button/text rows with one self-contained status row that morphs between states (a `Phase` enum
   → icon + tint + title + subtitle + action): **Check Now** shows an animated spinner (held for a ~700 ms
