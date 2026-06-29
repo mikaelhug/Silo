@@ -3,6 +3,15 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M100 — polished, stateful Updates UI in Settings → General.** Replaced the bare
+  version/button/text rows with one self-contained status row that morphs between states (a `Phase` enum
+  → icon + tint + title + subtitle + action): **Check Now** shows an animated spinner (held for a ~700 ms
+  minimum so the loading always reads as deliberate), then the result cross-fades in — a green
+  ✓ "You're on the latest version" or an accent ↓ "Version X is available" with a prominent **Update &
+  Relaunch** button; install progress (downloading/installing) and a ⚠ failed+Retry state share the same
+  row. Smooth (`.smooth(0.32)`) animation + `contentTransition(.opacity)` on the text + a scale/opacity
+  transition on the icon. Mirrors the Wine tab's "load → result surfaces" flow. Dropped the now-redundant
+  `AppEnvironment.updateMessage` (the view derives all copy from `updateCheck`). 175 tests green; clean build.
 - **✅ M99 — code-rot sweep after the settings reshape (M94–M98).** Audited every file the settings
   reshaping touched. Removed **dead code**: `PathPickerRow` (the manual-paths picker, orphaned when the
   "Advanced (manual paths)" disclosure was dropped) and `BackendSettingsViewModel.isConfigured` (declared,
