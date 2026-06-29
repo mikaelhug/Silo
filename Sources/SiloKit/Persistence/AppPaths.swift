@@ -51,4 +51,9 @@ public struct AppPaths: Sendable, Hashable {
     public func log(forAppID appID: Int) -> URL {
         logsDir.appendingPathComponent("\(appID).log")
     }
+
+    /// Launch log for a manual (non-Steam) game, keyed by its stable id.
+    public func manualLog(_ id: UUID) -> URL {
+        logsDir.appendingPathComponent("manual-\(id.uuidString).log")
+    }
 }

@@ -202,4 +202,52 @@ struct ConfigStoreTests {
         #expect(off["D3DM_ENABLE_METALFX"] == nil)
         #expect(off["D3DM_SUPPORT_DXR"] == nil)
     }
+
+    // MARK: - Manual (non-Steam) games
+
+    @Test("Round-trips manual games through JSON; upsert matches on id")
+    func manualGameRoundTrip() async throws {
+        let (store, _, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        let id = UUID()
+        var game = ManualGame(id: id, name: "MyGame",
+                              executablePath: URL(fileURLWithPath: "/games/MyGame/game.exe"))
+        game.customArgs = ["-windowed"]
+        game.envFlags.metalHUD = true
+        try await store.saveManualGame(game)
+
+        var reloaded = await store.load()
+        #expect(reloaded.manualGames.count == 1)
+        #expect(reloaded.manualGames.first?.name == "MyGame")
+        #expect(reloaded.manualGames.first?.customArgs == ["-windowed"])
+        #expect(reloaded.manualGames.first?.envFlags.metalHUD == true)
+
+        // Re-save the same id → upsert (rename), not a duplicate.
+        try await store.updateManualGame(id: id) { $0.name = "Renamed" }
+        reloaded = await store.load()
+        #expect(reloaded.manualGames.count == 1)
+        #expect(reloaded.manualGames.first?.name == "Renamed")
+
+        try await store.removeManualGame(id: id)
+        #expect(await store.load().manualGames.isEmpty)
+    }
+
+    @Test("Old config.json (no manualGames key) still decodes, preserving backend + games")
+    func backwardCompatDecode() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        // Build a realistic document with the real encoder, then strip the manualGames key to simulate a
+        // pre-manualGames config.json. It must NOT be discarded (that would wipe the user's config).
+        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        let original = AppState(backend: backend, games: [GameConfig(appID: 220)])
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as! [String: Any]
+        json.removeValue(forKey: "manualGames")
+        try FileManager.default.createDirectory(at: paths.supportDir, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: json).write(to: paths.configFile)
+
+        let state = await store.load()
+        #expect(state.backend.wineBinaryPath?.path == "/w/wine64")   // preserved, not reset
+        #expect(state.games.map(\.appID) == [220])                   // preserved
+        #expect(state.manualGames.isEmpty)                           // defaulted, not a decode failure
+    }
 }

@@ -66,4 +66,35 @@ public actor ConfigStore {
         try save(state)
         return state
     }
+
+    // MARK: - Manual (non-Steam) games
+
+    /// Insert/replace a manual game, preserving everything else.
+    @discardableResult
+    public func saveManualGame(_ game: ManualGame) throws -> AppState {
+        var state = load()
+        state.upsertManual(game)
+        try save(state)
+        return state
+    }
+
+    /// Mutate a single manual game in place (load → mutate → upsert → save). No-op if it's gone.
+    @discardableResult
+    public func updateManualGame(id: UUID, _ mutate: @Sendable (inout ManualGame) -> Void) throws -> AppState {
+        var state = load()
+        guard var game = state.manualGames.first(where: { $0.id == id }) else { return state }
+        mutate(&game)
+        state.upsertManual(game)
+        try save(state)
+        return state
+    }
+
+    /// Remove a manual game from the library, preserving everything else.
+    @discardableResult
+    public func removeManualGame(id: UUID) throws -> AppState {
+        var state = load()
+        state.removeManual(id: id)
+        try save(state)
+        return state
+    }
 }
