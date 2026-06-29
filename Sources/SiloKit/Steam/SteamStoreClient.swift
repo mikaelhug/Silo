@@ -27,6 +27,7 @@ public struct SteamStoreClient: Sendable {
 
     public func details(appID: Int) async -> SteamStoreDetails? {
         guard let url = URL(string: "https://store.steampowered.com/api/appdetails?appids=\(appID)&l=english"),
+              (try? DownloadGuard.requireHTTPS(url)) != nil,   // https-only, consistent with every other fetch
               let (data, _) = try? await session.data(from: url) else { return nil }
         return Self.parse(data, appID: appID)
     }

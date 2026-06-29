@@ -3,10 +3,8 @@ import Testing
 
 @Suite("Smoke")
 struct SmokeTests {
-    @Test("Version metadata is present")
-    func versionMetadata() {
-        #expect(!Silo.version.isEmpty)
-        #expect(Silo.bundleID == "com.mikael.silo")
-        #expect(Silo.appName == "Silo")
+    @Test("Version metadata resolves to a non-empty value (Versions.swift was generated)")
+    func versionResolves() {
+        #expect(!Silo.version.isEmpty)   // the real version-sync guard lives in VersionsTests
     }
 }

@@ -183,6 +183,10 @@ public struct LaunchOrchestrator: Sendable {
     private func resolveExecutable(app: SteamApp, config: GameConfig) throws -> URL {
         let installURL = app.installURL
         if let relative = config.executableRelativePath {
+            // A user-entered relative exe must stay inside the install dir — reject a path that climbs out.
+            guard !relative.split(separator: "/").contains("..") else {
+                throw LaunchError.executableNotFound(installURL)
+            }
             return installURL.appendingPathComponent(relative)
         }
         if let found = ExecutableResolver.firstExecutable(in: installURL) { return found }
