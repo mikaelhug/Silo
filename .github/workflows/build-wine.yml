@@ -47,13 +47,13 @@ jobs:
       ARCH_PREFIX: "arch -x86_64"
       CCACHE_DIR: ${{ github.workspace }}/.ccache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rosetta 2
         run: softwareupdate --install-rosetta --agree-to-license || true
 
       - name: Cache ccache (speeds up repeat builds)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-wine-${{ inputs.crossover_version }}
@@ -169,7 +169,7 @@ jobs:
           ls -la wine.tar.xz wine.tar.xz.sha256
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.release_tag }}
           name: ${{ inputs.release_tag }}
