@@ -8,9 +8,6 @@ struct ManualGameSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// A local editable copy — only written back on Save.
     @State var game: ManualGame
-    /// Edited as free text (seeded on appear); parsed into `envFlags.extra` on Save so it isn't
-    /// re-normalized under the cursor while typing.
-    @State private var envText = ""
 
     var body: some View {
         NavigationStack {
@@ -60,36 +57,22 @@ struct ManualGameSettingsSheet: View {
                 }
 
                 Section("Launch options") {
-                    TextField("e.g. -windowed -dx11", text: $game.launchOptionsString)
+                    TextField("Launch options", text: $game.launchOptionsString, axis: .vertical)
+                        .labelsHidden()
+                        .lineLimit(1...3)
+                        .multilineTextAlignment(.leading)
                         .autocorrectionDisabled()
-                }
-
-                Section {
-                    TextField("KEY=VALUE (one per line)", text: $envText, axis: .vertical)
-                        .lineLimit(2...6)
-                        .autocorrectionDisabled()
-                        .font(.system(.body, design: .monospaced))
-                } header: {
-                    Text("Environment variables")
-                } footer: {
-                    Text("Per-game env vars. For an ANGLE/Electron game that fails with shader / D3D11 "
-                         + "errors, try ANGLE_DEFAULT_PLATFORM=opengl (or swiftshader) to steer it off the "
-                         + "unsupported D3D11 backend.")
                 }
             }
             .formStyle(.grouped)
             .navigationTitle(game.name)
-            .onAppear { envText = game.envFlags.extraEnvironmentString }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        game.envFlags.extraEnvironmentString = envText
-                        Task { await env.gameLibrary.updateManual(game); dismiss() }
-                    }
+                    Button("Save") { Task { await env.gameLibrary.updateManual(game); dismiss() } }
                 }
             }
         }
-        .frame(width: 480, height: 600)
+        .frame(width: 480, height: 560)
     }
 }

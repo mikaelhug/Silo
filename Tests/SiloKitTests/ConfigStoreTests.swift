@@ -203,24 +203,6 @@ struct ConfigStoreTests {
         #expect(off["D3DM_SUPPORT_DXR"] == nil)
     }
 
-    @Test("extraEnvironmentString parses KEY=VALUE lines into extra and reaches the launch env")
-    func extraEnvironmentString() {
-        var flags = EnvFlags()
-        flags.extraEnvironmentString = """
-        ANGLE_DEFAULT_PLATFORM=opengl
-        FOO = bar
-        a line with no equals
-        EMPTYVAL=
-        =novalue
-        """
-        #expect(flags.extra["ANGLE_DEFAULT_PLATFORM"] == "opengl")
-        #expect(flags.extra["FOO"] == "bar")                       // key + value trimmed
-        #expect(flags.extra["EMPTYVAL"] == "")                     // empty value kept
-        #expect(flags.extra.count == 3)                            // no-'=' line + empty-key line dropped
-        #expect(flags.environment()["ANGLE_DEFAULT_PLATFORM"] == "opengl")   // flows to launch env
-        // Serializes back as sorted KEY=VALUE lines (round-trip).
-        #expect(flags.extraEnvironmentString == "ANGLE_DEFAULT_PLATFORM=opengl\nEMPTYVAL=\nFOO=bar")
-    }
 
     // MARK: - Manual (non-Steam) games
 

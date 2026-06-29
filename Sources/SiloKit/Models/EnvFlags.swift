@@ -49,23 +49,6 @@ public struct EnvFlags: Codable, Sendable, Hashable {
         self.extra = extra
     }
 
-    /// `extra` as editable `KEY=VALUE` lines (one per line, sorted) for a settings field. Lines without
-    /// a `=` are ignored; keys/values are trimmed. Lets a game carry per-title compat env — e.g.
-    /// `ANGLE_DEFAULT_PLATFORM=opengl` to steer an ANGLE/Electron game off the failing D3D11 backend.
-    public var extraEnvironmentString: String {
-        get { extra.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n") }
-        set {
-            var parsed: [String: String] = [:]
-            for line in newValue.split(whereSeparator: \.isNewline) {
-                guard let eq = line.firstIndex(of: "=") else { continue }
-                let key = line[..<eq].trimmingCharacters(in: .whitespaces)
-                let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-                if !key.isEmpty { parsed[key] = value }
-            }
-            extra = parsed
-        }
-    }
-
     /// Environment variables contributed by these flags.
     /// `extra` is merged last so it can override anything.
     public func environment() -> [String: String] {
