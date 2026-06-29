@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The Library: games installed in the Steam bottle (launched co-resident with its Steam client under
-/// GPTK), or the first-run onboarding until Wine + GPTK + the Steam bottle are ready.
+/// The Library: Steam games installed in the bottle (launched co-resident with its Steam client under
+/// GPTK) plus any manual non-Steam `.exe` games, or the first-run onboarding until Wine + GPTK + the
+/// Steam bottle are ready.
 struct LibraryGridView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openSettings) private var openSettings
