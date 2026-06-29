@@ -13,6 +13,23 @@ func chooseDiskImage() -> URL? {
     return panel.runModal() == .OK ? panel.url : nil
 }
 
+/// Present an open panel for choosing a Windows `.exe` (a game or installer). `directory` sets the initial
+/// location (e.g. the bottle's `drive_c`). Returns nil if cancelled.
+@MainActor
+func chooseExecutable(message: String, directory: URL? = nil) -> URL? {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = false
+    panel.message = message
+    panel.prompt = "Choose"
+    if let exe = UTType(filenameExtension: "exe") { panel.allowedContentTypes = [exe] }
+    if let directory, FileManager.default.fileExists(atPath: directory.path) {
+        panel.directoryURL = directory
+    }
+    return panel.runModal() == .OK ? panel.url : nil
+}
+
 /// Gradient fallback shown while a game's cover art loads or is unavailable (tile + detail hero).
 struct GameArtworkPlaceholder: View {
     var iconFont: Font = .title2

@@ -169,7 +169,8 @@ public final class GameLibraryViewModel {
         clearRunState(game.appID)
     }
 
-    public func openWinecfg(_ game: SteamApp) async {
+    /// Open `winecfg` for the shared bottle prefix (it's prefix-wide, so not per-game).
+    public func openWinecfg() async {
         guard backend.isWineConfigured else { setStatus("No Wine configured."); return }
         await orchestrator.runWineTool("winecfg", prefix: paths.steamBottle, backend: backend)
     }

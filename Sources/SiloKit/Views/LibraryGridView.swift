@@ -6,15 +6,18 @@ struct LibraryGridView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openSettings) private var openSettings
     @State private var settingsTarget: SteamApp?
+    @State private var manualSettingsTarget: ManualGame?
     @State private var detailTarget: SteamApp?
     @State private var showAddGame = false
 
     var body: some View {
         @Bindable var lib = env.gameLibrary
-        let shown = lib.filtered   // compute the filter+sort ONCE; reused by the subtitle count + the grid
+        // Compute the filter+sort ONCE; reused by the subtitle count + the grid.
+        let steamShown = lib.filtered
+        let manualShown = lib.filteredManual
         Group {
             if env.setupComplete {
-                grid(lib, shown: shown)
+                grid(lib, steam: steamShown, manual: manualShown)
             } else {
                 OnboardingView()
             }
@@ -24,17 +27,19 @@ struct LibraryGridView: View {
             if env.setupComplete {
                 Button { Task { await lib.openSteam() } } label: { Label("Open Steam", systemImage: "cart") }
                     .help("Open the bottle's Steam to browse + install games")
-                Button { showAddGame = true } label: { Label("Install Game", systemImage: "plus") }
+                Button { showAddGame = true } label: { Label("Add Game", systemImage: "plus") }
+                    .help("Add a non-Steam .exe game")
                 Button { Task { await lib.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
             }
             Button { openSettings() } label: { Label("Settings", systemImage: "gearshape") }
         }
         .sheet(isPresented: $showAddGame) { AddGameSheet() }
         .sheet(item: $settingsTarget) { GameSettingsSheet(game: $0) }
+        .sheet(item: $manualSettingsTarget) { ManualGameSettingsSheet(game: $0) }
         .sheet(item: $detailTarget) { game in
             GameDetailView(game: game, onSettings: { detailTarget = nil; settingsTarget = game })
         }
-        .navigationSubtitle(env.setupComplete ? subtitle(shown.count) : "")
+        .navigationSubtitle(env.setupComplete ? subtitle(steamShown.count + manualShown.count) : "")
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
     }
 
@@ -54,7 +59,7 @@ struct LibraryGridView: View {
     private let columns = [GridItem(.adaptive(minimum: 250), spacing: 16)]
 
     @ViewBuilder
-    private func grid(_ lib: GameLibraryViewModel, shown: [SteamApp]) -> some View {
+    private func grid(_ lib: GameLibraryViewModel, steam: [SteamApp], manual: [ManualGame]) -> some View {
         VStack(spacing: 0) {
             switch lib.loadState {
             case .notReady:
@@ -63,11 +68,12 @@ struct LibraryGridView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .empty:
                 ContentUnavailableView {
-                    Label("No games installed yet", systemImage: "tray")
+                    Label("No games yet", systemImage: "tray")
                 } description: {
-                    Text("Install games from the bottle's Steam, then Refresh.")
+                    Text("Install games from the bottle's Steam, or add a non-Steam .exe game.")
                 } actions: {
                     Button("Open Steam") { Task { await lib.openSteam() } }
+                    Button("Add Game…") { showAddGame = true }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .error(let message):
@@ -76,10 +82,14 @@ struct LibraryGridView: View {
             default:
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(shown) { game in
+                        ForEach(steam) { game in
                             SteamGameTileView(game: game,
                                               onSettings: { settingsTarget = game },
                                               onDetails: { detailTarget = game })
+                        }
+                        ForEach(manual) { game in
+                            ManualGameTileView(game: game,
+                                               onSettings: { manualSettingsTarget = game })
                         }
                     }
                     .padding()
@@ -93,46 +103,88 @@ struct LibraryGridView: View {
     }
 }
 
-/// Install a game into the bottle by App ID — opens the bottle's Steam to its install dialog.
+/// Add a **non-Steam** game: optionally run its installer in the bottle, then point at the game's `.exe`.
+/// (Steam games come in through "Open Steam" instead — this is for `.exe` games you have on disk.)
 struct AddGameSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
-    @State private var appIDText = ""
-
-    private var appID: Int? {
-        let trimmed = appIDText.trimmingCharacters(in: .whitespaces)
-        guard let id = Int(trimmed), id > 0 else { return nil }
-        return id
-    }
+    @State private var name = ""
+    @State private var chosenExe: URL?
+    @State private var ranInstaller = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Steam App ID (e.g. 220)", text: $appIDText).autocorrectionDisabled()
+                    Button {
+                        if let installer = chooseExecutable(
+                            message: "Choose an installer (setup .exe) to run inside the Steam bottle.") {
+                            ranInstaller = true
+                            Task { await env.gameLibrary.runInstaller(installer) }
+                        }
+                    } label: {
+                        Label("Run Installer…", systemImage: "shippingbox")
+                    }
+                    if ranInstaller {
+                        Label("Installer launched — finish its setup window, then choose the game's .exe below.",
+                              systemImage: "arrow.down.forward.circle")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 } header: {
-                    Text("Install a game by App ID")
+                    Text("1 · Installer (optional)")
                 } footer: {
-                    Text("The App ID is the number in the game's Steam store URL "
-                         + "(store.steampowered.com/app/<ID>). Silo opens the bottle's Steam to its install "
-                         + "dialog; once it finishes downloading there, Refresh the library.")
+                    Text("If the game ships an installer, run it here — it installs into the bottle's Windows "
+                         + "drive. Skip this for a portable game you can point at directly.")
+                }
+
+                Section {
+                    Button {
+                        if let exe = chooseExecutable(
+                            message: "Choose the game's .exe.", directory: bottleDriveC) {
+                            chosenExe = exe
+                            if name.trimmingCharacters(in: .whitespaces).isEmpty {
+                                name = exe.deletingPathExtension().lastPathComponent
+                            }
+                        }
+                    } label: {
+                        Label(chosenExe == nil ? "Choose Game .exe…" : "Change .exe…",
+                              systemImage: "gamecontroller")
+                    }
+                    if let chosenExe {
+                        Text(chosenExe.path)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    }
+                    TextField("Name", text: $name)
+                } header: {
+                    Text("2 · Game")
+                } footer: {
+                    Text("Point at the game's main executable — often under the bottle's "
+                         + "drive_c/Program Files after installing.")
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("Install Game")
+            .navigationTitle("Add a Game")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Install") {
-                        guard let appID else { return }
-                        Task { await env.gameLibrary.install(appID: appID) }
-                        dismiss()
+                    Button("Add") {
+                        guard let chosenExe else { return }
+                        Task {
+                            await env.gameLibrary.addManualGame(name: name, executable: chosenExe)
+                            dismiss()
+                        }
                     }
-                    .disabled(appID == nil)
+                    .disabled(chosenExe == nil)
                 }
             }
         }
-        .frame(width: 440, height: 240)
+        .frame(width: 540, height: 480)
+    }
+
+    /// Initial folder for the "choose game .exe" panel — the bottle's Windows drive, where installers land.
+    private var bottleDriveC: URL {
+        env.paths.steamBottle.appendingPathComponent("drive_c", isDirectory: true)
     }
 }
 
