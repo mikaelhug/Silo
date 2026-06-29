@@ -147,9 +147,6 @@ struct AddGameSheet: View {
                     TextField("Name", text: $name)
                 } header: {
                     Text("Game")
-                } footer: {
-                    Text("Point at the game's main .exe. For a portable game (a .zip you extracted), this is "
-                         + "all you need — just keep the folder somewhere it won't move.")
                 }
 
                 Section {
@@ -175,9 +172,6 @@ struct AddGameSheet: View {
                     }
                 } header: {
                     Text("Installer (only if needed)")
-                } footer: {
-                    Text("Skip this for a portable game. Use it only if your game has a separate setup .exe — "
-                         + "it runs in this game's own bottle, then choose that .exe above.")
                 }
 
                 if working {

@@ -67,9 +67,6 @@ struct GeneralSettingsView: View {
             }
         } header: {
             Text("Bottles")
-        } footer: {
-            Text("Where Silo keeps its Wine bottles (the Steam bottle + each manual game's bottle). Moving "
-                 + "copies the existing data, then Silo relaunches to use the new location.")
         }
     }
 
