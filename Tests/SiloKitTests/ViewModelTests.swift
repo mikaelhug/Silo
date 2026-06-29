@@ -63,6 +63,33 @@ struct ViewModelTests {
         #expect(vm.installed.map(\.name) == ["wine-cx-26.2.0"])
     }
 
+    @Test("installLatest does NOT re-download when the latest Wine is already installed")
+    func installLatestAlreadyInstalled() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let json = """
+        [ {"tag_name":"wine-cx-26.2.0","name":"Wine CX 26.2.0","assets":[
+            {"name":"wine.tar.xz","browser_download_url":"https://e.com/already.tar.xz","size":1}]} ]
+        """
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/already/releases?per_page=15", data: Data(json.utf8))
+        // Deliberately do NOT stub the asset URL — a download would fail, proving we don't attempt one.
+        let fake = FakeProcessRunner()
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        // The latest build is already on disk.
+        let bin = paths.runtimesDir.appendingPathComponent("wine-cx-26.2.0/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: bin.appendingPathComponent("wine64").path, contents: Data("x".utf8))
+        let vm = RuntimeViewModel(
+            manager: RuntimeManager(paths: paths, runner: fake, session: FakeURLProtocol.makeSession()),
+            repo: "acme/already")
+        await vm.refresh()                                   // installed now lists wine-cx-26.2.0
+
+        await vm.installLatest()
+
+        #expect(vm.statusMessage?.contains("already installed") == true)
+        #expect(vm.installed.map(\.name) == ["wine-cx-26.2.0"])             // unchanged
+        #expect(!fake.invocations.contains { $0.executable.lastPathComponent == "tar" })   // no extraction
+    }
+
     @Test("installLatest reports 'No Wine build published' when the repo has no wine-* release")
     func installLatestNoWineRelease() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

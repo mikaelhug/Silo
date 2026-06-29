@@ -42,6 +42,13 @@ public final class RuntimeViewModel {
                 statusMessage = "No Wine build published yet (the CI build-wine workflow must run first)."
                 return
             }
+            // Already have the latest? Don't re-download the ~250 MB build — just say so (and adopt it as
+            // the default if none is set).
+            if let existing = installed.first(where: { $0.name == release.tagName }) {
+                if defaultName == nil { setDefault(existing) }
+                statusMessage = "Latest Wine (\(release.version)) is already installed."
+                return
+            }
             guard let asset = RuntimeManager.preferredAsset(release) else {
                 statusMessage = "Latest Wine release has no installable archive."
                 return

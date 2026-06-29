@@ -3,6 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M97 — Wine "install latest" no-op when current + a manual update check.** (1) `RuntimeViewModel.
+  installLatest` now short-circuits when the newest published Wine is already installed — instead of
+  re-downloading the ~250 MB build it reports "Latest Wine (X) is already installed" (and adopts it as
+  default if none set). (2) Added a **"Check for Updates"** button to Settings → General → Updates
+  (`AppEnvironment.checkForUpdate` + `isCheckingForUpdate`) so the user can re-check on demand, even though
+  bootstrap still checks automatically. +2 tests → 175 / 28 suites green; clean build (no warnings).
 - **✅ M96 — Settings tabs restructured to General / GPTK / Wine.** The Settings window now has three
   top-level tabs: **General** (the former Steam-bottle pane, with the app version + inline updater moved to
   a "Updates" section at the bottom — `GeneralSettingsView`, renamed from `BackendSettingsView`), **GPTK**

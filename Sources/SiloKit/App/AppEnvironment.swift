@@ -23,6 +23,7 @@ public final class AppEnvironment {
     private let updater: Updater
     public private(set) var updateCheck: Updater.UpdateCheck?
     public private(set) var updateState: UpdateState = .idle
+    public private(set) var isCheckingForUpdate = false
     public private(set) var didBootstrap = false
     private var isBootstrapping = false
 
@@ -106,6 +107,15 @@ public final class AppEnvironment {
     public func refreshLibraryIfReady() async {
         guard didBootstrap, gameLibrary.steamReady else { return }
         await gameLibrary.load()
+    }
+
+    /// Manually re-check GitHub for a newer app release — the same check `bootstrap()` runs automatically,
+    /// surfaced as a "Check for Updates" button in Settings → General.
+    public func checkForUpdate() async {
+        guard !isCheckingForUpdate else { return }
+        isCheckingForUpdate = true
+        updateCheck = try? await updater.checkForUpdate()
+        isCheckingForUpdate = false
     }
 
     /// Apply the available update **inline** (Sparkle-style): download the release, swap the running

@@ -67,6 +67,25 @@ struct AppEnvironmentUpdateTests {
         #expect(runner.invocations.count == before)     // zero process work
     }
 
+    @Test("checkForUpdate re-queries GitHub and updates updateCheck")
+    func manualCheckForUpdate() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        FakeURLProtocol.stub("https://api.github.com/repos/test/manual-check/releases?per_page=30",
+                             data: Data(newerJSON.utf8))
+        let runner = FakeProcessRunner()
+        let env = AppEnvironment(
+            paths: paths, runner: runner,
+            updater: Updater(repo: "test/manual-check", currentVersion: "0.0.1",
+                             session: FakeURLProtocol.makeSession(), runner: runner))
+        #expect(env.updateCheck == nil)            // didn't bootstrap, so no auto-check yet
+
+        await env.checkForUpdate()
+
+        #expect(env.updateCheck?.isNewer == true)  // the manual check found the v9.9.9 release
+        #expect(!env.isCheckingForUpdate)
+    }
+
     // MARK: - applyBackend fan-out
 
     @Test("AppEnvironment fans a backend change out to BOTH the library and the Steam-bottle pane")

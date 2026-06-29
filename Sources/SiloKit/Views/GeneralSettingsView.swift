@@ -58,8 +58,14 @@ struct GeneralSettingsView: View {
                 if let update = env.updateCheck, update.isNewer {
                     Button("Update to \(update.latestVersion) & Relaunch") { Task { await env.installUpdate() } }
                         .buttonStyle(.borderedProminent)
-                } else {
+                } else if env.updateCheck != nil {
                     LabeledContent("Status", value: "Up to date")
+                }
+                LabeledContent("Check for updates") {
+                    Button(env.isCheckingForUpdate ? "Checking…" : "Check Now") {
+                        Task { await env.checkForUpdate() }
+                    }
+                    .disabled(env.isCheckingForUpdate)
                 }
             }
         } header: {
