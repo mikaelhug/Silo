@@ -18,10 +18,6 @@ struct GPTKManagerView: View {
                     .font(.caption)
             } header: {
                 Text("Game Porting Toolkit")
-            } footer: {
-                Text("Silo mounts the .dmg and extracts the D3DMetal libraries. A wine binary is still "
-                     + "needed (set it in Backend & Runtime).")
-                    .font(.caption)
             }
 
             Section("Installed versions") {

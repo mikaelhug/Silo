@@ -3,6 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M98 — dropped settings explanatory footers + "already latest" update message.** Removed the
+  descriptive footer `Text` under **Steam bottle**, **Updates** (General tab), **Wine**, and **GPTK** —
+  the sections speak for themselves. Added an "already latest" confirmation to the app updater: a manual
+  **Check for Updates** (or the bootstrap auto-check) now sets `AppEnvironment.updateMessage` to "You're on
+  the latest version (X)" when current (nil when an update is available — the install button says it — or on
+  offline), shown under the Check button. Mirrors the Wine tab's "already installed" message. 175 tests
+  green; clean build (no warnings).
 - **✅ M97 — Wine "install latest" no-op when current + a manual update check.** (1) `RuntimeViewModel.
   installLatest` now short-circuits when the newest published Wine is already installed — instead of
   re-downloading the ~250 MB build it reports "Latest Wine (X) is already installed" (and adopts it as

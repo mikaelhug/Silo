@@ -34,11 +34,6 @@ struct GeneralSettingsView: View {
             }
         } header: {
             Text("Steam bottle")
-        } footer: {
-            Text("For Steamworks/DRM games that need a running Steam client. “Set up” installs Windows "
-                 + "Steam into a shared prefix; “Launch Steam” starts it — sign in once (it caches the "
-                 + "login), then run a game and it shares this prefix.")
-                .font(.caption)
         }
     }
 
@@ -58,8 +53,6 @@ struct GeneralSettingsView: View {
                 if let update = env.updateCheck, update.isNewer {
                     Button("Update to \(update.latestVersion) & Relaunch") { Task { await env.installUpdate() } }
                         .buttonStyle(.borderedProminent)
-                } else if env.updateCheck != nil {
-                    LabeledContent("Status", value: "Up to date")
                 }
                 LabeledContent("Check for updates") {
                     Button(env.isCheckingForUpdate ? "Checking…" : "Check Now") {
@@ -67,13 +60,12 @@ struct GeneralSettingsView: View {
                     }
                     .disabled(env.isCheckingForUpdate)
                 }
+                if let message = env.updateMessage {
+                    Text(message).font(.callout).foregroundStyle(.secondary)
+                }
             }
         } header: {
             Text("Updates")
-        } footer: {
-            Text("Silo updates itself in place from its GitHub releases. It never bundles or downloads "
-                 + "Wine, GPTK, or any Steam-API emulator.")
-                .font(.caption)
         }
     }
 }
