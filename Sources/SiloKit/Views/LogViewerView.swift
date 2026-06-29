@@ -80,20 +80,21 @@ final class LogTailer {
             FileManager.default.createFile(atPath: url.path, contents: nil)
         }
         contents = url.tailString(maxBytes: logTailBytes)
-        watch = FileWatch(url: url) { text in
-            Task { @MainActor [weak self] in self?.enqueue(text) }
+        watch = FileWatch(url: url) {
+            let tail = url.tailString(maxBytes: logTailBytes)   // read off the main actor
+            Task { @MainActor [weak self] in self?.enqueue(tail) }
         }
     }
 
-    /// Coalesce write bursts: a noisy launch can fire many kqueue events/sec, but re-rendering the 256 KB
-    /// monospaced log Text on every one would stall the main actor. Hold the latest tail and publish at most
-    /// ~7×/sec (trailing), skipping no-op updates. Still event-driven — the throttle adds no polling.
+    /// Coalesce write bursts without a timer: a noisy launch can fire many kqueue events at once, but
+    /// re-rendering the 256 KB monospaced log Text on every one would stall the main actor. Hold the latest
+    /// tail and flush once on the next main-actor turn — every event that lands before the flush runs folds
+    /// into a single publish. Purely event-driven; no sleep, no polling.
     private func enqueue(_ text: String) {
         pendingTail = text
         guard !flushScheduled else { return }
         flushScheduled = true
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(150))
             guard let self else { return }
             self.flushScheduled = false
             if let tail = self.pendingTail, tail != self.contents { self.contents = tail }
@@ -103,23 +104,4 @@ final class LogTailer {
 
     /// Stops watching (also happens automatically when this tailer is deallocated, via `FileWatch`).
     func stop() { watch = nil; pendingTail = nil }
-}
-
-/// A self-contained kqueue file-watcher: fires `onChange` with the file's tail on each write, and tears
-/// down its source + descriptor on deinit (so it's safe to own from a `@MainActor` type).
-private final class FileWatch {
-    private let source: any DispatchSourceProtocol
-
-    init?(url: URL, onChange: @escaping @Sendable (String) -> Void) {
-        let fd = open(url.path, O_EVTONLY)
-        guard fd >= 0 else { return nil }
-        let src = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd, eventMask: [.write, .extend], queue: .global())
-        src.setEventHandler { onChange(url.tailString(maxBytes: logTailBytes)) }   // read off the main actor
-        src.setCancelHandler { close(fd) }
-        source = src
-        src.resume()
-    }
-
-    deinit { source.cancel() }
 }

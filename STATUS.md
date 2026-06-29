@@ -3,6 +3,19 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M114 — removed every sleep/poll; readiness is now event-driven.** No fixed waits anywhere:
+  - **Cold-start 10s grace → gone.** `SteamClientSession` now resolves the instant the co-resident Steam
+    is ready via a **kqueue watch on the prefix's `user.reg`** for Steam's `ActiveProcess` pid (exactly what
+    a game's `SteamAPI_Init` reads) — `SteamReadiness` (pure parse, unit-tested) + the reusable `FileWatch`.
+    A cold launch waits only as long as Steam actually takes, not a flat 10s. The one remaining `Task.sleep`
+    is a **bounded failsafe** (`readinessTimeout`, default 20s) that only fires if the signal never arrives
+    (so a wrong signal can't hang a launch) — it is NOT the mechanism.
+  - **Status auto-dismiss (6s) → gone:** the status bar shows the last action until replaced (no timer).
+  - **Update-check spinner floor (700ms) → gone:** the spinner reflects the real check duration.
+  - **Log-viewer throttle (150ms) → gone:** replaced with timer-free per-main-actor-turn coalescing (still
+    event-driven, still coalesces bursts). Extracted `FileWatch` to `Support/` (shared by the log tailer +
+    the readiness watch).
+  - 202 tests / 32 suites green; clean build (no warnings); app reassembled.
 - **✅ M112/M113 — single source of truth for versions (`versions.env`, Velox-style).** The app version was
   hard-coded in `Silo.swift` AND duplicated as a fallback in `build-app.sh`. Now `versions.env` (repo root)
   is the ONLY place a version is edited — `SILO_VERSION`, `SILO_GITHUB_REPO`, `CROSSOVER_VERSION` (the

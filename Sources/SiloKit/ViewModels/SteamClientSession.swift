@@ -18,9 +18,10 @@ public final class SteamClientSession {
     private var steamObserver: (any ProcessObservation)?
     /// The in-flight launch, so concurrent callers coalesce onto ONE instead of each starting Steam.
     private var steamLaunch: Task<Void, Never>?
-    /// Seconds to wait after a cold start before returning, so a game launched right after can reach Steam
-    /// (boot + auto-login + connect). Overridden to 0 in tests.
-    var coldStartGraceSeconds: Double = 10
+    /// Last-resort failsafe (seconds) for the readiness wait so a missing signal can't hang a launch — NOT
+    /// a fixed wait: a cold start resolves the instant Steam registers its `ActiveProcess` (event-driven,
+    /// see `awaitSteamReady`). 0 disables the wait entirely (tests).
+    var readinessTimeout: Double = 20
     /// The last launch failure message (for the UI), cleared on a successful launch.
     public private(set) var launchError: String?
 
@@ -66,7 +67,31 @@ public final class SteamClientSession {
         steamObserver = orchestrator.observeExit(pid: pid) { [weak self] in
             Task { @MainActor in if self?.steamPID == pid { self?.steamPID = nil } }
         }
-        if coldStartGraceSeconds > 0 { try? await Task.sleep(for: .seconds(coldStartGraceSeconds)) }
+        await awaitSteamReady()
+    }
+
+    /// Wait until the co-resident Steam client is ready for a game's Steamworks — i.e. it has registered a
+    /// live `ActiveProcess` pid in the prefix's `user.reg` (the exact thing `SteamAPI_Init` reads). Resolves
+    /// the INSTANT that happens via a kqueue watch on `user.reg`: no fixed wait, no polling. The
+    /// `readinessTimeout` is purely a failsafe so a missing signal can't hang a launch — in normal operation
+    /// the event resolves first. Returns immediately when readiness is already present or disabled (tests).
+    private func awaitSteamReady() async {
+        guard readinessTimeout > 0 else { return }
+        let prefix = bottle.prefix
+        if SteamReadiness.isReady(prefix: prefix) { return }
+        let timeout = readinessTimeout
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let gate = ReadyGate(continuation)
+            // Event-driven: resolve the moment Steam writes its ActiveProcess pid to user.reg.
+            gate.watch = FileWatch(url: SteamReadiness.userReg(prefix: prefix)) {
+                if SteamReadiness.isReady(prefix: prefix) { Task { @MainActor in gate.finish() } }
+            }
+            // Failsafe only — guards against a never-arriving signal (or Steam dying mid-boot).
+            gate.failsafe = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(timeout))
+                gate.finish()
+            }
+        }
     }
 
     /// Launch the bottle's Steam client (re-applying the steamwebhelper wrapper first); returns the PID,
@@ -79,5 +104,25 @@ public final class SteamClientSession {
             launchError = (error as NSError).localizedDescription
             return nil
         }
+    }
+}
+
+/// Resumes a readiness continuation exactly once (whichever of the kqueue signal / failsafe fires first),
+/// tearing down the watch + cancelling the failsafe so nothing lingers. `@MainActor` so the single-resume
+/// check is race-free.
+@MainActor
+private final class ReadyGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    var watch: FileWatch?
+    var failsafe: Task<Void, Never>?
+
+    init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+
+    func finish() {
+        guard let continuation else { return }
+        self.continuation = nil
+        watch = nil
+        failsafe?.cancel(); failsafe = nil
+        continuation.resume()
     }
 }

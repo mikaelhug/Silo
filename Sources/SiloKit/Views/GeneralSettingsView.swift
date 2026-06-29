@@ -222,16 +222,12 @@ struct GeneralSettingsView: View {
         }
     }
 
-    /// Run a check, holding the spinner for a short floor so the loading state always reads as deliberate,
-    /// then let the fresh `env.updateCheck` cross-fade in.
+    /// Run an update check; the spinner shows for exactly the real check duration, then the fresh
+    /// `env.updateCheck` cross-fades in. No artificial floor — nothing waits.
     private func runCheck() async {
         guard !isChecking else { return }
         isChecking = true
-        async let check: Void = env.checkForUpdate()
-        async let floor: Void = minimumSpinner()
-        _ = await (check, floor)
+        await env.checkForUpdate()
         isChecking = false
     }
-
-    private func minimumSpinner() async { try? await Task.sleep(for: .milliseconds(700)) }
 }
