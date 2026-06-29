@@ -86,6 +86,7 @@ struct SteamBottleTests {
         let (bottle, fake, _) = make(tmp)
         FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("installer".utf8))
         fake.queueResult(ProcessResult(exitCode: 0))   // wineboot --init succeeds
+        fake.queueResult(ProcessResult(exitCode: 0))   // wineserver -k (settle the boot server)
         fake.queueResult(ProcessResult(exitCode: 1))   // SteamSetup.exe /S fails
         await #expect(throws: SteamBottle.BottleError.steamInstallFailed(1)) {
             try await bottle.installSteam(wine: URL(fileURLWithPath: "/w/wine64"))

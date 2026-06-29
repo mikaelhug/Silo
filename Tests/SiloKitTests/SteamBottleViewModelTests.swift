@@ -49,6 +49,7 @@ struct SteamBottleViewModelTests {
         FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("installer".utf8))
         vm.updateWine(URL(fileURLWithPath: "/w/wine64"))
         fake.queueResult(ProcessResult(exitCode: 0))   // wineboot --init succeeds
+        fake.queueResult(ProcessResult(exitCode: 0))   // wineserver -k (settle the boot server)
         fake.queueResult(ProcessResult(exitCode: 1))   // SteamSetup.exe /S fails → steamInstallFailed
 
         await vm.setUp()
