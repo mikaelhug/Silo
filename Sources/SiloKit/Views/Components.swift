@@ -30,6 +30,19 @@ func chooseExecutable(message: String, directory: URL? = nil) -> URL? {
     return panel.runModal() == .OK ? panel.url : nil
 }
 
+/// Present an open panel for choosing a directory (e.g. where to keep bottles). Returns nil if cancelled.
+@MainActor
+func chooseDirectory(message: String) -> URL? {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = false
+    panel.canChooseDirectories = true
+    panel.canCreateDirectories = true
+    panel.allowsMultipleSelection = false
+    panel.message = message
+    panel.prompt = "Choose"
+    return panel.runModal() == .OK ? panel.url : nil
+}
+
 /// Gradient fallback shown while a game's cover art loads or is unavailable (tile + detail hero).
 struct GameArtworkPlaceholder: View {
     var iconFont: Font = .title2

@@ -31,6 +31,12 @@ public final class SteamClientSession {
 
     public func updateWine(_ url: URL?) { wineBinary = url }
 
+    /// Whether the bottle's Steam client is live right now (its tracked PID is still alive).
+    public var isRunning: Bool {
+        guard let pid = steamPID else { return false }
+        return orchestrator.isRunning(pid: pid)
+    }
+
     /// Bring the bottle's Steam client up (idempotent + coalesced): a no-op if it's already running, joins
     /// an in-flight launch, else launches it (re-applying the steamwebhelper wrapper) and tracks the PID.
     /// Returns whether the client is running after the call. Concurrent callers (two quick Play clicks, or

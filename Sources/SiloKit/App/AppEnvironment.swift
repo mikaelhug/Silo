@@ -110,6 +110,69 @@ public final class AppEnvironment {
         await gameLibrary.load()
     }
 
+    // MARK: - Bottles location
+
+    public private(set) var bottlesBusy = false
+    public private(set) var bottlesMessage: String?
+
+    /// True while any game OR the bottle Steam client is live — relocation is refused then (we'd be moving
+    /// prefixes out from under running wineservers).
+    public var anythingRunning: Bool {
+        !gameLibrary.runningPIDs.isEmpty || !gameLibrary.manualRunningPIDs.isEmpty
+            || steamClientSession.isRunning
+    }
+
+    /// Move all bottles into a `Silo Bottles` folder inside `chosen` (a directory the user picked — e.g. an
+    /// external drive), so we never scatter prefixes directly into a shared location.
+    public func moveBottles(to chosen: URL) async {
+        await relocateBottles(to: chosen.appendingPathComponent("Silo Bottles", isDirectory: true))
+    }
+
+    /// Move bottles back to the default location (under Application Support).
+    public func resetBottlesLocation() async {
+        guard paths.bottlesRelocated else { return }
+        await relocateBottles(to: paths.supportDir)
+    }
+
+    /// Relocate the bottle dirs to `newRoot`, persist the choice, and relaunch to adopt it everywhere
+    /// (`AppPaths` is injected by value, so the clean way to re-point every consumer is a fresh launch).
+    private func relocateBottles(to newRoot: URL) async {
+        guard !bottlesBusy else { return }
+        guard !anythingRunning else {
+            bottlesMessage = "Stop running games and Steam before moving bottles."
+            return
+        }
+        let old = paths.bottlesRoot
+        guard newRoot.standardizedFileURL != old.standardizedFileURL else {
+            bottlesMessage = "Bottles are already there."
+            return
+        }
+        bottlesBusy = true
+        bottlesMessage = "Moving bottles… this can take a while for installed games."
+        defer { bottlesBusy = false }
+
+        let names = AppPaths.bottleDirNames
+        do {
+            // Off the main actor — a cross-volume move is a full copy of (potentially huge) game data.
+            try await Task.detached(priority: .userInitiated) {
+                try await BottleRelocator().move(names, from: old, to: newRoot)
+            }.value
+        } catch {
+            bottlesMessage = "Couldn't move bottles: \((error as NSError).localizedDescription)"
+            return
+        }
+
+        // Persist (nil = back to the default), then adopt via relaunch.
+        let isDefault = newRoot.standardizedFileURL == paths.supportDir.standardizedFileURL
+        BottlesLocation.write(isDefault ? nil : newRoot, supportDir: paths.supportDir)
+        if let bundle = Updater.runningAppBundle() {
+            bottlesMessage = "Bottles moved. Relaunching…"
+            await updater.relaunch(bundle)   // launches the new instance + exit(0); never returns
+        } else {
+            bottlesMessage = "Bottles moved to \(newRoot.path). Restart Silo to use the new location."
+        }
+    }
+
     /// Manually re-check GitHub for a newer app release — the same check `bootstrap()` runs automatically,
     /// surfaced as a "Check for Updates" button in Settings → General.
     public func checkForUpdate() async {

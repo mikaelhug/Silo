@@ -3,6 +3,20 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✅ M109–M110 — bottles are relocatable (move to another disk / external drive).** App state
+  (config/logs/runtimes) stays under Application Support, but the **bottles** (Steam + every manual game's)
+  now live under a configurable `AppPaths.bottlesRoot` (default = supportDir).
+  - `BottlesLocation` persists the chosen root in a tiny file read SYNCHRONOUSLY at startup (`AppPaths.
+    standard`), so every derived bottle path is correct from the first frame (M109).
+  - `BottleRelocator` does a validated old→new move (writable + not-occupied checks; cross-volume
+    copy+delete; best-effort rollback so it never half-relocates) (M109).
+  - `AppEnvironment.moveBottles(to:)` / `resetBottlesLocation()`: refuse while anything's running, relocate
+    off the main actor, persist, then **relaunch** to adopt the new root everywhere (AppPaths is injected
+    by value). `anythingRunning` gate (M110).
+  - UI: **Settings → General → Bottles** — shows the location (+ an "isn't reachable, is the drive
+    connected?" warning when a relocated drive is ejected), **Move…** (folder picker → `<chosen>/Silo
+    Bottles`), and **Reset to Default**; a spinner while moving (M110).
+  - 193 tests / 30 suites green; clean build (no warnings); app reassembled.
 - **✅ M107–M108 — each manual (non-Steam) game now runs in its OWN isolated bottle.** Steam games still
   share the one Steam bottle (Steamworks needs co-residency), but manual games no longer do — each gets a
   private Wine prefix at `~/Library/Application Support/Silo/ManualBottles/<uuid>` (own registry/drive_c/

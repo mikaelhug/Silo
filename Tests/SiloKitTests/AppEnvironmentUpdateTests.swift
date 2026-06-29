@@ -86,6 +86,50 @@ struct AppEnvironmentUpdateTests {
         #expect(!env.isCheckingForUpdate)
     }
 
+    // MARK: - Bottles relocation
+
+    @Test("moveBottles relocates the bottle dirs, persists the new root, asks for a restart (no bundle in tests)")
+    func moveBottles() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        // A provisioned Steam bottle at the default location.
+        try FileManager.default.createDirectory(
+            at: paths.steamBottle.appendingPathComponent("drive_c"), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: paths.steamBottle.appendingPathComponent("marker").path, contents: Data("x".utf8))
+
+        let dest = try tmp.makeDir("External")
+        await env.moveBottles(to: dest)
+
+        let newRoot = dest.appendingPathComponent("Silo Bottles")
+        #expect(FileManager.default.fileExists(atPath: newRoot.appendingPathComponent("SteamBottle/marker").path))
+        #expect(!FileManager.default.fileExists(atPath: paths.steamBottle.appendingPathComponent("marker").path))
+        #expect(BottlesLocation.read(supportDir: paths.supportDir)?.path == newRoot.path)   // override persisted
+        #expect(env.bottlesMessage?.contains("Restart") == true)   // no .app bundle under swift test
+        #expect(!env.bottlesBusy)
+    }
+
+    @Test("resetBottlesLocation moves bottles back to the default and clears the override")
+    func resetBottles() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let support = tmp.url.appendingPathComponent("Silo")
+        let ext = tmp.url.appendingPathComponent("External/Silo Bottles")
+        // An env that already lives at a relocated root (i.e. as if relaunched there).
+        let env = AppEnvironment(
+            paths: AppPaths(supportDir: support, bottlesRoot: ext), runner: FakeProcessRunner())
+        try FileManager.default.createDirectory(
+            at: ext.appendingPathComponent("ManualBottles/uuid"), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: ext.appendingPathComponent("ManualBottles/uuid/m").path, contents: Data())
+        BottlesLocation.write(ext, supportDir: support)
+
+        await env.resetBottlesLocation()
+
+        #expect(FileManager.default.fileExists(atPath: support.appendingPathComponent("ManualBottles/uuid/m").path))
+        #expect(BottlesLocation.read(supportDir: support) == nil)   // override cleared → default
+    }
+
     // MARK: - applyBackend fan-out
 
     @Test("AppEnvironment fans a backend change out to BOTH the library and the Steam-bottle pane")
