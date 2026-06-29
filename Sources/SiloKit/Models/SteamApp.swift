@@ -14,6 +14,10 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
     public let bytesToDownload: Int64?
     public let buildID: Int?
     public let lastUpdated: Date?
+    /// Steam's `LastOwner` — the SteamID64 of the account that owns/installed this app. Steam writes `0`
+    /// for the shared system packages it auto-installs (Steamworks Common Redistributables, runtimes,
+    /// tools) rather than games the user owns. Used to keep those out of the library.
+    public let lastOwner: Int64?
     /// The library-folder root this app belongs to (derived during discovery, not from the .acf).
     public let libraryPath: URL
 
@@ -27,6 +31,7 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
         bytesToDownload: Int64? = nil,
         buildID: Int? = nil,
         lastUpdated: Date? = nil,
+        lastOwner: Int64? = nil,
         libraryPath: URL
     ) {
         self.appID = appID
@@ -38,10 +43,17 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
         self.bytesToDownload = bytesToDownload
         self.buildID = buildID
         self.lastUpdated = lastUpdated
+        self.lastOwner = lastOwner
         self.libraryPath = libraryPath
     }
 
     public var isFullyInstalled: Bool { stateFlags.isFullyInstalled }
+
+    /// A shared system package Steam auto-installs (redistributables, runtimes, tools) — `LastOwner` is
+    /// `0`/absent because no user owns it. These aren't games, so the library hides them. A user-owned
+    /// game always carries the owner's SteamID64 here. (Distinct from the install dir having an exe —
+    /// real games can keep their exe nested, so exe-presence is not a reliable signal.)
+    public var isSharedSystemApp: Bool { (lastOwner ?? 0) == 0 }
 
     /// Library cover art (Steam CDN `header.jpg`).
     public var headerArtURL: URL? {

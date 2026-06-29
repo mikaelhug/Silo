@@ -30,7 +30,10 @@ public actor DiscoveryEngine {
         var apps: [SteamApp] = []
         var seen = Set<Int>()
         for root in libraryRoots {
-            for app in scanLibrary(root: root) where seen.insert(app.appID).inserted {
+            // Skip shared system packages (Steamworks Common Redistributables, runtimes, tools): Steam
+            // installs them with `LastOwner == 0`, so they aren't games — see `SteamApp.isSharedSystemApp`.
+            for app in scanLibrary(root: root)
+            where !app.isSharedSystemApp && seen.insert(app.appID).inserted {
                 apps.append(app)
             }
         }

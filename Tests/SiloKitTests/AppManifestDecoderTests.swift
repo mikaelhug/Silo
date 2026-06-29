@@ -28,6 +28,17 @@ struct AppManifestDecoderTests {
         #expect(app.isFullyInstalled)                  // StateFlags 6 = fullyInstalled | updateRequired
     }
 
+    @Test("Reads LastOwner: a user game is owned, redistributables are shared (owner 0)")
+    func lastOwnerDistinguishesGames() throws {
+        let game = try decoder.decode(text: FixtureLoader.text("appmanifest_220.acf"), libraryPath: lib)
+        #expect(game.lastOwner == 76561197960287930)
+        #expect(!game.isSharedSystemApp)               // a real, user-owned game
+
+        let redist = try decoder.decode(text: FixtureLoader.text("appmanifest_228980.acf"), libraryPath: lib)
+        #expect(redist.lastOwner == 0)
+        #expect(redist.isSharedSystemApp)              // Steamworks Common Redistributables — not a game
+    }
+
     @Test("Throws missingRoot when AppState is absent")
     func missingRoot() {
         #expect(throws: AppManifestDecoder.DecodeError.missingRoot) {
