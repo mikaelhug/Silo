@@ -25,7 +25,7 @@ struct UpdaterTests {
     func newer() async throws {
         FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-newer/releases?per_page=30",
                              data: Data(releasesJSON.utf8))
-        let check = try await updater(repo: "owner/Silo-newer", current: "0.1.1").checkForUpdate()
+        let check = try await updater(repo: "owner/Silo-newer", current: "0.0.1").checkForUpdate()
         #expect(check.latestVersion == "0.2.0")        // NOT 26.2.0 — the wine-cx release is filtered out
         #expect(check.isNewer)
         #expect(check.downloadURL?.absoluteString == "https://example.com/Silo.app.zip")
@@ -46,7 +46,7 @@ struct UpdaterTests {
                              data: Data("""
                              [ { "tag_name": "wine-cx-26.2.0", "name": "Wine 26.2.0", "assets": [] } ]
                              """.utf8))
-        let check = try await updater(repo: "owner/Silo-wineonly", current: "0.1.1").checkForUpdate()
+        let check = try await updater(repo: "owner/Silo-wineonly", current: "0.0.1").checkForUpdate()
         #expect(!check.isNewer)
         #expect(check.downloadURL == nil)
     }
@@ -56,7 +56,7 @@ struct UpdaterTests {
         FakeURLProtocol.stub("https://api.github.com/repos/owner/Silo-404/releases?per_page=30",
                              statusCode: 404, data: Data("[]".utf8))
         await #expect(throws: Updater.UpdateError.badResponse(404)) {
-            try await updater(repo: "owner/Silo-404", current: "0.1.1").checkForUpdate()
+            try await updater(repo: "owner/Silo-404", current: "0.0.1").checkForUpdate()
         }
     }
 
@@ -65,7 +65,7 @@ struct UpdaterTests {
         #expect(Updater.isVersion("0.10.0", newerThan: "0.9.0"))
         #expect(Updater.isVersion("1.0.0", newerThan: "0.99.0"))
         #expect(!Updater.isVersion("0.2.0", newerThan: "0.2.0"))
-        #expect(!Updater.isVersion("0.1.1", newerThan: "0.2.0"))
+        #expect(!Updater.isVersion("0.0.1", newerThan: "0.2.0"))
     }
 
     // MARK: - Inline apply
