@@ -11,9 +11,14 @@ public final class GameLibraryViewModel {
 
     /// Games installed in the Steam bottle (parsed from its `appmanifest_*.acf`).
     public private(set) var games: [SteamApp] = []
+    /// Non-Steam games the user added by hand (persisted in `config.json`; launched in the same bottle
+    /// prefix under GPTK, without Steamworks).
+    public private(set) var manualGames: [ManualGame] = []
     public private(set) var loadState: LoadState = .idle
     public private(set) var busyAppIDs: Set<Int> = []
     public private(set) var runningPIDs: [Int: Int32] = [:]
+    public private(set) var manualRunningPIDs: [UUID: Int32] = [:]
+    public private(set) var manualBusyIDs: Set<UUID> = []
     public var searchText: String = ""
     public private(set) var statusMessage: String?
     private var statusDismiss: Task<Void, Never>?
@@ -25,6 +30,7 @@ public final class GameLibraryViewModel {
     private let paths: AppPaths
     private var backend: BackendConfig
     private var runObservers: [Int: any ProcessObservation] = [:]
+    private var manualObservers: [UUID: any ProcessObservation] = [:]
     /// The single owner of the live bottle Steam client (shared with the settings pane).
     private let session: SteamClientSession
 
@@ -51,14 +57,22 @@ public final class GameLibraryViewModel {
     public var canLaunch: Bool { backend.isWineConfigured }
     public var steamReady: Bool { bottle.isSteamInstalled }
 
-    /// Search filter over the installed games (already name-sorted by `DiscoveryEngine`).
+    /// Search filter over the installed Steam games (already name-sorted by `DiscoveryEngine`).
     public var filtered: [SteamApp] {
         searchText.isEmpty ? games
             : games.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
+    /// Search filter over the manual (non-Steam) games (kept name-sorted).
+    public var filteredManual: [ManualGame] {
+        searchText.isEmpty ? manualGames
+            : manualGames.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
     public func isRunning(_ game: SteamApp) -> Bool { runningPIDs[game.appID] != nil }
     public func isBusy(_ game: SteamApp) -> Bool { busyAppIDs.contains(game.appID) }
+    public func isRunning(_ game: ManualGame) -> Bool { manualRunningPIDs[game.id] != nil }
+    public func isBusy(_ game: ManualGame) -> Bool { manualBusyIDs.contains(game.id) }
 
     public func sizeString(_ game: SteamApp) -> String? {
         guard game.sizeOnDisk > 0 else { return nil }
@@ -78,18 +92,25 @@ public final class GameLibraryViewModel {
 
     // MARK: - Library
 
-    /// Re-scan the bottle's Steam library for installed games.
+    /// Re-scan the bottle's Steam library for installed games, plus the persisted manual (non-Steam) games.
     public func load() async {
+        manualGames = sortedManual(await configStore.load().manualGames)
+        // Manual games also live in the bottle prefix, so the library still gates on the bottle existing
+        // (notReady drives the onboarding until Steam is set up).
         guard bottle.isSteamInstalled else { loadState = .notReady; return }
         do {
-            let found = try await discovery.discoverGames(steamRoot: paths.steamBottleClientDir)
-            games = found
-            loadState = found.isEmpty ? .empty : .loaded
+            games = try await discovery.discoverGames(steamRoot: paths.steamBottleClientDir)
+            loadState = (games.isEmpty && manualGames.isEmpty) ? .empty : .loaded
         } catch DiscoveryEngine.DiscoveryError.steamDirNotFound {
-            games = []; loadState = .empty   // Steam installed but its library dir doesn't exist yet
+            games = []   // Steam installed but its library dir doesn't exist yet
+            loadState = manualGames.isEmpty ? .empty : .loaded
         } catch {
             games = []; loadState = .error((error as NSError).localizedDescription)
         }
+    }
+
+    private func sortedManual(_ list: [ManualGame]) -> [ManualGame] {
+        list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     public func refresh() async { await load() }
@@ -151,6 +172,97 @@ public final class GameLibraryViewModel {
     public func openWinecfg(_ game: SteamApp) async {
         guard backend.isWineConfigured else { setStatus("No Wine configured."); return }
         await orchestrator.runWineTool("winecfg", prefix: paths.steamBottle, backend: backend)
+    }
+
+    // MARK: - Manual (non-Steam) games
+
+    /// Run an installer `.exe` in the bottle (detached) so it installs into the bottle's `drive_c`. The
+    /// user then picks the installed game `.exe` with `addManualGame`.
+    public func runInstaller(_ installer: URL) async {
+        guard backend.isWineConfigured else { setStatus("Set up Wine + the Steam bottle first."); return }
+        do {
+            _ = try await orchestrator.runInstaller(
+                exe: installer, backend: backend, prefix: paths.steamBottle, logURL: paths.steamBottleLog)
+            setStatus("Running installer… finish it, then choose the installed .exe.")
+        } catch { setStatus("Installer failed: \((error as NSError).localizedDescription)") }
+    }
+
+    /// Add a non-Steam game pointing at an absolute `.exe`. Name defaults to the exe's filename.
+    @discardableResult
+    public func addManualGame(name: String, executable: URL) async -> ManualGame? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmed.isEmpty ? executable.deletingPathExtension().lastPathComponent : trimmed
+        let game = ManualGame(name: finalName, executablePath: executable)
+        do {
+            _ = try await configStore.saveManualGame(game)
+            manualGames = sortedManual(manualGames + [game])
+            if loadState == .empty { loadState = .loaded }
+            setStatus("Added \(finalName).")
+            return game
+        } catch {
+            setStatus("Couldn't add game: \((error as NSError).localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Persist edits to a manual game (rename, change exe, launch options, perf flags).
+    public func updateManual(_ game: ManualGame) async {
+        do {
+            _ = try await configStore.saveManualGame(game)
+            manualGames = sortedManual(manualGames.filter { $0.id != game.id } + [game])
+        } catch { setStatus("Couldn't save: \((error as NSError).localizedDescription)") }
+    }
+
+    /// Remove a manual game from the library (doesn't delete the on-disk files). Refuses while running.
+    public func removeManual(_ game: ManualGame) async {
+        guard manualRunningPIDs[game.id] == nil else { return }
+        _ = try? await configStore.removeManualGame(id: game.id)
+        manualGames.removeAll { $0.id == game.id }
+        if games.isEmpty && manualGames.isEmpty { loadState = .empty }
+        setStatus("Removed \(game.name).")
+    }
+
+    /// Launch a manual game in the bottle under GPTK (no Steam needed).
+    public func playManual(_ game: ManualGame) async {
+        guard backend.isWineConfigured, !manualBusyIDs.contains(game.id),
+              manualRunningPIDs[game.id] == nil else { return }
+        manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
+        do {
+            let pid = try await orchestrator.launchManualGame(
+                game, backend: backend, prefix: paths.steamBottle, logURL: paths.manualLog(game.id))
+            _ = try? await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
+            manualRunningPIDs[game.id] = pid
+            observeManualRun(id: game.id, pid: pid)
+            setStatus("Launched \(game.name).")
+        } catch {
+            setStatus("\(game.name): \((error as NSError).localizedDescription)")
+        }
+    }
+
+    /// Stop a running manual game (taskkill its exe; the shared bottle/Steam stays alive).
+    public func stopManual(_ game: ManualGame) async {
+        guard let pid = manualRunningPIDs[game.id] else { return }
+        await orchestrator.stopGame(
+            pid: pid, exeName: game.executablePath.lastPathComponent,
+            prefix: paths.steamBottle, backend: backend)
+        clearManualRun(game.id)
+    }
+
+    private func observeManualRun(id: UUID, pid: Int32) {
+        manualObservers[id]?.cancel()
+        manualObservers[id] = orchestrator.observeExit(pid: pid) { [weak self] in
+            Task { @MainActor in self?.manualGameDidExit(id: id, pid: pid) }
+        }
+    }
+
+    private func manualGameDidExit(id: UUID, pid: Int32) {
+        guard manualRunningPIDs[id] == pid else { return }
+        clearManualRun(id)
+    }
+
+    private func clearManualRun(_ id: UUID) {
+        manualRunningPIDs[id] = nil
+        manualObservers[id]?.cancel(); manualObservers[id] = nil
     }
 
     private func observeRun(appID: Int, pid: Int32) {
