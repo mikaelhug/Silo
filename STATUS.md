@@ -3,6 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🏷️ Release v0.2.0 (2026-06-29).** Minor bump from 0.1.1 via `versions.env`. Highlights since 0.1.1:
+  **manual non-Steam .exe games** (each in its **own isolated bottle**), **redistributables hidden**
+  (`LastOwner==0`), **relocatable bottles** (move to another disk/external drive — % progress, exFAT guard),
+  **versions.env single-source-of-truth**, **fully event-driven** (every sleep/poll removed; readiness via a
+  kqueue watch on Steam's `ActiveProcess`), and a compact fixed-size **Settings** window. 202 tests / 32
+  suites green; clean build (no warnings). Code/runtime production-quality (0% idle CPU, ~50 MB, no leaks);
+  remaining ship-to-others gaps are on-device validation + notarization (human-gated), not code.
 - **✅ M114 — removed every sleep/poll; readiness is now event-driven.** No fixed waits anywhere:
   - **Cold-start 10s grace → gone.** `SteamClientSession` now resolves the instant the co-resident Steam
     is ready via a **kqueue watch on the prefix's `user.reg`** for Steam's `ActiveProcess` pid (exactly what
