@@ -17,8 +17,10 @@ public final class GameLibraryViewModel {
     public private(set) var manualGames: [ManualGame] = []
     public private(set) var loadState: LoadState = .idle
     public private(set) var busyAppIDs: Set<Int> = []
-    public private(set) var runningPIDs: [Int: Int32] = [:]
-    public private(set) var manualRunningPIDs: [UUID: Int32] = [:]
+    /// Live launch tracking (values are wine loader PIDs). Module-internal, NOT public API — callers query
+    /// liveness via `isRunning(_:)` / `isAnythingRunning` rather than reaching into the PID tables.
+    private(set) var runningPIDs: [Int: Int32] = [:]
+    private(set) var manualRunningPIDs: [UUID: Int32] = [:]
     public private(set) var manualBusyIDs: Set<UUID> = []
     public var searchText: String = ""
     /// The most recent action result, shown in the library's status bar. Persists until the next action
@@ -58,7 +60,18 @@ public final class GameLibraryViewModel {
         self.provisioner = provisioner
     }
 
+    /// Defensive teardown (these VMs are process-lifetime singletons, so it normally never fires): cancel
+    /// any live exit observations so they can't outlive the model. `isolated` to touch its @MainActor state.
+    isolated deinit {
+        runObservers.values.forEach { $0.cancel() }
+        manualObservers.values.forEach { $0.cancel() }
+    }
+
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
+
+    /// Whether any game (Steam or manual) is currently tracked as running. Lets callers ask without
+    /// reaching into the internal PID tables.
+    public var isAnythingRunning: Bool { !runningPIDs.isEmpty || !manualRunningPIDs.isEmpty }
 
     public var canLaunch: Bool { backend.isWineConfigured }
     public var steamReady: Bool { bottle.isSteamInstalled }

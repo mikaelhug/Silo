@@ -70,22 +70,25 @@ public struct SystemProcessRunner: ProcessRunning {
         guard pid > 0 else { return NoopObservation() }
         let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
         source.setEventHandler(handler: onExit)
+        // No cancel handler (unlike FileWatch): a process source owns no descriptor we opened, so
+        // cancelling/deallocating the DispatchObservation tears it down completely — nothing to close.
         source.resume()
         return DispatchObservation(source)
     }
 
     // MARK: - Synchronous workers (run on a background queue)
 
-    /// Loader-injection vectors stripped from the INHERITED environment before Silo's overrides are
-    /// applied, so a hostile ambient env can't force a dylib into the wine child. We do NOT strip
-    /// `DYLD_FALLBACK_LIBRARY_PATH`/`DYLD_FALLBACK_FRAMEWORK_PATH` — Silo sets those explicitly in its
-    /// overrides (they still apply on top), and they only add *fallback* search paths, not forced loads.
+    /// Loader-injection vectors stripped from the FINAL environment — both the inherited ambient env AND
+    /// Silo's overrides — so neither a hostile ambient env nor a user's `EnvFlags.extra` escape hatch can
+    /// force a dylib into the wine child. We do NOT strip `DYLD_FALLBACK_LIBRARY_PATH`/
+    /// `DYLD_FALLBACK_FRAMEWORK_PATH` — Silo sets those explicitly (they only add *fallback* search paths,
+    /// not forced loads), and Silo never legitimately sets a denylisted key, so stripping it is loss-free.
     static let injectionDenylist: Set<String> = ["DYLD_INSERT_LIBRARIES", "DYLD_FORCE_FLAT_NAMESPACE"]
 
     static func mergedEnvironment(_ overrides: [String: String]) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        for key in injectionDenylist { env[key] = nil }
         for (key, value) in overrides { env[key] = value }
+        for key in injectionDenylist { env[key] = nil }   // applied LAST → also strips a user-set override
         return env
     }
 

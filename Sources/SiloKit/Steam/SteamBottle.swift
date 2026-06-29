@@ -12,6 +12,7 @@ public struct SteamBottle: Sendable {
     private let runner: ProcessRunning
     private let session: URLSession
     private let paths: AppPaths
+    // Computed (not stored): FileManager isn't Sendable, but the shared instance is fine to use.
     private var fileManager: FileManager { .default }
 
     public init(runner: ProcessRunning, session: URLSession = .shared, paths: AppPaths) {

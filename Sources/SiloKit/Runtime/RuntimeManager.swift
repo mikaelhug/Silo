@@ -155,6 +155,11 @@ public actor RuntimeManager {
         }
         try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
 
+        // The check above validates only the destination NAME; protection against `../` entries INSIDE the
+        // archive rests on two layers: (1) the archive's integrity is verified first (mandatory SHA-256 for
+        // the built-in repo, `requireDigest`), and (2) macOS `bsdtar` (libarchive) refuses upward traversal
+        // by default — we never pass `-P`/`--absolute-paths`. A custom repo with best-effort digests still
+        // gets layer (2).
         let result = try await runner.run(
             executable: URL(fileURLWithPath: "/usr/bin/tar"),
             arguments: ["-xf", archive.path, "-C", dest.path],

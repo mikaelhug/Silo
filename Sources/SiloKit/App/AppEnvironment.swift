@@ -122,8 +122,7 @@ public final class AppEnvironment {
     /// True while any game OR the bottle Steam client is live — relocation is refused then (we'd be moving
     /// prefixes out from under running wineservers).
     public var anythingRunning: Bool {
-        !gameLibrary.runningPIDs.isEmpty || !gameLibrary.manualRunningPIDs.isEmpty
-            || steamClientSession.isRunning
+        gameLibrary.isAnythingRunning || steamClientSession.isRunning
     }
 
     /// Move all bottles into a `Silo Bottles` folder inside `chosen` (a directory the user picked — e.g. an

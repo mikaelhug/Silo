@@ -231,6 +231,23 @@ struct LaunchPipelineTests {
         }
     }
 
+    @Test("launchInBottle rejects an executableRelativePath that climbs out of the install dir")
+    func rejectsPathEscapingRelativeExe() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let orchestrator = LaunchOrchestrator(runner: FakeProcessRunner(), linker: GraphicsLinker())
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        let app = SteamApp(appID: 220, name: "HL2", installDir: "HL2",
+                           stateFlags: .fullyInstalled, sizeOnDisk: 1, libraryPath: tmp.url)
+        var cfg = GameConfig(appID: 220)
+        cfg.executableRelativePath = "../../escape.exe"           // path traversal out of the install dir
+        await #expect(throws: LaunchOrchestrator.LaunchError.self) {
+            try await orchestrator.launchInBottle(
+                app: app, config: cfg, backend: backend, prefix: tmp.url,
+                logURL: tmp.url.appendingPathComponent("x.log"))
+        }
+    }
+
     @Test("runInstaller spawns the installer .exe in the bottle prefix")
     func installerRun() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

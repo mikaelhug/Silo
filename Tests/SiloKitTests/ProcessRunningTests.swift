@@ -45,7 +45,7 @@ struct SystemProcessRunnerTests {
         #expect(result.stdoutString == "isolated")
     }
 
-    @Test("mergedEnvironment strips loader-injection vars but keeps Silo's DYLD_FALLBACK override")
+    @Test("mergedEnvironment strips loader-injection vars from BOTH inherited env and overrides, keeps DYLD_FALLBACK")
     func mergedEnvironmentScrubsInjection() async throws {
         // Simulate a hostile ambient env carrying a dylib-injection var, then assert the child env.
         setenv("DYLD_INSERT_LIBRARIES", "/tmp/evil.dylib", 1)
@@ -55,8 +55,9 @@ struct SystemProcessRunnerTests {
         let merged = SystemProcessRunner.mergedEnvironment([
             "DYLD_FALLBACK_LIBRARY_PATH": "/runtime/lib:/usr/lib",
             "WINEPREFIX": "/p/220",
+            "DYLD_INSERT_LIBRARIES": "/tmp/from-extra.dylib",   // a user-set EnvFlags.extra must ALSO be stripped
         ])
-        // The classic injection vectors are removed from the inherited env...
+        // The classic injection vectors are removed — from the inherited env AND from the overrides.
         #expect(merged["DYLD_INSERT_LIBRARIES"] == nil)
         #expect(merged["DYLD_FORCE_FLAT_NAMESPACE"] == nil)
         // ...while Silo's explicit overrides (fallback path + prefix) survive on top.
