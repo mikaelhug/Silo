@@ -4,6 +4,7 @@
 	"name"		"Dota 2"
 	"StateFlags"		"6"
 	"installdir"		"dota 2 beta"
+	"LastOwner"		"76561197960287930"
 	"LastUpdated"		"1700000000"
 	"SizeOnDisk"		"50000000000"
 	"BytesToDownload"		"50000000000"

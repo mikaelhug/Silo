@@ -61,4 +61,15 @@ struct DiscoveryEngineTests {
             try await DiscoveryEngine().discoverGames(steamRoot: steamRoot)
         }
     }
+
+    @Test("Excludes shared system packages (Steamworks Common Redistributables, LastOwner 0)")
+    func excludesRedistributables() async throws {
+        let tmp = try TempDir()
+        // A real owned game (220) alongside the auto-installed redistributables package (228980).
+        let steamRoot = try makeSteamRoot(tmp, named: "Steam",
+            manifests: ["appmanifest_220.acf", "appmanifest_228980.acf"])
+        let apps = try await DiscoveryEngine().discoverGames(steamRoot: steamRoot)
+        #expect(apps.map(\.appID) == [220])                       // 228980 hidden — not a game
+        #expect(!apps.contains { $0.name == "Steamworks Common Redistributables" })
+    }
 }

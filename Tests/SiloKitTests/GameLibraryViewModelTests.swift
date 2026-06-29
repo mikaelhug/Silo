@@ -50,7 +50,7 @@ struct GameLibraryViewModelTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, _, paths) = make(tmp)
         try installSteam(paths)
-        try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "SizeOnDisk" "12000000" }"#, appID: 220)
+        try writeManifest(paths, #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "LastOwner" "76561197960287930" "SizeOnDisk" "12000000" }"#, appID: 220)
         await vm.load()
         #expect(vm.loadState == .loaded)
         #expect(vm.games.map(\.appID) == [220])

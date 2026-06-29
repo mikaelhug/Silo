@@ -29,6 +29,7 @@ public struct AppManifestDecoder: Sendable {
             bytesToDownload: optInt64(state, "BytesToDownload"),
             buildID: optInt(state, "buildid"),
             lastUpdated: optDate(state, "LastUpdated"),
+            lastOwner: optInt64(state, "LastOwner"),
             libraryPath: libraryPath
         )
     }

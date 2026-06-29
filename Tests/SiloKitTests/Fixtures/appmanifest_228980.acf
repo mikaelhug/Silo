@@ -1,0 +1,31 @@
+"AppState"
+{
+	"appid"		"228980"
+	"universe"		"1"
+	"LauncherPath"		"C:\\Program Files (x86)\\Steam\\steam.exe"
+	"name"		"Steamworks Common Redistributables"
+	"StateFlags"		"4"
+	"installdir"		"Steamworks Shared"
+	"LastUpdated"		"1782633117"
+	"LastPlayed"		"0"
+	"SizeOnDisk"		"142521834"
+	"StagingSize"		"0"
+	"buildid"		"19222509"
+	"LastOwner"		"0"
+	"DownloadType"		"0"
+	"AutoUpdateBehavior"		"0"
+	"AllowOtherDownloadsWhileRunning"		"0"
+	"ScheduledAutoUpdate"		"0"
+	"InstalledDepots"
+	{
+		"228990"
+		{
+			"manifest"		"1829726630299308803"
+			"size"		"102931551"
+		}
+	}
+	"InstallScripts"
+	{
+		"228990"		"_CommonRedist\\DirectX\\Jun2010\\installscript.vdf"
+	}
+}
