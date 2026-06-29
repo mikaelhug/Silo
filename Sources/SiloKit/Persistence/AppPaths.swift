@@ -1,18 +1,26 @@
 import Foundation
 
-/// Canonical filesystem locations under `~/Library/Application Support/Silo`.
+/// Canonical filesystem locations. App state (config, logs, runtimes) lives under
+/// `~/Library/Application Support/Silo`; the **bottles** (Steam + manual) live under `bottlesRoot`, which
+/// defaults to `supportDir` but can be relocated to another disk / external drive.
 public struct AppPaths: Sendable, Hashable {
     public let supportDir: URL
+    /// The folder that holds the bottle prefixes (`SteamBottle` + `ManualBottles`). Defaults to
+    /// `supportDir`; the user can move it elsewhere (persisted via `BottlesLocation`, read at startup so
+    /// every derived path points at the right place from the first frame).
+    public let bottlesRoot: URL
 
-    public init(supportDir: URL) {
+    public init(supportDir: URL, bottlesRoot: URL? = nil) {
         self.supportDir = supportDir
+        self.bottlesRoot = bottlesRoot ?? supportDir
     }
 
-    /// The standard location under the user's Application Support directory.
+    /// The standard location under the user's Application Support directory, honouring a persisted
+    /// bottles-location override.
     public static func standard(fileManager: FileManager = .default) -> AppPaths {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Silo", isDirectory: true)
-        return AppPaths(supportDir: base)
+        return AppPaths(supportDir: base, bottlesRoot: BottlesLocation.read(supportDir: base))
     }
 
     public var runtimesDir: URL { supportDir.appendingPathComponent("Runtimes", isDirectory: true) }
@@ -21,13 +29,32 @@ public struct AppPaths: Sendable, Hashable {
     /// Scratch dir for downloaded app-update archives (the inline updater stages the `.zip` here).
     public var updatesDir: URL { supportDir.appendingPathComponent("Updates", isDirectory: true) }
 
+    // MARK: - Bottles location
+
+    /// Bottles live somewhere other than the default (Application Support).
+    public var bottlesRelocated: Bool {
+        bottlesRoot.standardizedFileURL != supportDir.standardizedFileURL
+    }
+
+    /// Whether the configured bottles root is currently usable — its volume is mounted. (A custom root on
+    /// an external drive becomes unreachable when the drive is ejected.) The root itself need not exist yet
+    /// (a fresh custom location), only its parent.
+    public var bottlesRootReachable: Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: bottlesRoot.path)
+            || fm.fileExists(atPath: bottlesRoot.deletingLastPathComponent().path)
+    }
+
+    /// The bottle directory names that relocate together (everything under `bottlesRoot`).
+    public static let bottleDirNames = ["SteamBottle", "ManualBottles"]
+
     // MARK: - Steam bottle (the shared prefix that hosts a logged-in Windows Steam client + its games)
 
     /// The single shared Wine prefix that runs the Windows Steam client and the games co-resident with it.
-    public var steamBottle: URL { supportDir.appendingPathComponent("SteamBottle", isDirectory: true) }
+    public var steamBottle: URL { bottlesRoot.appendingPathComponent("SteamBottle", isDirectory: true) }
 
     /// Parent of the per-game isolated bottles used by manual (non-Steam) games.
-    public var manualBottlesDir: URL { supportDir.appendingPathComponent("ManualBottles", isDirectory: true) }
+    public var manualBottlesDir: URL { bottlesRoot.appendingPathComponent("ManualBottles", isDirectory: true) }
 
     /// A manual game's own isolated Wine prefix (its private registry + `drive_c`), keyed by its id.
     public func manualBottle(_ id: UUID) -> URL {
