@@ -1,9 +1,10 @@
 import Foundation
 
-/// Top-level namespace + build metadata for the Silo app.
+/// Top-level namespace + build metadata for the Silo app. Version numbers live in `versions.env` (the
+/// single source of truth) and reach the code via the generated `Versions` enum — see `Scripts/gen-versions.sh`.
 public enum Silo {
     /// Marketing version. Kept in sync with `Info.plist` `CFBundleShortVersionString` by the build script.
-    public static let version = "0.1.1"
+    public static let version = Versions.silo
 
     /// Stable bundle identifier (TCC prompts are keyed to this).
     public static let bundleID = "com.mikael.silo"
@@ -12,13 +13,13 @@ public enum Silo {
     public static let appName = "Silo"
 
     /// GitHub repo (`owner/name`) the in-app updater checks for new app releases.
-    public static let updateRepo = "mikaelhug/Silo"
+    public static let updateRepo = Versions.githubRepo
 
     /// Repo whose releases host Silo's own CrossOver-based Wine builds (the base D3DMetal runs on).
     /// Self-reliant by design: built from CrossOver's open (LGPL) sources in our own CI and published
     /// to our Releases, so we never depend on a third-party prebuilt that may go stale. See WINE-BUILD.md.
     /// (Until the first build is published, the Wine tab is empty — install CrossOver, or override here.)
-    public static let wineRepo = "mikaelhug/Silo"
+    public static let wineRepo = Versions.githubRepo
 
     /// Apple's official GPTK page (manual DMG download, requires Apple ID).
     public static let appleGPTKURL = URL(string: "https://developer.apple.com/games/game-porting-toolkit/")!

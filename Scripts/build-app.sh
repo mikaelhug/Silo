@@ -8,8 +8,11 @@ BIN_NAME="silo"
 CONFIG="release"
 APP="dist/$APP_NAME.app"
 
-VERSION=$(grep -m1 'static let version' Sources/SiloKit/Silo.swift | sed -E 's/.*"([^"]+)".*/\1/')
-VERSION=${VERSION:-0.1.1}
+# Versions come from versions.env (the single source of truth). Regenerate the committed Swift mirror so
+# the assembled app always matches, then read the marketing version for the Info.plist.
+./Scripts/gen-versions.sh
+set -a; . ./versions.env; set +a
+VERSION="$SILO_VERSION"
 BUILD=$(date +%Y%m%d%H%M)
 
 echo "==> swift build -c $CONFIG"
