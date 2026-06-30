@@ -22,7 +22,16 @@ struct ManualGameTileView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(game.name).font(.headline).lineLimit(1)
-                Text("Non-Steam game").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text("Non-Steam game").font(.caption).foregroundStyle(.secondary)
+                    if game.backend != .gptk {
+                        Text(game.backend.badge)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.tint.opacity(0.18), in: Capsule())
+                            .help("Runs under \(game.backend.displayName)")
+                    }
+                }
                 HStack(spacing: 8) {
                     primaryButton(running: running, busy: busy)
                     Spacer()

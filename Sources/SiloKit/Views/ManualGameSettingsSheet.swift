@@ -46,6 +46,18 @@ struct ManualGameSettingsSheet: View {
                          + "here without affecting other games.")
                 }
 
+                Section {
+                    Picker("Graphics", selection: $game.backend) {
+                        ForEach(GraphicsBackend.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Text(game.backend.recommendedFor)
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    Text("Graphics Backend")
+                } footer: {
+                    Text("The translation layer this game runs under. Switching takes effect next launch.")
+                }
+
                 Section("Performance") {
                     Picker("Sync", selection: $game.envFlags.syncMode) {
                         ForEach(SyncMode.allCases) { Text($0.displayName).tag($0) }
