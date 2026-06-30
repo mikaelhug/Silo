@@ -81,7 +81,7 @@ struct SteamGameTileView: View {
             openWindow(id: LogTarget.windowID,
                        value: LogTarget(title: "\(game.name) — Log", url: env.logURL(forAppID: game.appID)))
         }
-        Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg() } }
+        Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg(game.backend) } }
             .disabled(!env.gameLibrary.canLaunch)
         Button("View in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([game.installURL])

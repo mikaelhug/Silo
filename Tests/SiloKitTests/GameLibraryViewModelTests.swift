@@ -80,6 +80,55 @@ struct GameLibraryViewModelTests {
         #expect(vm.games.first { $0.appID == 400 }?.backend == .dxmt)
     }
 
+    @Test("a DXMT Steam game launches in the DXMT bottle on the DXMT runtime (co-resident DXMT client)")
+    func dxmtSteamGameRoutesToDXMTBottle() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let gptkBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .gptk)
+        let dxmtBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+
+        // Real base wine + DXMT source so the resolver can clone the variant + overlay.
+        let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
+        try tmp.makeDir("wine/lib/wine/x86_64-windows"); try tmp.makeDir("wine/lib/wine/x86_64-unix")
+        let dxmtLib = try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
+        for m in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
+            try tmp.write("dxmt/lib/wine/x86_64-windows/\(m)", "DXMT")
+        }
+        try tmp.makeDir("dxmt/lib/wine/x86_64-unix"); try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WM")
+        var backend = BackendConfig(); backend.wineBinaryPath = wine; backend.dxmtLibDirPath = dxmtLib
+
+        let gptkSession = SteamClientSession(bottle: gptkBottle, orchestrator: orchestrator)
+        let dxmtSession = SteamClientSession(bottle: dxmtBottle, orchestrator: orchestrator)
+        gptkSession.updateWine(wine); dxmtSession.updateWine(wine)
+        gptkSession.readinessTimeout = 0; dxmtSession.readinessTimeout = 0
+        let vm = GameLibraryViewModel(
+            bottle: gptkBottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend,
+            session: gptkSession, dxmtSession: dxmtSession, provisioner: WinePrefixProvisioner(runner: fake))
+
+        // Install Steam + a game in the DXMT bottle.
+        let client = paths.steamBottleClientDir(.dxmt)
+        let common = client.appendingPathComponent("steamapps/common/Old")
+        try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: common.appendingPathComponent("Old.exe").path, contents: Data("MZ".utf8))
+        FileManager.default.createFile(atPath: paths.steamBottleExe(.dxmt).path, contents: Data())
+        try #""AppState" { "appid" "400" "name" "Old" "StateFlags" "4" "installdir" "Old" "LastOwner" "76561197960287930" "SizeOnDisk" "100" }"#
+            .write(to: client.appendingPathComponent("steamapps/appmanifest_400.acf"), atomically: true, encoding: .utf8)
+
+        await vm.load()
+        let game = try #require(vm.games.first { $0.appID == 400 })
+        #expect(game.backend == .dxmt)
+        await vm.play(game)
+
+        let spawn = try #require(fake.invocations.last {
+            $0.detached && $0.arguments.contains { $0.hasSuffix("Old.exe") } })
+        #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))   // the DXMT variant runtime
+        #expect(spawn.environment["WINEPREFIX"] == paths.steamBottle(.dxmt).path)   // the DXMT Steam bottle
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+    }
+
     @Test("load → notReady when the bottle has no Steam installed")
     func notReadyWithoutSteam() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
