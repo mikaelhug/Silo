@@ -55,20 +55,22 @@ SRC="$WORK/dxmt"
 echo "==> Preflight"
 # (1) Full Xcode + Metal toolchain — DXMT compiles .metal shaders via `xcrun metal` (meson.build).
 echo "    Xcode: $(xcode-select -p 2>/dev/null || echo '?')"
-# Xcode 16+ (incl. Xcode 26 on macOS 26 Tahoe) ship the Metal shader compiler as a SEPARATE component.
-# Fetch it if missing (idempotent), then re-check — DXMT compiles .metal shaders, so this is required.
-if ! xcrun -sdk macosx -f metal >/dev/null 2>&1; then
-  echo "    Metal compiler not found — fetching the Metal toolchain component (one-time, ~GB)…"
-  xcodebuild -downloadComponent MetalToolchain 2>/dev/null || true
-fi
-xcrun -sdk macosx -f metal >/dev/null 2>&1 || {
-  echo "ERROR: the Metal shader compiler (xcrun metal) still isn't available. DXMT compiles .metal shaders."
-  echo "  - If 'xcode-select -p' shows /Library/Developer/CommandLineTools, point it at full Xcode:"
-  echo "      sudo xcode-select -s /Applications/Xcode.app"
-  echo "  - Then install the Metal toolchain component:"
-  echo "      xcodebuild -downloadComponent MetalToolchain"
+# DXMT compiles .metal shaders. Xcode 16+/26 ship the Metal TOOLCHAIN as a SEPARATE component — the bare
+# `metal` binary is present (so `-f metal` finds it) but `metal -c` FAILS until the component is installed.
+# Fetch it (idempotent — no-op once present), then verify by actually compiling a probe shader.
+xcodebuild -downloadComponent MetalToolchain 2>/dev/null || true
+_probe="$(mktemp -d)/p.metal"; printf 'kernel void _p() {}' > "$_probe"
+if ! xcrun -sdk macosx metal -c "$_probe" -o "$_probe.air" >/dev/null 2>&1; then
+  rm -rf "$(dirname "$_probe")"
+  echo "ERROR: the Metal shader compiler can't run (DXMT compiles .metal shaders). Ensure full Xcode is"
+  echo "       installed + selected, then:"
+  echo "         sudo xcode-select -s /Applications/Xcode.app   # if it points at CommandLineTools"
+  echo "         sudo xcodebuild -license accept                # if not yet accepted"
+  echo "         xcodebuild -downloadComponent MetalToolchain   # install the Metal toolchain (~2 GB)"
   exit 1
-}
+fi
+rm -rf "$(dirname "$_probe")"
+echo "    Metal toolchain: OK"
 # (2) A Wine install to build against (winemetal.so links its winemac.so + needs its headers/import libs).
 [ -d "$WINE_INSTALL" ] || {
   echo "ERROR: no Wine install at '$WINE_INSTALL'."
@@ -105,20 +107,21 @@ rm llvm-mingw.tar.xz
   || { echo "ERROR: unexpected llvm-mingw layout (no toolchains/$MINGW_DIR/bin/x86_64-w64-mingw32-gcc)"; exit 1; }
 
 echo "==> Configure + build (x86_64, release) against the Wine install — compiles Metal shaders + airconv"
-# Force the NATIVE (winemetal.so + airconv) compile to x86_64 so it matches the x86_64 Wine + x86_64
-# llvm@15 (the upstream build-osx.txt sets only `c = clang`; this pins the arch on top of it).
-cat > arch-x86_64.txt <<'EOF'
-[built-in options]
-c_args = ['-arch', 'x86_64']
-cpp_args = ['-arch', 'x86_64']
-c_link_args = ['-arch', 'x86_64']
-cpp_link_args = ['-arch', 'x86_64']
+# Native (macOS) toolchain for winemetal.so + airconv: pin the SYSTEM clang by ABSOLUTE path, x86_64. This
+# is load-bearing — llvm-mingw AND llvm@15 each ship a bare `clang` on PATH that would otherwise shadow the
+# Apple clang; those can't link macOS binaries (you get `ld: library 'System' not found`). Overrides DXMT's
+# build-osx.txt (which uses a bare `clang`).
+cat > silo-osx.txt <<'EOF'
+[binaries]
+c = ['/usr/bin/clang', '-arch', 'x86_64']
+cpp = ['/usr/bin/clang++', '-arch', 'x86_64']
 EOF
-BREW_BIN="$($ARCH "$BREW" --prefix)/bin"
-export PATH="$SRC/toolchains/$MINGW_DIR/bin:$LLVM15/bin:$BREW_BIN:$PATH"
+# Cross toolchain (llvm-mingw) is referenced by ABSOLUTE path in build-win64.txt, and llvm@15 via
+# -Dnative_llvm_path — so keep them AFTER the system dirs on PATH (system clang/ld/ar win for bare names).
+export PATH="$PATH:$SRC/toolchains/$MINGW_DIR/bin:$LLVM15/bin"
 rm -rf build install
 $ARCH meson setup \
-  --cross-file build-win64.txt --native-file build-osx.txt --native-file arch-x86_64.txt \
+  --cross-file build-win64.txt --native-file silo-osx.txt \
   -Dnative_llvm_path="$LLVM15" \
   -Dwine_install_path="$WINE_INSTALL" \
   build --buildtype release --prefix "$SRC/install" --strip
