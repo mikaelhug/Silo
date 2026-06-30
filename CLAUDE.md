@@ -43,9 +43,13 @@ process with `WINEPREFIX` overridden to the isolated prefix).
 ## Graphics backends (GPTK + DXMT — decided 2026-06-30, reverses the GPTK-only stance)
 Two Metal translation layers, selectable **per game**: **GPTK / D3DMetal** (Apple's, D3D10/11/12 → Metal,
 the default) and **DXMT** (3Shain's, D3D10/11 → Metal directly, the fallback for titles GPTK's
-device-creation can't run, e.g. Overcooked 2). DXMT is built from the **same CrossOver-FOSS source** as
-Wine (it bundles `DXMT v0.72`), so constraint #8 still holds — never a third-party prebuilt. DXVK was
-evaluated and rejected (needs a Vulkan/MoltenVK stack; DXMT is Metal-direct).
+device-creation can't run, e.g. Overcooked 2). DXMT `v0.72` — the **exact version CrossOver 26 bundles** —
+is built from its upstream (`3Shain/dxmt`, pinned in `versions.env`) **against the CrossOver Wine**, the
+DXMT↔Wine pairing CrossOver itself ships — via `Scripts/build-dxmt.sh` / `.github/workflows/build-dxmt.yml`
+(needs full Xcode's Metal toolchain + the wine install for `winemetal.so`). Constraint #8 binds **Wine**
+only (DXMT isn't Wine); we build from upstream for the canonical, reproducible build incl. its git
+submodules. Never a third-party prebuilt. DXVK was evaluated and rejected (Vulkan/MoltenVK stack; DXMT is
+Metal-direct).
 
 **The deterministic rule — backend ⇔ runtime ⇔ bottle** (`GraphicsBackend` is the single source of truth):
 - Both backends overlay a **builtin** `d3d11`/`dxgi` into a runtime's `lib/wine` tree, so they can't share

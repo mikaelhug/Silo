@@ -1,0 +1,170 @@
+name: Build DXMT (older-games backend)
+
+# Self-reliant DXMT pipeline: build 3Shain's DXMT (the Metal D3D10/11 layer Silo overlays as the GPTK
+# fallback) from its upstream source against Silo's CrossOver Wine, and publish it to this repo's
+# Releases — so the app never depends on a third-party prebuilt that may go stale.
+#
+# We pin the EXACT DXMT version CrossOver 26 bundles and build it against the matching CrossOver Wine
+# (the published wine-cx-* release this repo builds), so DXMT↔Wine is the pairing CrossOver itself ships.
+# DXMT is NOT Wine, so constraint #8 (Wine = CrossOver-FOSS only) is unaffected; we build from DXMT's
+# upstream for its canonical, reproducible build incl. the git submodules CrossOver's tarball omits.
+#
+# CAVEAT: like the Wine build this is intricate + slow (compiles Metal shaders + airconv; needs full
+# Xcode's Metal toolchain) and will need iteration against real CI logs. It is intentionally manual
+# (workflow_dispatch). See also Scripts/build-dxmt.sh (the identical local recipe).
+
+on:
+  workflow_dispatch:
+    inputs:
+      dxmt_version:
+        description: "DXMT upstream git tag, e.g. v0.72 (must exist in 3Shain/dxmt)"
+        required: true
+        default: "v0.72"
+      llvm_mingw_version:
+        description: "mstorsjo/llvm-mingw version DXMT's cross-file pins, e.g. 20231017"
+        required: true
+        default: "20231017"
+      wine_release_tag:
+        description: "This repo's CrossOver Wine release to build against, e.g. wine-cx-26.2.0"
+        required: true
+        default: "wine-cx-26.2.0"
+      release_tag:
+        description: "Release tag to publish, e.g. dxmt-v0.72"
+        required: true
+        default: "dxmt-v0.72"
+
+permissions:
+  contents: write
+
+concurrency:
+  # One build per DXMT version; don't cancel an in-flight build.
+  group: dxmt-build-${{ inputs.dxmt_version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # macos-15 ships Xcode 16 (the Metal toolchain DXMT's shader compile needs).
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      # DXMT must be x86_64 to match the x86_64 CrossOver Wine + winemetal.so (Rosetta).
+      ARCH_PREFIX: "arch -x86_64"
+      MINGW_DIR: "llvm-mingw-${{ inputs.llvm_mingw_version }}-ucrt-macos-universal"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode (Metal toolchain)
+        run: |
+          set -eo pipefail
+          # Pick an installed Xcode 16 (any 16.x has the Metal toolchain), else the default Xcode.app.
+          shopt -s nullglob
+          xcodes=(/Applications/Xcode_16*.app)
+          XCODE="${xcodes[0]:-/Applications/Xcode.app}"
+          sudo xcode-select -s "$XCODE"
+          xcrun -sdk macosx -f metal   # fail early if the Metal toolchain is missing
+
+      - name: Install Rosetta 2
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Build dependencies (x86_64 Homebrew)
+        run: |
+          set -eo pipefail
+          # x86_64 Homebrew under Rosetta so llvm@15 + meson match the x86_64 DXMT we build.
+          # shellcheck disable=SC2016  # the $(...) must run in the spawned bash, not expand here
+          if [ ! -x /usr/local/bin/brew ]; then
+            $ARCH_PREFIX /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+          fi
+          BREW=/usr/local/bin/brew
+          test -x "$BREW"
+          export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
+          # The runner pre-seeds /usr/local/bin with macOS Python.framework shims that block Homebrew's
+          # python keg-link (meson pulls python). Remove just those shims so the install is error-free.
+          for shim in /usr/local/bin/*; do
+            if [ -L "$shim" ] && readlink "$shim" 2>/dev/null | grep -q "Python.framework"; then
+              sudo rm -f "$shim"
+            fi
+          done
+          $ARCH_PREFIX "$BREW" install llvm@15 meson ninja || true
+          missing=""
+          for f in llvm@15 meson ninja; do
+            $ARCH_PREFIX "$BREW" --prefix "$f" >/dev/null 2>&1 || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then echo "::error::required brew formulae failed to install:$missing"; exit 1; fi
+          echo "BREW=$BREW" >> "$GITHUB_ENV"
+          echo "LLVM15=$($ARCH_PREFIX "$BREW" --prefix llvm@15)" >> "$GITHUB_ENV"
+
+      - name: Download the CrossOver Wine to build against
+        run: |
+          set -eo pipefail
+          # The wine-cx-* release (built by build-wine.yml) carries wine.tar.xz = a full Wine install with
+          # the headers + import libs (winecrt0/ntdll/dbghelp) DXMT's winemetal.so links against.
+          gh release download "${{ inputs.wine_release_tag }}" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'wine.tar.xz' --dir "$RUNNER_TEMP/wine-dl"
+          mkdir -p "$RUNNER_TEMP/wine-install"
+          tar -xJf "$RUNNER_TEMP/wine-dl/wine.tar.xz" -C "$RUNNER_TEMP/wine-install"
+          test -d "$RUNNER_TEMP/wine-install/lib/wine/x86_64-windows"
+          echo "WINE_INSTALL=$RUNNER_TEMP/wine-install" >> "$GITHUB_ENV"
+
+      - name: Fetch DXMT source + submodules
+        run: |
+          set -eo pipefail
+          # Keep .git so meson stamps the version from the tag (vcs_tag → version.h).
+          git clone --depth 1 --branch "${{ inputs.dxmt_version }}" --recurse-submodules --shallow-submodules \
+            https://github.com/3Shain/dxmt.git "$RUNNER_TEMP/dxmt"
+          # The cross toolchain DXMT's build-win64.txt pins, placed where @GLOBAL_SOURCE_ROOT@ expects it.
+          mkdir -p "$RUNNER_TEMP/dxmt/toolchains"
+          curl -fL "https://github.com/mstorsjo/llvm-mingw/releases/download/${{ inputs.llvm_mingw_version }}/${MINGW_DIR}.tar.xz" -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
+          tar -xf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C "$RUNNER_TEMP/dxmt/toolchains"
+          test -x "$RUNNER_TEMP/dxmt/toolchains/$MINGW_DIR/bin/x86_64-w64-mingw32-gcc"
+          echo "DXMT_SRC=$RUNNER_TEMP/dxmt" >> "$GITHUB_ENV"
+
+      - name: Configure + build (x86_64, release)
+        run: |
+          set -eo pipefail
+          cd "$DXMT_SRC"
+          # Force the native (winemetal.so + airconv) compile to x86_64 to match the x86_64 Wine + llvm@15.
+          # echo (not a heredoc) so the YAML block indentation never leaks into the meson native file.
+          {
+            echo "[built-in options]"
+            echo "c_args = ['-arch', 'x86_64']"
+            echo "cpp_args = ['-arch', 'x86_64']"
+            echo "c_link_args = ['-arch', 'x86_64']"
+            echo "cpp_link_args = ['-arch', 'x86_64']"
+          } > arch-x86_64.txt
+          BREW_BIN="$($ARCH_PREFIX "$BREW" --prefix)/bin"
+          export PATH="$DXMT_SRC/toolchains/$MINGW_DIR/bin:$LLVM15/bin:$BREW_BIN:$PATH"
+          $ARCH_PREFIX meson setup \
+            --cross-file build-win64.txt --native-file build-osx.txt --native-file arch-x86_64.txt \
+            -Dnative_llvm_path="$LLVM15" \
+            -Dwine_install_path="$WINE_INSTALL" \
+            build --buildtype release --prefix "$DXMT_SRC/install" --strip
+          $ARCH_PREFIX meson compile -C build
+          $ARCH_PREFIX meson install -C build
+
+      - name: Verify artifacts
+        run: |
+          set -eo pipefail
+          cd "$DXMT_SRC"
+          win="install/lib/wine/x86_64-windows"; unix="install/lib/wine/x86_64-unix"
+          for f in "$win/d3d11.dll" "$win/dxgi.dll" "$win/d3d10core.dll" "$win/winemetal.dll" "$unix/winemetal.so"; do
+            test -e "$f" || { echo "::error::missing artifact $f"; exit 1; }
+          done
+          file "$unix/winemetal.so" | grep -q x86_64 || { echo "::error::winemetal.so is not x86_64"; exit 1; }
+
+      - name: Package dxmt.tar.xz
+        run: |
+          set -eo pipefail
+          ( cd "$DXMT_SRC/install" && tar -cJf "$GITHUB_WORKSPACE/dxmt.tar.xz" --exclude='*.a' lib )
+          ( cd "$GITHUB_WORKSPACE" && shasum -a 256 dxmt.tar.xz > dxmt.tar.xz.sha256 )
+          ls -la "$GITHUB_WORKSPACE/dxmt.tar.xz" "$GITHUB_WORKSPACE/dxmt.tar.xz.sha256"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_tag }}
+          files: |
+            dxmt.tar.xz
+            dxmt.tar.xz.sha256
+          body: "DXMT ${{ inputs.dxmt_version }} (3Shain/dxmt) built against this repo's CrossOver Wine (${{ inputs.wine_release_tag }}) — the older-games D3D10/11 backend. In Silo: Settings → DXMT → Import the extracted lib/wine/x86_64-windows folder."
