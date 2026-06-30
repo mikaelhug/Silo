@@ -92,14 +92,15 @@ public struct LaunchOrchestrator: Sendable {
     /// `SteamBottle`). Returns the child PID.
     @discardableResult
     public func launchInBottle(
-        app: SteamApp, config: GameConfig, backend: BackendConfig, prefix: URL, logURL: URL
+        app: SteamApp, config: GameConfig, backend: BackendConfig,
+        graphics: GraphicsBackend = .gptk, prefix: URL, logURL: URL
     ) async throws -> Int32 {
         guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
         let gameExe = try resolveExecutable(app: app, config: config)
-        try linkGraphics(backendConfig: backend)
+        try linkGraphics(backendConfig: backend, graphics: graphics)
         try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)
         let plan = try Self.makePlan(
-            config: config, backend: backend, gameExe: gameExe, prefix: prefix, logURL: logURL
+            config: config, backend: backend, graphics: graphics, gameExe: gameExe, prefix: prefix, logURL: logURL
         )
         return try await spawn(plan)
     }
@@ -110,16 +111,18 @@ public struct LaunchOrchestrator: Sendable {
     /// use Steamworks) and no Steam client requirement — just wine + the absolute `.exe` path. Returns PID.
     @discardableResult
     public func launchManualGame(
-        _ game: ManualGame, backend: BackendConfig, prefix: URL, logURL: URL
+        _ game: ManualGame, backend: BackendConfig,
+        graphics: GraphicsBackend = .gptk, prefix: URL, logURL: URL
     ) async throws -> Int32 {
         guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
         guard FileManager.default.fileExists(atPath: game.executablePath.path) else {
             throw LaunchError.executableNotFound(game.executablePath)
         }
-        try linkGraphics(backendConfig: backend)
+        try linkGraphics(backendConfig: backend, graphics: graphics)
         let config = GameConfig(appID: 0, envFlags: game.envFlags, presence: .none, customArgs: game.customArgs)
         let plan = try Self.makePlan(
-            config: config, backend: backend, gameExe: game.executablePath, prefix: prefix, logURL: logURL)
+            config: config, backend: backend, graphics: graphics, gameExe: game.executablePath,
+            prefix: prefix, logURL: logURL)
         return try await spawn(plan)
     }
 
@@ -127,15 +130,15 @@ public struct LaunchOrchestrator: Sendable {
     /// installs into the bottle's `drive_c`; the user then points the game at the installed executable.
     @discardableResult
     public func runInstaller(
-        exe: URL, backend: BackendConfig, prefix: URL, logURL: URL
+        exe: URL, backend: BackendConfig, graphics: GraphicsBackend = .gptk, prefix: URL, logURL: URL
     ) async throws -> Int32 {
         guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
         guard FileManager.default.fileExists(atPath: exe.path) else {
             throw LaunchError.executableNotFound(exe)
         }
-        try linkGraphics(backendConfig: backend)
+        try linkGraphics(backendConfig: backend, graphics: graphics)
         let plan = try Self.makePlan(
-            config: GameConfig(appID: 0, presence: .none), backend: backend,
+            config: GameConfig(appID: 0, presence: .none), backend: backend, graphics: graphics,
             gameExe: exe, prefix: prefix, logURL: logURL)
         return try await spawn(plan)
     }
@@ -219,13 +222,16 @@ public struct LaunchOrchestrator: Sendable {
         throw LaunchError.executableNotFound(installURL)
     }
 
-    /// Wire up GPTK's graphics translation before launch: overlay D3DMetal into the wine RUNTIME
-    /// (idempotent, shared by every co-resident game). Skipped when unconfigured — the game then falls
-    /// back to wine's own wined3d.
-    private func linkGraphics(backendConfig: BackendConfig) throws {
+    /// Wire up the selected backend's graphics translation before launch: overlay D3DMetal (GPTK) or DXMT
+    /// into the wine RUNTIME (idempotent, shared by every co-resident game in that backend's bottle).
+    /// Skipped when that backend is unconfigured — the game then falls back to wine's own wined3d.
+    private func linkGraphics(backendConfig: BackendConfig, graphics: GraphicsBackend) throws {
         guard let wine = backendConfig.wineBinaryPath,
-              let gptkLibDir = backendConfig.gptkLibDirPath else { return }
-        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+              let libDir = backendConfig.libDir(for: graphics) else { return }
+        switch graphics {
+        case .gptk: try linker.overlayGPTK(wineBinary: wine, gptkLibDir: libDir)
+        case .dxmt: try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: libDir)
+        }
     }
 
     private static func mergeOverride(_ existing: String?, _ addition: String) -> String {

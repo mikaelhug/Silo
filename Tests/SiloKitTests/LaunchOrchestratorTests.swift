@@ -269,6 +269,43 @@ struct LaunchPipelineTests {
             .appendingPathComponent("steam_appid.txt").path))
     }
 
+    @Test("launchManualGame under DXMT overlays DXMT into the runtime and forces its builtin d3d overrides")
+    func manualGameDXMT() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+
+        // A fake wine runtime + a DXMT runtime source tree (PE d3d11 + winemetal.so bridge).
+        let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
+        try tmp.makeDir("wine/lib/wine/x86_64-windows")
+        try tmp.makeDir("wine/lib/wine/x86_64-unix")
+        let dxmtLibDir = try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
+        try tmp.write("dxmt/lib/wine/x86_64-windows/d3d11.dll", "DXMT-PE")
+        try tmp.makeDir("dxmt/lib/wine/x86_64-unix")
+        try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WINEMETAL")
+        let exe = try tmp.write("Games/Old/old.exe", "MZ")
+        let prefix = try tmp.makeDir("bottle")
+
+        var backend = BackendConfig()
+        backend.wineBinaryPath = wine
+        backend.dxmtLibDirPath = dxmtLibDir
+
+        let game = ManualGame(name: "Old", executablePath: exe)
+        let pid = try await orchestrator.launchManualGame(
+            game, backend: backend, graphics: .dxmt, prefix: prefix,
+            logURL: tmp.url.appendingPathComponent("m.log"))
+        #expect(pid == 4242)
+
+        // DXMT overlaid into the wine RUNTIME (its d3d11 now carries DXMT's bytes).
+        let overlaid = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-windows/d3d11.dll")
+        #expect(try String(contentsOf: overlaid, encoding: .utf8) == "DXMT-PE")
+
+        let spawn = try #require(fake.invocations.last { $0.detached })
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(spawn.environment["WINEPREFIX"] == prefix.path)
+    }
+
     @Test("launchManualGame throws when the .exe is missing")
     func manualGameMissingExe() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
