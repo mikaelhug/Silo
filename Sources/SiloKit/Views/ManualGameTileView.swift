@@ -17,12 +17,8 @@ struct ManualGameTileView: View {
         let busy = lib.isBusy(game)
 
         VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                GameArtworkPlaceholder()
-                Image(systemName: "gamecontroller.fill")
-                    .font(.largeTitle).foregroundStyle(.white.opacity(0.85))
-            }
-            .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92).clipped()
+            ManualGameArtwork(exe: game.executablePath)
+                .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92).clipped()
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(game.name).font(.headline).lineLimit(1)
@@ -85,5 +81,45 @@ struct ManualGameTileView: View {
         }
         Divider()
         Button("Remove…", role: .destructive) { confirmingRemove = true }
+    }
+}
+
+/// A manual game's tile artwork: the icon embedded in its `.exe` if one can be extracted, else the generic
+/// placeholder. The PE is parsed off the main thread, once, and the result cached by exe path.
+struct ManualGameArtwork: View {
+    let exe: URL
+    @State private var icon: NSImage?
+
+    var body: some View {
+        ZStack {
+            GameArtworkPlaceholder()
+            if let icon {
+                Image(nsImage: icon).resizable().aspectRatio(contentMode: .fit).padding(14)
+            } else {
+                Image(systemName: "gamecontroller.fill")
+                    .font(.largeTitle).foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .task(id: exe) { icon = await ManualIconCache.shared.icon(for: exe) }
+    }
+}
+
+/// Caches extracted `.exe` icons by path so a tile (or a re-render) parses the PE at most once. A parsed
+/// "no icon" result is cached too (stored as `.some(nil)`), so files without an icon aren't re-parsed.
+@MainActor
+final class ManualIconCache {
+    static let shared = ManualIconCache()
+    private var cache: [String: NSImage?] = [:]
+
+    func icon(for exe: URL) async -> NSImage? {
+        if let cached = cache[exe.path] { return cached }
+        // Read + parse off the main thread (Data is Sendable); build the NSImage back on the main actor.
+        let ico: Data? = await Task.detached(priority: .utility) {
+            guard let data = try? Data(contentsOf: exe, options: .mappedIfSafe) else { return nil }
+            return PEIcon.icoData(fromExecutable: data)
+        }.value
+        let image = ico.flatMap { NSImage(data: $0) }
+        cache[exe.path] = image
+        return image
     }
 }
