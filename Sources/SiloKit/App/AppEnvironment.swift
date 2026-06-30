@@ -11,6 +11,8 @@ public final class AppEnvironment {
     let orchestrator: LaunchOrchestrator
     let discovery: DiscoveryEngine
     let runtimeManager: RuntimeManager
+    /// Runs Wine maintenance tools + registry tweaks (Retina) against the shared Steam bottle.
+    let wineTools: WineTools
 
     public let gameLibrary: GameLibraryViewModel
     public let backendSettings: BackendSettingsViewModel
@@ -40,6 +42,7 @@ public final class AppEnvironment {
     ) {
         self.paths = paths
         self.runner = runner
+        self.wineTools = WineTools(runner: runner)
         self.updater = updater ?? Updater(runner: runner)
 
         let configStore = ConfigStore(paths: paths)
@@ -224,6 +227,43 @@ public final class AppEnvironment {
     /// The Windows Steam client is installed in the bottle (the user signs into it in-app).
     public var steamReady: Bool { gameLibrary.steamReady }
     public var setupComplete: Bool { wineReady && gptkReady && steamReady }
+
+    // MARK: - Steam-bottle Wine tools (Settings → General)
+
+    /// Last result of a bottle-tool action (Retina toggle / winecfg / regedit), shown in Settings.
+    public private(set) var bottleToolsMessage: String?
+    public private(set) var bottleToolsBusy = false
+
+    /// The wine binary games launch with (nil until Wine is configured).
+    public var wineBinary: URL? { backendSettings.config.wineBinaryPath }
+
+    /// Toggle macOS Retina/HiDPI mode for the shared Steam bottle: persist the choice, then write the
+    /// `RetinaMode` registry key into the bottle prefix. Takes effect on the next game launch.
+    public func setSteamBottleRetina(_ on: Bool) async {
+        guard let wine = wineBinary else { bottleToolsMessage = "Set up Wine first."; return }
+        guard !bottleToolsBusy else { return }
+        bottleToolsBusy = true; defer { bottleToolsBusy = false }
+        backendSettings.config.retinaMode = on
+        await backendSettings.save()
+        do {
+            try await wineTools.setRetinaMode(on, prefix: paths.steamBottle, wine: wine)
+            bottleToolsMessage = "Retina mode \(on ? "on" : "off") — applies on the next game launch."
+        } catch {
+            bottleToolsMessage = "Couldn't update Retina mode: \((error as NSError).localizedDescription)"
+        }
+    }
+
+    /// Open a Wine maintenance tool (winecfg / regedit / Control Panel) on the shared Steam bottle so the
+    /// user can fix the prefix by hand.
+    public func openWineTool(_ tool: WineTools.Tool) async {
+        guard let wine = wineBinary else { bottleToolsMessage = "Set up Wine first."; return }
+        do {
+            try await wineTools.open(tool, prefix: paths.steamBottle, wine: wine, logURL: paths.steamBottleLog)
+            bottleToolsMessage = "Opened \(tool.rawValue)."
+        } catch {
+            bottleToolsMessage = "Couldn't open \(tool.rawValue): \((error as NSError).localizedDescription)"
+        }
+    }
 
     /// Build a per-game settings view model with the game's persisted config.
     public func makeGameSettings(appID: Int) async -> GameSettingsViewModel {

@@ -203,6 +203,26 @@ struct ConfigStoreTests {
         #expect(off["D3DM_SUPPORT_DXR"] == nil)
     }
 
+    @Test("BackendConfig tolerates a pre-retinaMode document (defaults false, never wipes config)")
+    func backendConfigTolerantDecode() throws {
+        // An old config.json predating retinaMode — must decode (not throw), keeping its fields.
+        let old = try JSONDecoder().decode(
+            BackendConfig.self,
+            from: Data(#"{"wineRuntimeName":"wine-cx-26.2.0","gptkRuntimeName":"GPTK-4.0_beta_1"}"#.utf8))
+        #expect(old.wineRuntimeName == "wine-cx-26.2.0")
+        #expect(old.gptkRuntimeName == "GPTK-4.0_beta_1")
+        #expect(!old.retinaMode)   // absent → false, not a decode error
+        #expect(try JSONDecoder().decode(BackendConfig.self, from: Data("{}".utf8)).retinaMode == false)
+    }
+
+    @Test("BackendConfig round-trips retinaMode")
+    func backendConfigRoundTrip() throws {
+        let original = BackendConfig(retinaMode: true)
+        let decoded = try JSONDecoder().decode(BackendConfig.self, from: JSONEncoder().encode(original))
+        #expect(decoded == original)
+        #expect(decoded.retinaMode)
+    }
+
 
     // MARK: - Manual (non-Steam) games
 

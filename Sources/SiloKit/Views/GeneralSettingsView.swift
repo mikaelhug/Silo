@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// The **General** settings tab: Steam-bottle setup, with the app version + inline updater at the bottom.
 struct GeneralSettingsView: View {
@@ -12,10 +13,45 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             steamBottleSection
+            bottleToolsSection
             bottlesSection
             updatesSection
         }
         .formStyle(.grouped)
+    }
+
+    /// Per-bottle Wine knobs + escape-hatch tools for the shared Steam bottle. Retina/HiDPI is the common
+    /// fix for wrong-sized game windows on Retina Macs; the tool buttons let users repair the prefix by hand.
+    @ViewBuilder private var bottleToolsSection: some View {
+        let configured = env.wineBinary != nil
+        Section {
+            Toggle(isOn: Binding(
+                get: { env.backendSettings.config.retinaMode },
+                set: { on in Task { await env.setSteamBottleRetina(on) } })
+            ) {
+                Text("Retina / HiDPI mode")
+                Text("Render games at the Mac's native resolution. Fixes wrong-sized windows; applies on "
+                     + "the next launch.").font(.caption).foregroundStyle(.secondary)
+            }
+            .disabled(!configured || env.bottleToolsBusy)
+
+            LabeledContent("Repair") {
+                HStack(spacing: 8) {
+                    Button("Wine Config") { Task { await env.openWineTool(.winecfg) } }
+                    Button("Registry") { Task { await env.openWineTool(.regedit) } }
+                    Button("Control Panel") { Task { await env.openWineTool(.control) } }
+                }
+                .disabled(!configured)
+            }
+            Button("Reveal Bottle in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([env.paths.steamBottle])
+            }
+            if let message = env.bottleToolsMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Bottle tools")
+        }
     }
 
     /// Where Silo keeps its Wine bottles — movable to another disk / external drive.
