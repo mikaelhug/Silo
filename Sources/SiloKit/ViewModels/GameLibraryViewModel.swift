@@ -234,11 +234,13 @@ public final class GameLibraryViewModel {
     /// `id` used for any pre-Add installer run so the game adopts that already-booted bottle. Name defaults
     /// to the exe's filename.
     @discardableResult
-    public func addManualGame(id: UUID = UUID(), name: String, executable: URL) async -> ManualGame? {
+    public func addManualGame(
+        id: UUID = UUID(), name: String, executable: URL, backend graphics: GraphicsBackend = .gptk
+    ) async -> ManualGame? {
         guard await ensureManualBottle(id) else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmed.isEmpty ? executable.deletingPathExtension().lastPathComponent : trimmed
-        let game = ManualGame(id: id, name: finalName, executablePath: executable)
+        let game = ManualGame(id: id, name: finalName, executablePath: executable, backend: graphics)
         do {
             _ = try await configStore.saveManualGame(game)
             manualGames = sortedManual(manualGames + [game])
@@ -270,23 +272,52 @@ public final class GameLibraryViewModel {
         setStatus("Removed \(game.name).")
     }
 
-    /// Launch a manual game in its OWN bottle under GPTK (no Steam needed). Boots the bottle first if this
-    /// is its first run.
+    /// Launch a manual game in its OWN bottle under its chosen backend (GPTK or DXMT; no Steam needed).
+    /// Boots the bottle first, then routes through `BottleResolver` so the game runs on the right runtime —
+    /// GPTK in place, or DXMT's cloned+overlaid variant. The clone/overlay runs off the main actor.
     public func playManual(_ game: ManualGame) async {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id),
               manualRunningPIDs[game.id] == nil else { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
         guard await ensureManualBottle(game.id) else { return }
+        let cfg = backend
+        let context: LaunchContext
         do {
+            context = try await Task.detached { [paths] in
+                try BottleResolver(paths: paths).manual(game, config: cfg)
+            }.value
+        } catch {
+            setStatus("\(game.name): \(Self.resolveMessage(error))")
+            return
+        }
+        do {
+            // The resolved runtime is the backend's variant; feed it to the orchestrator as the launch wine.
+            var launchBackend = backend
+            launchBackend.wineBinaryPath = context.wineBinary
             let pid = try await orchestrator.launchManualGame(
-                game, backend: backend, prefix: paths.manualBottle(game.id), logURL: paths.manualLog(game.id))
+                game, backend: launchBackend, graphics: context.graphics,
+                prefix: context.prefix, logURL: paths.manualLog(game.id))
             _ = try? await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
             manualRunningPIDs[game.id] = pid
             observeManualRun(id: game.id, pid: pid)
             setStatus("Launched \(game.name).")
-            watchManualGraphics(id: game.id, log: paths.manualLog(game.id), name: game.name)   // last (see play)
+            watchManualGraphics(id: game.id, log: paths.manualLog(game.id),
+                                name: game.name, backend: game.backend)   // last (see play)
         } catch {
             setStatus("\(game.name): \((error as NSError).localizedDescription)")
+        }
+    }
+
+    /// Human-readable text for a `BottleResolver.ResolveError` (a missing secondary runtime is the common
+    /// case a user can act on).
+    private static func resolveMessage(_ error: Error) -> String {
+        switch error {
+        case BottleResolver.ResolveError.backendNotConfigured(let graphics):
+            "\(graphics.displayName) runtime isn't installed — set it up in Settings first."
+        case BottleResolver.ResolveError.wineNotConfigured:
+            "No Wine configured."
+        default:
+            (error as NSError).localizedDescription
         }
     }
 
@@ -340,12 +371,13 @@ public final class GameLibraryViewModel {
         }
     }
 
-    /// Same, for a manual game's own bottle log.
-    private func watchManualGraphics(id: UUID, log: URL, name: String) {
+    /// Same, for a manual game's own bottle log. The message names the game's chosen backend (GPTK or DXMT),
+    /// since the "fell back to wined3d" signal applies to whichever translation layer was attempted.
+    private func watchManualGraphics(id: UUID, log: URL, name: String, backend: GraphicsBackend) {
         let monitor = GraphicsFallbackMonitor()
         manualGraphicsMonitors[id] = monitor
         monitor.start(url: log) { [weak self] in
-            self?.setStatus("\(name): GPTK (D3DMetal) didn't engage — running on fallback graphics (wined3d).")
+            self?.setStatus("\(name): \(backend.displayName) didn't engage — running on fallback graphics (wined3d).")
             self?.manualGraphicsMonitors[id] = nil
         }
     }
