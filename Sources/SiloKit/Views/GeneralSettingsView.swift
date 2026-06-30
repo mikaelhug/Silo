@@ -18,6 +18,7 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             steamBottleSection
+            dxmtSection
             bottleToolsSection
             bottlesSection
             updatesSection
@@ -137,6 +138,43 @@ struct GeneralSettingsView: View {
             }
         } header: {
             Text("Steam bottle")
+        }
+    }
+
+    /// The optional DXMT backend: import its runtime + stand up its own Steam bottle (older DX10/11 games).
+    @ViewBuilder private var dxmtSection: some View {
+        let bottle = env.dxmtBottleVM
+        Section {
+            LabeledContent("Runtime") {
+                HStack(spacing: 8) {
+                    Text(env.dxmtReady ? (env.backendSettings.config.dxmtRuntimeName ?? "Imported") : "Not imported")
+                        .foregroundStyle(.secondary)
+                    Button(env.dxmtReady ? "Replace…" : "Import…") {
+                        if let dir = chooseDirectory(message: "Choose the DXMT x86_64-windows module folder.") {
+                            Task { await env.importDXMTRuntime(from: dir) }
+                        }
+                    }
+                }
+            }
+            Button("Set up DXMT Steam bottle") { Task { await bottle.setUp() } }
+                .disabled(!bottle.canSetUp)
+            Button("Launch DXMT Steam") { Task { await bottle.launchSteam() } }
+                .disabled(bottle.busy || !bottle.steamInstalled)
+            Button("Reset DXMT Steam login") { Task { await bottle.resetLogin() } }
+                .disabled(bottle.busy || !bottle.steamInstalled)
+            Button("Open DXMT bottle log") {
+                openWindow(id: LogTarget.windowID,
+                           value: LogTarget(title: "DXMT Steam Bottle — Log", url: env.paths.steamBottleLog(.dxmt)))
+            }
+            if bottle.busy { ProgressView().controlSize(.small) }
+            if !bottle.status.isEmpty {
+                Text(bottle.status).font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("DXMT — older games (optional)")
+        } footer: {
+            Text("A second backend + Steam bottle for DirectX 10/11 titles GPTK can't run (e.g. Overcooked 2). "
+                 + "Sign into this bottle separately — Steam machine tokens are per-bottle.")
         }
     }
 
