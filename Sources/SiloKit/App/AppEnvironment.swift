@@ -19,6 +19,8 @@ public final class AppEnvironment {
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
     public let steamBottleVM: SteamBottleViewModel
+    /// Setup + launch for the DXMT Steam bottle (the older-games path) — same flow, the DXMT prefix.
+    public let dxmtBottleVM: SteamBottleViewModel
     /// The owner of the GPTK Steam bottle's live client (shared by the Library + the settings pane).
     public let steamClientSession: SteamClientSession
     /// The DXMT Steam bottle's client session (one Steam install/login per backend).
@@ -82,6 +84,7 @@ public final class AppEnvironment {
         self.gameLibrary = gameLibrary
         let steamBottleVM = SteamBottleViewModel(bottle: bottle, session: steamClientSession)
         self.steamBottleVM = steamBottleVM
+        self.dxmtBottleVM = SteamBottleViewModel(bottle: dxmtBottle, session: dxmtSession)
 
         backendSettings.onChange = { [weak self] in self?.applyBackend($0) }
         gptkManager.onDefaultChanged = { [weak self] install in
@@ -95,9 +98,10 @@ public final class AppEnvironment {
     /// Fan out a backend-config change to the view models that depend on it.
     private func applyBackend(_ config: BackendConfig) {
         gameLibrary.updateBackend(config)
-        steamBottleVM.updateWine(config.wineBinaryPath)
         // Both Steam clients run on the base wine (CEF; co-resident games pick the per-backend variant).
-        dxmtClientSession.updateWine(config.wineBinaryPath)
+        // updateWine on each bottle VM also updates its session's wine.
+        steamBottleVM.updateWine(config.wineBinaryPath)
+        dxmtBottleVM.updateWine(config.wineBinaryPath)
     }
 
     /// Load persisted config and populate the UI. Idempotent.
@@ -238,6 +242,29 @@ public final class AppEnvironment {
     /// The Windows Steam client is installed in the bottle (the user signs into it in-app).
     public var steamReady: Bool { gameLibrary.steamReady }
     public var setupComplete: Bool { wineReady && gptkReady && steamReady }
+
+    // MARK: - DXMT (optional older-games backend)
+
+    /// The DXMT runtime (its module dir, built from CrossOver source) is configured.
+    public var dxmtReady: Bool { backendSettings.config.dxmtLibDirPath != nil }
+    /// The DXMT Steam bottle has its Windows Steam client installed.
+    public var dxmtSteamReady: Bool {
+        FileManager.default.fileExists(atPath: paths.steamBottleExe(.dxmt).path)
+    }
+
+    /// Import a DXMT runtime by pointing at its `x86_64-windows` module dir (the `d3d11`/`winemetal`
+    /// artifacts built from the CrossOver source). Validates the folder, then adopts it as the backend's
+    /// DXMT lib dir (persisted + fanned out), enabling the DXMT bottle to launch games.
+    public func importDXMTRuntime(from dir: URL) async {
+        let required = ["d3d11.dll", "winemetal.dll"]
+        guard required.allSatisfy({ FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path) })
+        else {
+            backendSettings.statusMessage =
+                "That folder isn't a DXMT runtime (expected d3d11.dll + winemetal.dll)."
+            return
+        }
+        await backendSettings.applyDXMTLibDir(dir)
+    }
 
     // MARK: - Steam-bottle Wine tools (Settings → General)
 
