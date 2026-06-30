@@ -21,6 +21,13 @@ struct GraphicsFallbackTests {
         #expect(GraphicsFallback.classify(log) == .fallback)
     }
 
+    @Test("flags wined3d driving d3d1x (the definitive 'GPTK didn't engage' signal)")
+    func vulkanRenderer() {
+        // Real line from Overcooked! 2 (legacy D3D10 path → wined3d, not GPTK).
+        let log = "05c4:err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications."
+        #expect(GraphicsFallback.classify(log) == .fallback)
+    }
+
     @Test("detection is case-insensitive")
     func caseInsensitive() {
         #expect(GraphicsFallback.classify("FAILED TO DLOPEN D3DMETAL") == .fallback)
