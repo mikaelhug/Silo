@@ -376,7 +376,7 @@ public final class GameLibraryViewModel {
     private func watchManualGraphics(id: UUID, log: URL, name: String, backend: GraphicsBackend) {
         let monitor = GraphicsFallbackMonitor()
         manualGraphicsMonitors[id] = monitor
-        monitor.start(url: log) { [weak self] in
+        monitor.start(url: log, backend: backend) { [weak self] in
             self?.setStatus("\(name): \(backend.displayName) didn't engage — running on fallback graphics (wined3d).")
             self?.manualGraphicsMonitors[id] = nil
         }

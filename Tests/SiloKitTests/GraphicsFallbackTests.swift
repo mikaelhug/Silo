@@ -49,4 +49,21 @@ struct GraphicsFallbackTests {
         #expect(GraphicsFallback.classify("") == .unknown)
         #expect(GraphicsFallback.classify("fixme:keyboard:NtUserActivateKeyboardLayout not supported") == .unknown)
     }
+
+    @Test("a DXMT launch that fell back to wined3d is flagged via the backend-agnostic signals")
+    func dxmtFallbackDetected() {
+        let log = "05c4:err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications."
+        #expect(GraphicsFallback.classify(log, backend: .dxmt) == .fallback)
+    }
+
+    @Test("a healthy DXMT launch that merely loads winemetal is NOT flagged (no bare-substring false positive)")
+    func healthyDXMTNotFlagged() {
+        let log = """
+        msync: up and running.
+        trace:module:load_builtin_dll Loaded L"C:\\\\windows\\\\system32\\\\winemetal.dll"
+        DXMT: created Metal device "Apple M4 Pro"
+        == application started
+        """
+        #expect(GraphicsFallback.classify(log, backend: .dxmt) == .unknown)
+    }
 }

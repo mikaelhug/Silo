@@ -1,31 +1,43 @@
 import Foundation
 
-/// Detects when GPTK / D3DMetal did NOT drive a launch and wine silently fell back to its own `wined3d`
-/// (which can't create a modern D3D device on Apple Silicon). This is the guardrail for the exact failure
-/// class that previously went unnoticed: the launch "succeeds" (a process spawns), the status bar says
-/// "Launched …", but graphics never came up on GPTK. We surface it instead of letting it hide.
+/// Detects when the requested translation layer (GPTK / D3DMetal **or** DXMT) did NOT drive a launch and
+/// wine silently fell back to its own `wined3d` (which can't create a modern D3D device on Apple Silicon).
+/// This is the guardrail for the exact failure class that previously went unnoticed: the launch "succeeds"
+/// (a process spawns), the status bar says "Launched …", but graphics never came up on the chosen backend.
 ///
 /// Detection is a pure parse over the game's launch log, so it unit-tests with fixture text and no runtime.
 public enum GraphicsFallback: Sendable {
     public enum Status: Sendable, Equatable {
-        case fallback   // GPTK didn't engage — wine fell back to wined3d (and couldn't create the device)
-        case unknown    // no decisive signal (working GPTK launch, a d3d9/OpenGL game, or not yet logged)
+        case fallback   // the backend didn't engage — wine fell back to wined3d (and couldn't create the device)
+        case unknown    // no decisive signal (a working launch, a d3d9/OpenGL game, or not yet logged)
     }
 
-    /// Substrings that appear in a launch log ONLY when GPTK/D3DMetal failed to drive d3d10/11/12 and wine
-    /// fell back. High-confidence: a working GPTK launch — and a legitimate d3d9/OpenGL game that never
-    /// touches d3d1x — emits NONE of these, so the guardrail won't false-positive on them.
-    static let fallbackSignatures = [
-        "Failed to dlopen D3DMetal",                                 // GPTK's Metal backend never loaded
+    /// Signatures that mean wine's own `wined3d` took over rendering — i.e. the requested backend did NOT
+    /// engage. **Backend-agnostic:** both GPTK and DXMT target Metal, so a Vulkan-renderer / feature-level-
+    /// unsupported line means neither did its job and wined3d is driving d3d1x. A healthy launch — and a
+    /// legitimate d3d9/OpenGL game that never touches d3d1x — emits NONE of these, so no false positives.
+    static let wined3dFallbackSignatures = [
         "None of the requested D3D feature levels is supported",     // wined3d couldn't create the d3d1x device
-        "Using the Vulkan renderer",                                 // wined3d IS driving d3d1x (i.e. NOT GPTK) —
-                                                                     // the definitive "GPTK didn't engage" signal,
-                                                                     // present even when wined3d then runs OK
+        "Using the Vulkan renderer",                                 // wined3d IS driving d3d1x (the definitive
+                                                                     // "the backend didn't engage" signal,
+                                                                     // present even when wined3d then runs OK)
     ]
 
-    /// Classify a launch-log tail. Pure; case-insensitive substring match.
-    public static func classify(_ log: String) -> Status {
-        for signature in fallbackSignatures where log.range(of: signature, options: .caseInsensitive) != nil {
+    /// Backend-specific signatures that pinpoint *that* layer's loader failing — earlier + more specific
+    /// than the generic wined3d signals. GPTK logs a D3DMetal dlopen assertion; DXMT has no
+    /// reliably-distinct early signature yet (a bare "winemetal" appears on healthy launches too, so it
+    /// can't be one), so it relies on the wined3d signals above. Verify a DXMT-specific string on-device.
+    static func loaderFailureSignatures(_ backend: GraphicsBackend) -> [String] {
+        switch backend {
+        case .gptk: ["Failed to dlopen D3DMetal"]   // GPTK's Metal backend never loaded
+        case .dxmt: []
+        }
+    }
+
+    /// Classify a launch-log tail for the backend the game was launched under. Pure; case-insensitive.
+    public static func classify(_ log: String, backend: GraphicsBackend = .gptk) -> Status {
+        let signatures = wined3dFallbackSignatures + loaderFailureSignatures(backend)
+        for signature in signatures where log.range(of: signature, options: .caseInsensitive) != nil {
             return .fallback
         }
         return .unknown
@@ -39,11 +51,13 @@ public enum GraphicsFallback: Sendable {
 final class GraphicsFallbackMonitor {
     private var watch: FileWatch?
     private var onFallback: (@MainActor () -> Void)?
+    private var backend: GraphicsBackend = .gptk
     private var fired = false
 
-    func start(url: URL, onFallback: @escaping @MainActor () -> Void) {
+    func start(url: URL, backend: GraphicsBackend = .gptk, onFallback: @escaping @MainActor () -> Void) {
         stop()
         self.onFallback = onFallback
+        self.backend = backend
         fired = false
         if !FileManager.default.fileExists(atPath: url.path) {
             FileManager.default.createFile(atPath: url.path, contents: nil)
@@ -58,7 +72,7 @@ final class GraphicsFallbackMonitor {
     func stop() { watch = nil; onFallback = nil }
 
     private func check(_ tail: String) {
-        guard !fired, GraphicsFallback.classify(tail) == .fallback else { return }
+        guard !fired, GraphicsFallback.classify(tail, backend: backend) == .fallback else { return }
         fired = true
         let callback = onFallback
         stop()
