@@ -3,6 +3,28 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✨ Tier-1 features from the Whisky study (2026-06-30, 239 tests green).** Five features mined from
+  Whisky (the closest analog launcher) + Apple's GPTK materials, each with tests:
+  1. **Retina/HiDPI toggle** for the Steam bottle (`WineTools.setRetinaMode` → `HKCU\…\Mac Driver\RetinaMode`;
+     persisted in `BackendConfig.retinaMode` with a tolerant decoder so old config never wipes). Settings →
+     General → "Bottle tools". The standard fix for wrong-sized game windows.
+  2. **Wine repair tools** (winecfg / regedit / Control Panel + "Reveal Bottle in Finder") — escape hatch to
+     fix a prefix by hand. Routes through the existing `LaunchOrchestrator.runWineTool`, which gained
+     `WINEMSYNC=1` (shares the bottle's wineserver, no 2nd-server fork — also fixes the existing callers).
+     `WineTools` is now registry-only (no duplicate tool-launcher).
+  3. **Structured launch-log header** (`LaunchPlan.logHeader`, pure): every launch log opens with the
+     resolved exe/args/cwd/env (sorted), written before spawn → a black-window report is self-explanatory.
+  4. **Opt-in kill-on-quit** (Settings toggle, default off): `RootView`'s `willTerminate` hook →
+     `GameLibraryViewModel.terminateAllSync` SIGTERMs only the games Silo launched, never the co-resident
+     Steam client (test-verified).
+  5. **PE icon extraction for manual games** (`PEIcon`, clean-room PE/.rsrc/.ico parser, bounds-checked):
+     manual (non-Steam) games now show their `.exe`'s real icon in the grid (parsed off-main, cached). Steam
+     games keep cover-art.
+  6. **Game-Mode `.app` shortcut** for manual games (`GameAppShortcut`): "Create Desktop Shortcut" writes a
+     standalone `.app` (categorized `public.app-category.games` → macOS Game Mode) that execs wine directly
+     with a snapshot of the real launch env. Steam-game shortcuts deferred (need co-resident orchestration).
+  Verified earlier vs Whisky: its `WINEESYNC`-under-msync quirk is GONE in GPTK 4 (NOT adopted); skipped
+  DXVK/winetricks/custom-registry-UI/CLI per Silo's constraints.
 - **🟢 GPTK D3DMetal CONFIRMED working — it IS Silo's active graphics path (2026-06-30).** Decisive
   on-device positive control: **We Were Here (582500)** launched co-resident under GPTK with verbose
   logging renders **D3D11 through D3DMetal**, proven by THREE independent signals (not a single-signal
