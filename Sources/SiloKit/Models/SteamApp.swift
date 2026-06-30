@@ -20,6 +20,9 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
     public let lastOwner: Int64?
     /// The library-folder root this app belongs to (derived during discovery, not from the .acf).
     public let libraryPath: URL
+    /// The graphics backend this app runs under — i.e. which Steam bottle it was discovered in
+    /// (GPTK or DXMT). Derived during discovery, not from the .acf; a Steam game's backend IS its bottle.
+    public var backend: GraphicsBackend
 
     public init(
         appID: Int,
@@ -32,7 +35,8 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
         buildID: Int? = nil,
         lastUpdated: Date? = nil,
         lastOwner: Int64? = nil,
-        libraryPath: URL
+        libraryPath: URL,
+        backend: GraphicsBackend = .gptk
     ) {
         self.appID = appID
         self.name = name
@@ -45,6 +49,7 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
         self.lastUpdated = lastUpdated
         self.lastOwner = lastOwner
         self.libraryPath = libraryPath
+        self.backend = backend
     }
 
     public var isFullyInstalled: Bool { stateFlags.isFullyInstalled }
