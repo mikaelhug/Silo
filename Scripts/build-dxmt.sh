@@ -46,7 +46,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 VER="${POSITIONAL[0]:-$DXMT_VERSION}"
-TAG="${POSITIONAL[1]:-dxmt-$VER}"
+# Per-wine tag (matches CI): the wine this builds against is the versions.env CrossOver (.wine-build/install).
+TAG="${POSITIONAL[1]:-dxmt-$VER-cx$CROSSOVER_VERSION}"
 MINGW_DIR="llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-macos-universal"
 WORK="$ROOT/.dxmt-build"
 SRC="$WORK/dxmt"

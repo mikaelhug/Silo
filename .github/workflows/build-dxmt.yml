@@ -31,8 +31,28 @@ on:
         required: false
         default: ""
       release_tag:
-        description: "Override the published release tag (blank = dxmt-<DXMT_VERSION>)"
+        description: "Override the published release tag (blank = dxmt-<DXMT_VERSION>-cx<wine version>)"
         required: false
+        default: ""
+  workflow_call:
+    # Chained from wine-autoupdate.yml after a new wine-cx-* is published, so DXMT is rebuilt against it
+    # (DXMT's winemetal.so ABI-links a specific wine — keep the pairing fresh).
+    inputs:
+      dxmt_version:
+        required: false
+        type: string
+        default: ""
+      llvm_mingw_version:
+        required: false
+        type: string
+        default: ""
+      wine_release_tag:
+        required: false
+        type: string
+        default: ""
+      release_tag:
+        required: false
+        type: string
         default: ""
 
 permissions:
@@ -69,7 +89,8 @@ jobs:
           DXMT_VER="${IN_DXMT:-$DXMT_VERSION}"
           MINGW_VER="${IN_MINGW:-$LLVM_MINGW_VERSION}"
           WINE_TAG="${IN_WINE:-wine-cx-$CROSSOVER_VERSION}"
-          REL_TAG="${IN_REL:-dxmt-$DXMT_VER}"
+          CX_VER="${WINE_TAG#wine-cx-}"   # the CrossOver version this DXMT is built against → into the tag
+          REL_TAG="${IN_REL:-dxmt-$DXMT_VER-cx$CX_VER}"
           {
             echo "DXMT_REPO=$DXMT_REPO"
             echo "DXMT_VER=$DXMT_VER"
