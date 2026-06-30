@@ -21,8 +21,10 @@
     base wine (CEF; the co-resident game picks the variant — shared wineserver). **No login sync** (machine
     tokens are per-prefix → sign into each bottle once, by design).
   - **UI:** per-card backend tag on EVERY library card (Steam + manual); onboarding "Older games (DXMT) —
-    optional" section + a General-settings DXMT section (import runtime folder + set up/launch/reset the DXMT
-    bottle). `GraphicsFallback` backend-aware.
+    optional" section + a General-settings DXMT section. `GraphicsFallback` backend-aware.
+  - **DXMT runtime delivery:** **auto-download** from Silo's Releases (`AppEnvironment.downloadLatestDXMT`
+    → `RuntimeManager.installDXMT`, reusing the Wine downloader engine — SHA-256 verify + extract +
+    de-quarantine/ad-hoc-sign) OR manual folder import. One-click "Download…" in onboarding + Settings.
   - **Decision:** GPTK keeps the existing `SteamBottle` dir (no migration of the multi-GB prefix); DXMT is a
     sibling. Dropped the plan's `SteamBottle-GPTK` rename + `SteamLoginSync`.
   - **DXMT build (scripted + lint-clean, 2026-06-30):** `Scripts/build-dxmt.sh` (local, verbose) +
