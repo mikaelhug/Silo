@@ -25,11 +25,18 @@
     bottle). `GraphicsFallback` backend-aware.
   - **Decision:** GPTK keeps the existing `SteamBottle` dir (no migration of the multi-GB prefix); DXMT is a
     sibling. Dropped the plan's `SteamBottle-GPTK` rename + `SteamLoginSync`.
-  - **PENDING (the only blocker left):** **Build DXMT** from `crossover-sources` (bundles DXMT v0.72) in
-    `Scripts/build-wine.sh` / `build-wine.yml` — produce the 4 artifacts (`d3d11`/`d3d10core`/`dxgi`/
-    `winemetal` + `winemetal.so`); the in-app importer (`AppEnvironment.importDXMTRuntime`, points at the
-    `x86_64-windows` folder) + the whole dual-bottle path are already wired and tested, just need real
-    binaries. Then **on-device:** validate DXMT renders Overcooked 2.
+  - **DXMT build (scripted + lint-clean, 2026-06-30):** `Scripts/build-dxmt.sh` (local, verbose) +
+    `.github/workflows/build-dxmt.yml` (CI) build **DXMT v0.72 from upstream `3Shain/dxmt`** (the version
+    CrossOver 26 bundles) against the published `wine-cx-*` CrossOver Wine, via DXMT's canonical Meson build
+    (llvm-mingw `20231017` cross + Homebrew `llvm@15` airconv + full-Xcode Metal), x86_64 to match the Wine.
+    Output `dxmt.tar.xz` (`lib/wine/{x86_64-windows,x86_64-unix}`) → import the `x86_64-windows` folder in
+    Silo. Pins live in `versions.env` (`DXMT_REPO`/`DXMT_VERSION`/`LLVM_MINGW_VERSION`). Validated:
+    `shellcheck`+`actionlint` clean, source structure + build commands verified against DXMT's own CI, local
+    preflight runs. The actual ~1-2h compile needs full Xcode + the Wine install (can't run headlessly here).
+  - **Decision:** GPTK keeps the existing `SteamBottle` dir (no migration of the multi-GB prefix); DXMT is a
+    sibling. Dropped the plan's `SteamBottle-GPTK` rename + `SteamLoginSync`.
+  - **PENDING (run + validate):** kick `build-dxmt.yml` (after a `wine-cx-*` release exists) → publish
+    `dxmt-v0.72`; import it in Silo; then **on-device:** confirm DXMT renders Overcooked 2.
 - **✨ Tier-1 features from the Whisky study (2026-06-30, 239 tests green).** Five features mined from
   Whisky (the closest analog launcher) + Apple's GPTK materials, each with tests:
   1. **Retina/HiDPI toggle** for the Steam bottle (`WineTools.setRetinaMode` → `HKCU\…\Mac Driver\RetinaMode`;
