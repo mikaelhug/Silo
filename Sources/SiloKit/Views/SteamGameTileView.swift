@@ -28,8 +28,11 @@ struct SteamGameTileView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(game.name).font(.headline).lineLimit(1)
-                if let size = lib.sizeString(game) {
-                    Text(size).font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if let size = lib.sizeString(game) {
+                        Text(size).font(.caption).foregroundStyle(.secondary)
+                    }
+                    BackendTag(backend: game.backend)
                 }
                 HStack(spacing: 8) {
                     primaryButton(running: running, busy: busy)
