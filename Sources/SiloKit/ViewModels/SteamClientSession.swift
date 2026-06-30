@@ -37,10 +37,22 @@ public final class SteamClientSession {
 
     public func updateWine(_ url: URL?) { wineBinary = url }
 
+    /// Which backend bottle this session's Steam client belongs to (GPTK or DXMT).
+    public var backend: GraphicsBackend { bottle.backend }
+
     /// Whether the bottle's Steam client is live right now (its tracked PID is still alive).
     public var isRunning: Bool {
         guard let pid = steamPID else { return false }
         return orchestrator.isRunning(pid: pid)
+    }
+
+    /// Stop this bottle's Steam client (best-effort). Used to keep only ONE client online at a time across
+    /// the two Steam bottles — the same Steam account can't be "in-game" on two clients at once.
+    public func stop() {
+        guard let pid = steamPID else { return }
+        orchestrator.terminate(pid: pid)
+        steamPID = nil
+        steamObserver?.cancel(); steamObserver = nil
     }
 
     /// Bring the bottle's Steam client up (idempotent + coalesced): a no-op if it's already running, joins

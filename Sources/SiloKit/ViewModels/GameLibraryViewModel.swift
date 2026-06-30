@@ -38,8 +38,10 @@ public final class GameLibraryViewModel {
     /// Per-launch watchers that surface a silent GPTK→wined3d graphics fallback (keyed like the observers).
     private var graphicsMonitors: [Int: GraphicsFallbackMonitor] = [:]
     private var manualGraphicsMonitors: [UUID: GraphicsFallbackMonitor] = [:]
-    /// The single owner of the live bottle Steam client (shared with the settings pane).
+    /// The owner of the GPTK Steam bottle's live client (shared with the settings pane), and — when the
+    /// DXMT Steam bottle exists — the DXMT bottle's client. Keyed by backend so a game routes to its bottle.
     private let session: SteamClientSession
+    private let dxmtSession: SteamClientSession?
     /// Boots the per-game isolated bottles that manual (non-Steam) games run in.
     private let provisioner: WinePrefixProvisioner
 
@@ -51,6 +53,7 @@ public final class GameLibraryViewModel {
         paths: AppPaths,
         backend: BackendConfig,
         session: SteamClientSession,
+        dxmtSession: SteamClientSession? = nil,
         provisioner: WinePrefixProvisioner
     ) {
         self.bottle = bottle
@@ -60,7 +63,23 @@ public final class GameLibraryViewModel {
         self.paths = paths
         self.backend = backend
         self.session = session
+        self.dxmtSession = dxmtSession
         self.provisioner = provisioner
+    }
+
+    /// The Steam client session that owns a given backend's bottle. Falls back to the GPTK session when a
+    /// DXMT session isn't wired (tests / DXMT bottle not set up) — a DXMT Steam game only reaches here once
+    /// the DXMT bottle exists, which AppEnvironment always pairs with a DXMT session.
+    private func clientSession(for graphics: GraphicsBackend) -> SteamClientSession {
+        graphics == .dxmt ? (dxmtSession ?? session) : session
+    }
+
+    /// Keep only ONE Steam client online at a time (same account): stop every other backend's client before
+    /// bringing up the one the game needs.
+    private func stopOtherSteamClients(except graphics: GraphicsBackend) {
+        for other in [session, dxmtSession].compactMap({ $0 }) where other.backend != graphics {
+            other.stop()
+        }
     }
 
     /// Defensive teardown (these VMs are process-lifetime singletons, so it normally never fires): cancel
@@ -161,32 +180,44 @@ public final class GameLibraryViewModel {
 
     // MARK: - Launch (co-resident in the bottle)
 
-    /// Launch a game in the Steam bottle under GPTK, with the Steam client co-resident so Steamworks works.
+    /// Launch a game co-resident in its backend's Steam bottle (GPTK or DXMT), with that bottle's Steam
+    /// client up so Steamworks works. Routes prefix + runtime through `BottleResolver` (its backend = its
+    /// bottle), and keeps only that bottle's Steam client online.
     public func play(_ game: SteamApp) async {
         guard backend.isWineConfigured, !busyAppIDs.contains(game.appID), runningPIDs[game.appID] == nil else { return }
         busyAppIDs.insert(game.appID); defer { busyAppIDs.remove(game.appID) }
         do {
-            // Steamworks IPC is prefix-scoped: the client must be up + logged in in this same prefix first.
-            // If it can't start, surface why rather than launching the game against a dead Steam (which would
-            // just fail SteamAPI_Init with no explanation).
-            guard await session.ensureRunning() else {
-                let why = session.launchError.map { ": \($0)" } ?? ""
+            // Resolve the game's backend → its bottle prefix + prepared runtime (off-main; clones DXMT).
+            let cfg = backend
+            let context = try await Task.detached { [paths] in
+                try BottleResolver(paths: paths).steam(game.backend, config: cfg)
+            }.value
+            // Steamworks IPC is prefix-scoped: this bottle's client must be up + logged in first (and it's
+            // the ONLY one online — same account can't be in-game on two clients). If it can't start,
+            // surface why rather than launching against a dead Steam (which fails SteamAPI_Init silently).
+            stopOtherSteamClients(except: game.backend)
+            let client = clientSession(for: game.backend)
+            guard await client.ensureRunning() else {
+                let why = client.launchError.map { ": \($0)" } ?? ""
                 setStatus("\(game.name) needs the Steam client, but it couldn't start\(why).")
                 return
             }
             let config = await configStore.load().config(for: game.appID)
+            var launchBackend = backend
+            launchBackend.wineBinaryPath = context.wineBinary
             let pid = try await orchestrator.launchInBottle(
-                app: game, config: config, backend: backend,
-                prefix: paths.steamBottle, logURL: paths.log(forAppID: game.appID))
+                app: game, config: config, backend: launchBackend, graphics: game.backend,
+                prefix: context.prefix, logURL: paths.log(forAppID: game.appID))
             _ = try? await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
             runningPIDs[game.appID] = pid
             observeRun(appID: game.appID, pid: pid)
             setStatus("Launched \(game.name).")
             // Last, so a detected fallback (which usually arrives a beat later as the log is written, but
             // may already be present) overrides the "Launched" status rather than being clobbered by it.
-            watchGraphics(appID: game.appID, log: paths.log(forAppID: game.appID), name: game.name)
+            watchGraphics(appID: game.appID, log: paths.log(forAppID: game.appID),
+                          name: game.name, backend: game.backend)
         } catch {
-            setStatus("\(game.name): \((error as NSError).localizedDescription)")
+            setStatus("\(game.name): \(Self.resolveMessage(error))")
         }
     }
 
@@ -196,7 +227,8 @@ public final class GameLibraryViewModel {
         guard let pid = runningPIDs[game.appID] else { return }
         let config = await configStore.load().config(for: game.appID)
         let exeName = orchestrator.resolvedExecutableName(app: game, config: config)
-        await orchestrator.stopGame(pid: pid, exeName: exeName, prefix: paths.steamBottle, backend: backend)
+        await orchestrator.stopGame(
+            pid: pid, exeName: exeName, prefix: paths.steamBottle(game.backend), backend: backend)
         clearRunState(game.appID)
     }
 
@@ -208,10 +240,10 @@ public final class GameLibraryViewModel {
         for pid in manualRunningPIDs.values { orchestrator.terminate(pid: pid) }
     }
 
-    /// Open `winecfg` for the shared bottle prefix (it's prefix-wide, so not per-game).
-    public func openWinecfg() async {
+    /// Open `winecfg` for a backend's Steam bottle prefix (prefix-wide, so not per-game — but per-bottle).
+    public func openWinecfg(_ graphics: GraphicsBackend = .gptk) async {
         guard backend.isWineConfigured else { setStatus("No Wine configured."); return }
-        await orchestrator.runWineTool("winecfg", prefix: paths.steamBottle, backend: backend)
+        await orchestrator.runWineTool("winecfg", prefix: paths.steamBottle(graphics), backend: backend)
     }
 
     // MARK: - Manual (non-Steam) games — each in its OWN isolated bottle (paths.manualBottle(id))
@@ -376,12 +408,12 @@ public final class GameLibraryViewModel {
         manualGraphicsMonitors[id]?.stop(); manualGraphicsMonitors[id] = nil
     }
 
-    /// Start watching a Steam game's launch log; surface a status if GPTK silently fell back to wined3d.
-    private func watchGraphics(appID: Int, log: URL, name: String) {
+    /// Start watching a Steam game's launch log; surface a status if its backend silently fell back to wined3d.
+    private func watchGraphics(appID: Int, log: URL, name: String, backend: GraphicsBackend) {
         let monitor = GraphicsFallbackMonitor()
         graphicsMonitors[appID] = monitor
-        monitor.start(url: log) { [weak self] in
-            self?.setStatus("\(name): GPTK (D3DMetal) didn't engage — running on fallback graphics (wined3d).")
+        monitor.start(url: log, backend: backend) { [weak self] in
+            self?.setStatus("\(name): \(backend.displayName) didn't engage — running on fallback graphics (wined3d).")
             self?.graphicsMonitors[appID] = nil
         }
     }

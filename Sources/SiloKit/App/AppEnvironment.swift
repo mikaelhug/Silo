@@ -19,8 +19,10 @@ public final class AppEnvironment {
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
     public let steamBottleVM: SteamBottleViewModel
-    /// The single owner of the live bottle Steam client (shared by the Library + the settings pane).
+    /// The owner of the GPTK Steam bottle's live client (shared by the Library + the settings pane).
     public let steamClientSession: SteamClientSession
+    /// The DXMT Steam bottle's client session (one Steam install/login per backend).
+    public let dxmtClientSession: SteamClientSession
     public let steamStore = SteamStoreClient()
     private let updater: Updater
     public private(set) var updateCheck: Updater.UpdateCheck?
@@ -63,12 +65,19 @@ public final class AppEnvironment {
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
-        let bottle = SteamBottle(runner: runner, paths: paths)
+        let bottle = SteamBottle(runner: runner, paths: paths, backend: .gptk)
         let steamClientSession = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
         self.steamClientSession = steamClientSession
+        // The DXMT Steam bottle + its client session (one Steam install/login per backend). The client runs
+        // on the base wine (CEF needs no d3d; a co-resident DXMT game launches on the DXMT variant runtime,
+        // which shares the prefix's wineserver). Empty until the user sets it up via onboarding.
+        let dxmtBottle = SteamBottle(runner: runner, paths: paths, backend: .dxmt)
+        let dxmtSession = SteamClientSession(bottle: dxmtBottle, orchestrator: orchestrator)
+        self.dxmtClientSession = dxmtSession
         let gameLibrary = GameLibraryViewModel(
             bottle: bottle, discovery: discovery, orchestrator: orchestrator,
             configStore: configStore, paths: paths, backend: initialBackend, session: steamClientSession,
+            dxmtSession: dxmtSession,
             provisioner: WinePrefixProvisioner(runner: runner))
         self.gameLibrary = gameLibrary
         let steamBottleVM = SteamBottleViewModel(bottle: bottle, session: steamClientSession)
@@ -87,6 +96,8 @@ public final class AppEnvironment {
     private func applyBackend(_ config: BackendConfig) {
         gameLibrary.updateBackend(config)
         steamBottleVM.updateWine(config.wineBinaryPath)
+        // Both Steam clients run on the base wine (CEF; co-resident games pick the per-backend variant).
+        dxmtClientSession.updateWine(config.wineBinaryPath)
     }
 
     /// Load persisted config and populate the UI. Idempotent.
