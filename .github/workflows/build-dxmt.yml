@@ -110,10 +110,12 @@ jobs:
           xcodes=(/Applications/Xcode_16*.app)
           if [ ${#xcodes[@]} -gt 0 ]; then sudo xcode-select -s "${xcodes[0]}"; fi
           echo "Using $(xcode-select -p)"
-          # Xcode 16 split the Metal shader compiler into a separately-downloadable component. It's
-          # normally pre-installed on the runner; fetch it if not (idempotent — no-op when present).
-          xcrun -sdk macosx -f metal >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain || true
-          xcrun -sdk macosx -f metal   # hard-fail only if Metal STILL isn't available after the fetch
+          # Xcode 16+/26 split the Metal compiler into a separate component: the `metal` binary exists but
+          # `metal -c` fails until it's installed. Fetch it (idempotent), then verify by ACTUALLY compiling
+          # a probe shader (a bare `-f metal` check is NOT enough — binary present != can compile).
+          xcodebuild -downloadComponent MetalToolchain 2>/dev/null || true
+          printf 'kernel void _p() {}' > "$RUNNER_TEMP/p.metal"
+          xcrun -sdk macosx metal -c "$RUNNER_TEMP/p.metal" -o "$RUNNER_TEMP/p.air"   # hard-fail if Metal can't compile
 
       - name: Install Rosetta 2
         run: softwareupdate --install-rosetta --agree-to-license || true
@@ -174,19 +176,20 @@ jobs:
         run: |
           set -eo pipefail
           cd "$DXMT_SRC"
-          # Force the native (winemetal.so + airconv) compile to x86_64 to match the x86_64 Wine + llvm@15.
-          # echo (not a heredoc) so the YAML block indentation never leaks into the meson native file.
+          # Native (macOS) toolchain for winemetal.so + airconv: pin the SYSTEM clang by ABSOLUTE path,
+          # x86_64. Load-bearing — llvm-mingw AND llvm@15 each ship a bare `clang` that would shadow the
+          # Apple clang on PATH and can't link macOS binaries (ld: library 'System' not found). echo (not a
+          # heredoc) so YAML block indentation can't leak into the meson file.
           {
-            echo "[built-in options]"
-            echo "c_args = ['-arch', 'x86_64']"
-            echo "cpp_args = ['-arch', 'x86_64']"
-            echo "c_link_args = ['-arch', 'x86_64']"
-            echo "cpp_link_args = ['-arch', 'x86_64']"
-          } > arch-x86_64.txt
-          BREW_BIN="$($ARCH_PREFIX "$BREW" --prefix)/bin"
-          export PATH="$DXMT_SRC/toolchains/$MINGW_DIR/bin:$LLVM15/bin:$BREW_BIN:$PATH"
+            echo "[binaries]"
+            echo "c = ['/usr/bin/clang', '-arch', 'x86_64']"
+            echo "cpp = ['/usr/bin/clang++', '-arch', 'x86_64']"
+          } > silo-osx.txt
+          # Cross toolchain (llvm-mingw) is absolute in build-win64.txt and llvm@15 is via
+          # -Dnative_llvm_path, so keep them AFTER the system dirs on PATH (system clang/ld/ar win).
+          export PATH="$PATH:$DXMT_SRC/toolchains/$MINGW_DIR/bin:$LLVM15/bin"
           $ARCH_PREFIX meson setup \
-            --cross-file build-win64.txt --native-file build-osx.txt --native-file arch-x86_64.txt \
+            --cross-file build-win64.txt --native-file silo-osx.txt \
             -Dnative_llvm_path="$LLVM15" \
             -Dwine_install_path="$WINE_INSTALL" \
             build --buildtype release --prefix "$DXMT_SRC/install" --strip
