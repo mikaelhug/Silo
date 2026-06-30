@@ -122,6 +122,27 @@ struct MakePlanTests {
                 gameExe: gameExe, prefix: prefix, logURL: log)
         }
     }
+
+    @Test("logHeader dumps the resolved launch context (exe, args, cwd, env sorted)")
+    func logHeader() throws {
+        let plan = LaunchPlan(
+            executable: URL(fileURLWithPath: "/rt/bin/wine64"),
+            arguments: ["/g/Foo/Foo.exe", "-windowed"],
+            environment: ["WINEPREFIX": "/b/Steam", "WINEMSYNC": "1", "WINEDLLOVERRIDES": "d3d11=b"],
+            currentDirectory: URL(fileURLWithPath: "/g/Foo"),
+            logURL: URL(fileURLWithPath: "/logs/foo.log"))
+        let header = plan.logHeader(at: Date(timeIntervalSince1970: 0))
+        #expect(header.contains("exe   : /rt/bin/wine64"))
+        #expect(header.contains("args  : /g/Foo/Foo.exe -windowed"))
+        #expect(header.contains("cwd   : /g/Foo"))
+        #expect(header.contains("WINEPREFIX=/b/Steam"))
+        #expect(header.contains("WINEDLLOVERRIDES=d3d11=b"))
+        #expect(header.contains("begin process output"))
+        // env is sorted alphabetically: WINEDLLOVERRIDES < WINEMSYNC < WINEPREFIX
+        let dll = try #require(header.range(of: "WINEDLLOVERRIDES"))
+        let pre = try #require(header.range(of: "WINEPREFIX"))
+        #expect(dll.lowerBound < pre.lowerBound)
+    }
 }
 
 @Suite("LaunchOrchestrator.launch (pipeline)")

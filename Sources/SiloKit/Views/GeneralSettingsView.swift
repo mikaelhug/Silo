@@ -10,6 +10,11 @@ struct GeneralSettingsView: View {
     /// the GitHub call.
     @State private var isChecking = false
 
+    /// When set, Silo SIGTERMs the games it launched as it quits (never the co-resident Steam client).
+    /// Default off so quitting the launcher never surprises a user mid-game. Read by `RootView`'s
+    /// `willTerminate` hook.
+    @AppStorage("stopGamesOnQuit") private var stopGamesOnQuit = false
+
     var body: some View {
         Form {
             steamBottleSection
@@ -37,14 +42,19 @@ struct GeneralSettingsView: View {
 
             LabeledContent("Repair") {
                 HStack(spacing: 8) {
-                    Button("Wine Config") { Task { await env.openWineTool(.winecfg) } }
-                    Button("Registry") { Task { await env.openWineTool(.regedit) } }
-                    Button("Control Panel") { Task { await env.openWineTool(.control) } }
+                    Button("Wine Config") { Task { await env.openWineTool("winecfg") } }
+                    Button("Registry") { Task { await env.openWineTool("regedit") } }
+                    Button("Control Panel") { Task { await env.openWineTool("control") } }
                 }
                 .disabled(!configured)
             }
             Button("Reveal Bottle in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([env.paths.steamBottle])
+            }
+            Toggle(isOn: $stopGamesOnQuit) {
+                Text("Stop running games when Silo quits")
+                Text("SIGTERMs games Silo launched on quit (never the Steam client). Off keeps a game "
+                     + "running if you quit the launcher.").font(.caption).foregroundStyle(.secondary)
             }
             if let message = env.bottleToolsMessage {
                 Text(message).font(.caption).foregroundStyle(.secondary)

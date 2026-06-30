@@ -185,6 +185,14 @@ public final class GameLibraryViewModel {
         clearRunState(game.appID)
     }
 
+    /// SIGTERM every game Silo launched (Steam + manual), synchronously. Used at app quit (where there's no
+    /// time for the async `taskkill`/`wineserver -k` cleanup): wine turns SIGTERM into terminating the hosted
+    /// game, and we only signal the PIDs Silo spawned — the co-resident Steam client is never touched.
+    public func terminateAllSync() {
+        for pid in runningPIDs.values { orchestrator.terminate(pid: pid) }
+        for pid in manualRunningPIDs.values { orchestrator.terminate(pid: pid) }
+    }
+
     /// Open `winecfg` for the shared bottle prefix (it's prefix-wide, so not per-game).
     public func openWinecfg() async {
         guard backend.isWineConfigured else { setStatus("No Wine configured."); return }

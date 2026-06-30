@@ -138,12 +138,28 @@ public struct LaunchOrchestrator: Sendable {
     }
 
     private func spawn(_ plan: LaunchPlan) async throws -> Int32 {
-        try await runner.spawnDetached(
+        writeLogHeader(for: plan)
+        return try await runner.spawnDetached(
             executable: plan.executable, arguments: plan.arguments,
             environment: plan.environment, currentDirectory: plan.currentDirectory, logURL: plan.logURL)
     }
 
+    /// Truncate the log and write the resolved launch context at the top (a fresh log per launch); the
+    /// child's stdout/stderr then appends after it (`spawnDetached` seeks to end). Best-effort — a failed
+    /// header write never blocks the launch.
+    private func writeLogHeader(for plan: LaunchPlan) {
+        try? FileManager.default.createDirectory(
+            at: plan.logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data(plan.logHeader(at: Date()).utf8).write(to: plan.logURL)
+    }
+
     public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
+
+    /// SIGTERM a launched process (synchronous, best-effort). Used to stop games at app quit, where there's
+    /// no time for the async `taskkill` cleanup `stopGame` does. Wine translates SIGTERM into terminating
+    /// the hosted Windows process, so this stops a Silo-launched game; the co-resident Steam client (a
+    /// different PID we never SIGTERM) is untouched.
+    public func terminate(pid: Int32) { runner.terminate(pid: pid) }
 
     /// Stop a game running in the shared Steam bottle. SIGTERMs the launched process AND asks Wine to
     /// `taskkill /IM <game exe>` — the launched PID is only Wine's loader, so a game that re-execs or
@@ -175,10 +191,14 @@ public struct LaunchOrchestrator: Sendable {
     /// Run a built-in wine tool (e.g. `winecfg`) against `prefix`, detached.
     public func runWineTool(_ tool: String, prefix: URL, backend: BackendConfig) async {
         guard let wine = backend.wineBinaryPath else { return }
+        // WINEMSYNC=1 so the tool shares the bottle's wineserver instead of forking a second one on the
+        // same prefix (the co-residency rule the launch + stop paths follow).
+        var env = Silo.wineEnvironment(prefix: prefix, wine: wine)
+        env["WINEMSYNC"] = "1"
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: [tool],
-            environment: Silo.wineEnvironment(prefix: prefix, wine: wine),
-            currentDirectory: nil, logURL: prefix.appendingPathComponent("winetool.log"))
+            environment: env, currentDirectory: nil,
+            logURL: prefix.appendingPathComponent("winetool.log"))
     }
 
     // MARK: - Helpers

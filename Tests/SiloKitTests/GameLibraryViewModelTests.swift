@@ -355,21 +355,41 @@ struct GameLibraryViewModelTests {
     @Test("play surfaces a GPTK-fallback warning when the launch log shows a wined3d fallback")
     func playSurfacesGraphicsFallback() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, _, paths) = make(tmp)
+        let (vm, fake, paths) = make(tmp)
         try installSteam(paths)
         let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-        // Pre-write a launch log carrying the fallback signature; the monitor reads the tail on start, so
-        // the warning surfaces deterministically (overriding the "Launched" status) — proving a silent
+        // Simulate the game writing a wined3d-fallback signature to its log — appended when it spawns, i.e.
+        // AFTER Silo writes the launch-context header (spawn writes the header, then spawnDetached runs and
+        // the onRun hook fires, exactly as a failing game's stderr would append). The monitor reads the tail
+        // on start, so the warning surfaces deterministically (overriding "Launched"), proving a silent
         // GPTK→wined3d fallback can no longer hide behind "Launched".
         let log = paths.log(forAppID: 220)
-        try FileManager.default.createDirectory(
-            at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try #"Assertion failed: (GFXTHandle && "Failed to dlopen D3DMetal")"#
-            .write(to: log, atomically: true, encoding: .utf8)
+        fake.onRun = { inv in
+            guard inv.detached, inv.logURL == log, let handle = try? FileHandle(forWritingTo: log) else { return }
+            handle.seekToEndOfFile()
+            handle.write(Data(#"Assertion failed: (GFXTHandle && "Failed to dlopen D3DMetal")"#.utf8))
+            try? handle.close()
+        }
 
         await vm.play(game)
 
         #expect(vm.statusMessage?.contains("GPTK") == true)          // fallback surfaced, not a silent "Launched"
         #expect(vm.statusMessage?.contains("Launched") != true)
+    }
+
+    @Test("terminateAllSync SIGTERMs every launched game, leaving the co-resident Steam client alive")
+    func terminateAllOnQuit() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        await vm.play(try installedGame(paths, appID: 220, name: "HL2", dir: "HL2"))
+        await vm.play(try installedGame(paths, appID: 440, name: "TF2", dir: "TF2"))
+        let gamePIDs = Set(vm.runningPIDs.values)
+        try #require(gamePIDs.count == 2)                            // both games launched
+
+        vm.terminateAllSync()
+
+        // Exactly the two game PIDs were SIGTERM'd — Steam's PID (spawned by ensureRunning) is not in the set.
+        #expect(Set(fake.terminatedPIDs) == gamePIDs)
     }
 }
