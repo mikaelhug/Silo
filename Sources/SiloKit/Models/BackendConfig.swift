@@ -11,6 +11,11 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var gptkLibDirPath: URL?
     /// Name of the default GPTK install (managed in the GPTK settings tab).
     public var gptkRuntimeName: String?
+    /// Directory containing DXMT's PE modules (`d3d11`/`dxgi`/`d3d10core`/`winemetal`), overlaid into the
+    /// wine runtime's `lib/wine` tree by `GraphicsLinker.overlayDXMT`. The DXMT counterpart of `gptkLibDirPath`.
+    public var dxmtLibDirPath: URL?
+    /// Name of the default DXMT install (managed in the Runtimes settings).
+    public var dxmtRuntimeName: String?
     /// macOS Retina/HiDPI mode for the shared Steam bottle (`HKCU\Software\Wine\Mac Driver\RetinaMode`).
     /// Mirrors what Silo last wrote to the prefix; off is Wine's default. See `WineTools.setRetinaMode`.
     public var retinaMode: Bool
@@ -20,17 +25,22 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         wineRuntimeName: String? = nil,
         gptkLibDirPath: URL? = nil,
         gptkRuntimeName: String? = nil,
+        dxmtLibDirPath: URL? = nil,
+        dxmtRuntimeName: String? = nil,
         retinaMode: Bool = false
     ) {
         self.wineBinaryPath = wineBinaryPath
         self.wineRuntimeName = wineRuntimeName
         self.gptkLibDirPath = gptkLibDirPath
         self.gptkRuntimeName = gptkRuntimeName
+        self.dxmtLibDirPath = dxmtLibDirPath
+        self.dxmtRuntimeName = dxmtRuntimeName
         self.retinaMode = retinaMode
     }
 
     private enum CodingKeys: String, CodingKey {
-        case wineBinaryPath, wineRuntimeName, gptkLibDirPath, gptkRuntimeName, retinaMode
+        case wineBinaryPath, wineRuntimeName, gptkLibDirPath, gptkRuntimeName
+        case dxmtLibDirPath, dxmtRuntimeName, retinaMode
     }
 
     /// Tolerant decode (mirrors `AppState`): every field defaults if absent, so adding one never makes an
@@ -41,9 +51,20 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         wineRuntimeName = try c.decodeIfPresent(String.self, forKey: .wineRuntimeName)
         gptkLibDirPath = try c.decodeIfPresent(URL.self, forKey: .gptkLibDirPath)
         gptkRuntimeName = try c.decodeIfPresent(String.self, forKey: .gptkRuntimeName)
+        dxmtLibDirPath = try c.decodeIfPresent(URL.self, forKey: .dxmtLibDirPath)
+        dxmtRuntimeName = try c.decodeIfPresent(String.self, forKey: .dxmtRuntimeName)
         retinaMode = try c.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? false
     }
 
     /// Whether games can be launched (a wine binary is set).
     public var isWineConfigured: Bool { wineBinaryPath != nil }
+
+    /// The lib dir overlaid for a given backend — the single place that maps a `GraphicsBackend` to its
+    /// configured runtime modules, so `makePlan` and the linker never hard-code one backend's path.
+    public func libDir(for backend: GraphicsBackend) -> URL? {
+        switch backend {
+        case .gptk: gptkLibDirPath
+        case .dxmt: dxmtLibDirPath
+        }
+    }
 }
