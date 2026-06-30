@@ -54,9 +54,11 @@ SRC="$WORK/dxmt"
 echo "==> Preflight"
 # (1) Full Xcode + Metal toolchain — DXMT compiles .metal shaders via `xcrun metal` (meson.build).
 xcrun -sdk macosx -f metal >/dev/null 2>&1 || {
-  echo "ERROR: the Metal toolchain isn't available. DXMT compiles .metal shaders, which needs FULL Xcode"
-  echo "       (not just Command Line Tools). Install Xcode, then:"
-  echo "       sudo xcode-select -s /Applications/Xcode.app"
+  echo "ERROR: the Metal shader compiler (xcrun metal) isn't available. DXMT compiles .metal shaders."
+  echo "  - If you only have Command Line Tools: install full Xcode, then"
+  echo "      sudo xcode-select -s /Applications/Xcode.app"
+  echo "  - If you HAVE Xcode 16+ but metal is missing (Apple split it into a separate component):"
+  echo "      xcodebuild -downloadComponent MetalToolchain"
   exit 1
 }
 # (2) A Wine install to build against (winemetal.so links its winemac.so + needs its headers/import libs).

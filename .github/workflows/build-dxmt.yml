@@ -54,15 +54,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Select Xcode (Metal toolchain)
+      - name: Select Xcode + ensure Metal toolchain
         run: |
           set -eo pipefail
-          # Pick an installed Xcode 16 (any 16.x has the Metal toolchain), else the default Xcode.app.
+          # GitHub's macos-15 image ships full Xcode 16.x at /Applications/Xcode_16*.app — pick one.
           shopt -s nullglob
           xcodes=(/Applications/Xcode_16*.app)
           XCODE="${xcodes[0]:-/Applications/Xcode.app}"
           sudo xcode-select -s "$XCODE"
-          xcrun -sdk macosx -f metal   # fail early if the Metal toolchain is missing
+          echo "Using $XCODE"
+          # Xcode 16 split the Metal shader compiler into a separately-downloadable component. It's
+          # normally pre-installed on the runner; fetch it if not (idempotent — no-op when present).
+          xcrun -sdk macosx -f metal >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain || true
+          xcrun -sdk macosx -f metal   # hard-fail only if Metal STILL isn't available after the fetch
 
       - name: Install Rosetta 2
         run: softwareupdate --install-rosetta --agree-to-license || true
