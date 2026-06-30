@@ -165,6 +165,46 @@ struct GameLibraryViewModelTests {
         #expect(!FileManager.default.fileExists(atPath: paths.manualBottle(id).path))
     }
 
+    @Test("a DXMT manual game launches on the cloned DXMT variant runtime with DXMT's builtin overrides")
+    func manualGameDXMTRoutesToVariantRuntime() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+
+        // Real base wine tree + DXMT source tree so the resolver can clone the variant + overlay DXMT.
+        let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
+        try tmp.makeDir("wine/lib/wine/x86_64-windows")
+        try tmp.makeDir("wine/lib/wine/x86_64-unix")
+        let dxmtLib = try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
+        for m in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
+            try tmp.write("dxmt/lib/wine/x86_64-windows/\(m)", "DXMT:\(m)")
+        }
+        try tmp.makeDir("dxmt/lib/wine/x86_64-unix")
+        try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WINEMETAL")
+
+        var backend = BackendConfig()
+        backend.wineBinaryPath = wine
+        backend.dxmtLibDirPath = dxmtLib
+        let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        session.updateWine(backend.wineBinaryPath); session.readinessTimeout = 0
+        let vm = GameLibraryViewModel(
+            bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
+            provisioner: WinePrefixProvisioner(runner: fake))
+
+        let exe = try tmp.write("Games/Old/old.exe", "MZ")
+        let game = try #require(await vm.addManualGame(name: "Old", executable: exe, backend: .dxmt))
+        #expect(game.backend == .dxmt)
+        await vm.playManual(game)
+
+        let spawn = try #require(fake.invocations.last { $0.detached })
+        #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))   // the cloned DXMT runtime, not the base
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(spawn.environment["WINEPREFIX"] == paths.manualBottle(game.id).path)   // its own isolated bottle
+    }
+
     @Test("addManualGame defaults the name to the exe filename and persists across a reload")
     func manualGameDefaultNameAndPersistence() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
