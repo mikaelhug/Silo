@@ -150,6 +150,26 @@ struct AppEnvironmentUpdateTests {
 
     // MARK: - applyBackend fan-out
 
+    @Test("importDXMTRuntime adopts a valid DXMT module folder and rejects an incomplete one")
+    func importsDXMTRuntime() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        #expect(!env.dxmtReady)
+
+        // Incomplete folder (no winemetal.dll) is rejected.
+        let bad = try tmp.makeDir("bad"); try tmp.write("bad/d3d11.dll", "x")
+        await env.importDXMTRuntime(from: bad)
+        #expect(!env.dxmtReady)
+
+        // A complete DXMT module folder is adopted + persisted.
+        let good = try tmp.makeDir("dxmt-win")
+        try tmp.write("dxmt-win/d3d11.dll", "x"); try tmp.write("dxmt-win/winemetal.dll", "x")
+        await env.importDXMTRuntime(from: good)
+        #expect(env.dxmtReady)
+        #expect(env.backendSettings.config.dxmtLibDirPath == good)
+    }
+
     @Test("AppEnvironment fans a backend change out to BOTH the library and the Steam-bottle pane")
     func backendFanOut() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

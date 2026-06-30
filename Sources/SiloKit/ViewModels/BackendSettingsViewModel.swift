@@ -33,6 +33,13 @@ public final class BackendSettingsViewModel {
         await save()
     }
 
+    /// Adopt a DXMT runtime's module dir (built from CrossOver source) as the backend's DXMT lib dir.
+    public func applyDXMTLibDir(_ dir: URL) async {
+        config.dxmtLibDirPath = dir
+        config.dxmtRuntimeName = dir.lastPathComponent
+        await save()
+    }
+
     public func save() async {
         do {
             try await configStore.saveBackend(config)

@@ -44,6 +44,9 @@ struct OnboardingView: View {
                 }
                 .frame(maxWidth: 540)
 
+                DXMTOnboardingSection()
+                    .frame(maxWidth: 540)
+
                 let message = steam.status.isEmpty
                     ? (runtime.statusMessage ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
                 if let message {
@@ -57,6 +60,46 @@ struct OnboardingView: View {
             .padding(40)
             .frame(maxWidth: .infinity)
         }
+    }
+}
+
+/// Optional second-backend setup (collapsed by default): import the DXMT runtime + set up the DXMT Steam
+/// bottle. DXMT is the fallback for older DirectX 10/11 titles GPTK can't run; its own bottle = its own
+/// Steam login (machine tokens are per-prefix, so you sign into each bottle once).
+private struct DXMTOnboardingSection: View {
+    @Environment(AppEnvironment.self) private var env
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(spacing: 12) {
+                StepRow(
+                    number: 1, title: "Import the DXMT runtime",
+                    subtitle: "Choose the DXMT module folder (x86_64-windows) built from the CrossOver source.",
+                    done: env.dxmtReady, locked: !env.wineReady,
+                    actionLabel: "Choose folder…",
+                    action: {
+                        if let dir = chooseDirectory(message: "Choose the DXMT x86_64-windows module folder.") {
+                            Task { await env.importDXMTRuntime(from: dir) }
+                        }
+                    })
+                StepRow(
+                    number: 2, title: "Set up the DXMT Steam bottle",
+                    subtitle: "Installs a second Windows Steam client; sign in to install your older games here.",
+                    done: env.dxmtSteamReady, busy: env.dxmtBottleVM.busy, locked: !env.wineReady,
+                    actionLabel: "Set up…",
+                    action: { Task { await env.dxmtBottleVM.setUp() } })
+            }
+            .padding(.top, 10)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Older games (DXMT) — optional").font(.headline)
+                Text("A fallback backend for DirectX 10/11 titles GPTK can't run (e.g. Overcooked 2).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
