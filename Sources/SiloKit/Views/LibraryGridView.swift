@@ -118,6 +118,8 @@ struct AddGameSheet: View {
     @State private var ranInstaller = false
     @State private var bottleCreated = false   // a bottle was provisioned this session (cancel → discard)
     @State private var working = false
+    /// The graphics backend this game's isolated bottle runs under (GPTK default; DXMT for older/problem titles).
+    @State private var backend: GraphicsBackend = .gptk
 
     var body: some View {
         NavigationStack {
@@ -147,6 +149,18 @@ struct AddGameSheet: View {
                     TextField("Name", text: $name)
                 } header: {
                     Text("Game")
+                }
+
+                Section {
+                    Picker("Graphics", selection: $backend) {
+                        ForEach(GraphicsBackend.allCases) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                    Text(backend.recommendedFor)
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    Text("Graphics Backend")
                 }
 
                 Section {
@@ -199,7 +213,7 @@ struct AddGameSheet: View {
                         Task {
                             working = true
                             let game = await env.gameLibrary.addManualGame(
-                                id: draftID, name: name, executable: chosenExe)
+                                id: draftID, name: name, executable: chosenExe, backend: backend)
                             working = false
                             if game != nil { dismiss() }
                         }
