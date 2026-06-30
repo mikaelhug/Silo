@@ -89,6 +89,62 @@ public struct GraphicsLinker: Sendable {
         try linkD3DMetalFramework(unixDir: wineUnixDir, externalDir: wineExternal)
     }
 
+    // MARK: - DXMT overlay
+
+    /// The modules DXMT ships in its `lib/wine` tree: its Direct3D 10/11 translation (`d3d11`, `d3d10core`,
+    /// `dxgi`) plus the `winemetal` Metal bridge (PE `winemetal.dll` + unix `winemetal.so`). DXMT is
+    /// D3D10/11 only — it ships no `d3d12` and no `d3d9`. Used to select what to overlay and as a guard so
+    /// we never clobber an unrelated wine module.
+    static func isDXMTModule(_ name: String) -> Bool {
+        let n = name.lowercased()
+        guard n.hasSuffix(".dll") || n.hasSuffix(".so") else { return false }
+        return n.hasPrefix("d3d") || n.hasPrefix("dxgi") || n.hasPrefix("winemetal")
+    }
+
+    /// Overlay 3Shain's DXMT modules into the **wine runtime** (not a game prefix) so wine loads DXMT's
+    /// Metal-backed Direct3D directly, exactly as `overlayGPTK` does for D3DMetal. For each DXMT PE module
+    /// the `.dll` is copied into `<wine>/lib/wine/x86_64-windows`; the only matching unix `.so` is DXMT's
+    /// `winemetal.so` (its Metal bridge), recreated in `<wine>/lib/wine/x86_64-unix` (the `d3d*`/`dxgi`
+    /// PEs are pure forwarders to `winemetal` and have no `.so`). Unlike GPTK, DXMT ships nothing in
+    /// `lib/external` — `winemetal.so` links the system `Metal.framework` — so there is no framework
+    /// symlink to maintain. The translated modules are forced to builtin at launch
+    /// (`GraphicsBackend.dxmt.dllOverrides`, incl. `winemetal=b`) so wine loads these overlaid versions.
+    ///
+    /// Idempotent: a no-op once the runtime already carries this DXMT's modules, so it's safe to call
+    /// before every launch — it re-applies only after a runtime re-download or a DXMT update.
+    ///
+    /// - Parameters:
+    ///   - wineBinary: the runtime's wine binary (`<wine>/bin/wine64`), used to locate `<wine>/lib`.
+    ///   - dxmtLibDir: DXMT's PE module dir (`<dxmt>/lib/wine/x86_64-windows`).
+    public func overlayDXMT(wineBinary: URL, dxmtLibDir: URL) throws {
+        guard fileManager.fileExists(atPath: dxmtLibDir.path) else { throw LinkError.sourceMissing(dxmtLibDir) }
+        let dxmtUnixDir = dxmtLibDir.deletingLastPathComponent().appendingPathComponent("x86_64-unix")
+
+        let wineLayout = WineRuntimeLayout(wineBinary: wineBinary)
+        let wineWinDir = wineLayout.windowsModulesDir
+        let wineUnixDir = wineLayout.unixModulesDir
+
+        let modules = try fileManager.contentsOfDirectory(at: dxmtLibDir, includingPropertiesForKeys: nil)
+            .filter { Self.isDXMTModule($0.lastPathComponent) }
+        guard !modules.isEmpty else { return }
+
+        // Idempotent: if a witness module is already byte-identical, the runtime carries THIS DXMT — skip.
+        let witness = modules.first { $0.lastPathComponent == "d3d11.dll" } ?? modules[0]
+        if fileManager.contentsEqual(
+            atPath: witness.path,
+            andPath: wineWinDir.appendingPathComponent(witness.lastPathComponent).path) { return }
+
+        try fileManager.createDirectory(at: wineWinDir, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: wineUnixDir, withIntermediateDirectories: true)
+        for dll in modules {
+            try replace(dll, in: wineWinDir)
+            // The matching unix `.so` (only `winemetal.so` actually exists) is DXMT's Metal bridge.
+            let so = dxmtUnixDir.appendingPathComponent(
+                (dll.lastPathComponent as NSString).deletingPathExtension + ".so")
+            if isSymlink(so) || fileManager.fileExists(atPath: so.path) { try replace(so, in: wineUnixDir) }
+        }
+    }
+
     // MARK: - Helpers
 
     /// The relative symlink target from `<wine>/lib/wine/x86_64-unix` to the overlaid framework.

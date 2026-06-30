@@ -179,4 +179,81 @@ struct GraphicsLinkerTests {
             try linker.overlayGPTK(wineBinary: wine, gptkLibDir: missing)
         }
     }
+
+    // MARK: - DXMT overlay
+
+    /// Build a minimal DXMT runtime tree and return its `lib/wine/x86_64-windows` dir (the `dxmtLibDir`).
+    /// DXMT's real layout: PE `d3d11`/`d3d10core`/`dxgi`/`winemetal` dlls, and ONE unix `.so` —
+    /// `winemetal.so` (a real dylib, not a symlink) — the d3d PEs forward to winemetal and have no `.so`.
+    @discardableResult
+    private func makeDXMT(_ tmp: TempDir) throws -> URL {
+        let win = try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
+        try tmp.makeDir("dxmt/lib/wine/x86_64-unix")
+        for module in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
+            try tmp.write("dxmt/lib/wine/x86_64-windows/\(module)", "PE:\(module)")
+        }
+        try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WINEMETAL-DYLIB")
+        return win
+    }
+
+    @Test("overlayDXMT copies DXMT's d3d/winemetal PE modules + winemetal.so into the wine runtime")
+    func overlayDXMTCopiesModules() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxmtLibDir = try makeDXMT(tmp)
+        let wine = try makeWine(tmp)
+        let wineLib = wine.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("lib")
+
+        try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: dxmtLibDir)
+
+        for dll in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
+            let dest = wineLib.appendingPathComponent("wine/x86_64-windows/\(dll)")
+            #expect(FileManager.default.contentsEqual(
+                atPath: dest.path, andPath: dxmtLibDir.appendingPathComponent(dll).path))
+        }
+        // The Metal bridge .so is overlaid as a real file (DXMT's winemetal.so isn't a symlink).
+        let so = wineLib.appendingPathComponent("wine/x86_64-unix/winemetal.so")
+        #expect(try String(contentsOf: so, encoding: .utf8) == "WINEMETAL-DYLIB")
+    }
+
+    @Test("overlayDXMT overlays ONLY winemetal.so (the d3d PEs are pure forwarders) and touches no lib/external")
+    func overlayDXMTNoStrayUnixOrExternal() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxmtLibDir = try makeDXMT(tmp)
+        let wine = try makeWine(tmp)
+        let wineLib = wine.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("lib")
+
+        try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: dxmtLibDir)
+
+        // No d3d11.so / dxgi.so etc. (DXMT's d3d modules have no unix half), and no lib/external at all.
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/x86_64-unix/d3d11.so").path))
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/x86_64-unix/dxgi.so").path))
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("external").path))
+    }
+
+    @Test("overlayDXMT is idempotent and re-applies on a DXMT update")
+    func overlayDXMTIdempotentAndReapplies() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxmtLibDir = try makeDXMT(tmp)
+        let wine = try makeWine(tmp)
+        let d3d11 = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-windows/d3d11.dll")
+
+        try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: dxmtLibDir)
+        try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: dxmtLibDir)   // no throw, still correct
+        #expect(try String(contentsOf: d3d11, encoding: .utf8) == "PE:d3d11.dll")
+
+        try tmp.write("dxmt/lib/wine/x86_64-windows/d3d11.dll", "PE:d3d11.dll v2")  // DXMT update
+        try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: dxmtLibDir)
+        #expect(try String(contentsOf: d3d11, encoding: .utf8) == "PE:d3d11.dll v2")
+    }
+
+    @Test("overlayDXMT throws sourceMissing when DXMT's module dir does not exist")
+    func overlayDXMTSourceMissing() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let wine = try makeWine(tmp)
+        let missing = tmp.url.appendingPathComponent("nope/lib/wine/x86_64-windows")
+        #expect(throws: GraphicsLinker.LinkError.sourceMissing(missing)) {
+            try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: missing)
+        }
+    }
 }
