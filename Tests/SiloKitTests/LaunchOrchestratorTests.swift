@@ -79,6 +79,36 @@ struct MakePlanTests {
         #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
     }
 
+    @Test("DXMT plan: winemetal/d3d builtin overrides, and NO lib/external DYLD path (winemetal links system Metal)")
+    func dxmtPlan() throws {
+        let cfg = GameConfig(appID: 220)
+        var b = backend()   // wine binary = /w/bin/wine64 → runtime root /w
+        b.dxmtLibDirPath = URL(fileURLWithPath: "/d/lib/wine/x86_64-windows")
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: b, graphics: .dxmt, gameExe: gameExe, prefix: prefix, logURL: log)
+
+        // DXMT forces ITS module set (incl. its winemetal Metal bridge) to builtin — D3D10/11 only, no d3d12.
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        // Unlike GPTK, DXMT ships no framework in lib/external — winemetal.so links the system Metal.framework
+        // — so makePlan must NOT prepend /w/lib/external; the base bundled-deps DYLD path is left intact.
+        #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == nil)
+        #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/w/lib/external:") == false)
+        #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.contains("/silo-bundled") == true)
+    }
+
+    @Test("Determinism: selecting DXMT never leaks GPTK's overrides, even when GPTK is the configured backend")
+    func backendSelectionIsDeterministic() throws {
+        let cfg = GameConfig(appID: 220)
+        var b = backend()
+        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")  // GPTK configured…
+        // …but the launch asks for DXMT, which is NOT configured → no d3d overrides at all (plain wined3d),
+        // and crucially NOT GPTK's. The backend can only ever resolve to its own overlay.
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: b, graphics: .dxmt, gameExe: gameExe, prefix: prefix, logURL: log)
+        #expect(plan.environment["WINEDLLOVERRIDES"] == nil)
+        #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == nil)
+    }
+
     @Test("User WINEDEBUG via extra flags is preserved")
     func customWineDebug() throws {
         var cfg = GameConfig(appID: 220)
