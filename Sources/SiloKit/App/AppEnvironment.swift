@@ -278,9 +278,12 @@ public final class AppEnvironment {
         dxmtDownloading = true
         defer { dxmtDownloading = false }
         do {
-            // The repo also hosts the app's v* + the wine-cx-* releases, so pick the newest dxmt-* one.
-            let releases = try await runtimeManager.availableReleases(repo: Silo.wineRepo, limit: 15)
-            guard let release = releases.first(where: { $0.tagName.lowercased().hasPrefix("dxmt") }) else {
+            // The repo hosts app v* + wine-cx-* + dxmt-* releases. Pick the DXMT built against the
+            // configured wine (tags are dxmt-<ver>-cx<wine>), else the newest dxmt-* — keeps winemetal.so
+            // paired with the wine it runs on.
+            let releases = try await runtimeManager.availableReleases(repo: Silo.wineRepo, limit: 30)
+            guard let release = RuntimeManager.matchedDXMTRelease(
+                releases, forWine: backendSettings.config.wineRuntimeName) else {
                 backendSettings.statusMessage =
                     "No DXMT build published yet (the build-dxmt CI workflow must run first)."
                 return

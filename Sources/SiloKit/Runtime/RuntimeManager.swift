@@ -150,6 +150,27 @@ public actor RuntimeManager {
         return DXMTInstall(name: safe, installDir: dir, libDir: Self.locateDXMTLibDir(in: dir))
     }
 
+    /// Pick the DXMT release to install for a given wine. DXMT releases are tagged
+    /// `dxmt-<ver>-cx<wine version>`, so prefer the one built against `wineRuntimeName` (e.g.
+    /// `wine-cx-26.2.0`) to keep the winemetal.so↔wine ABI paired; fall back to the newest `dxmt-*`
+    /// (GitHub returns releases newest-first) when there's no exact match or no wine is set. Pure.
+    public static func matchedDXMTRelease(
+        _ releases: [GitHubRelease], forWine wineRuntimeName: String?
+    ) -> GitHubRelease? {
+        let dxmt = releases.filter { $0.tagName.lowercased().hasPrefix("dxmt") }
+        if let cx = wineRuntimeName.flatMap(wineCXVersion),
+           let matched = dxmt.first(where: { $0.tagName.hasSuffix("-cx\(cx)") }) {
+            return matched
+        }
+        return dxmt.first
+    }
+
+    /// The CrossOver version embedded in a wine runtime name (`wine-cx-26.2.0` → `26.2.0`), or nil.
+    static func wineCXVersion(_ runtimeName: String) -> String? {
+        let prefix = "wine-cx-"
+        return runtimeName.hasPrefix(prefix) ? String(runtimeName.dropFirst(prefix.count)) : nil
+    }
+
     // MARK: - Shared download engine
 
     /// Download an asset and extract it into `Runtimes/<name>` (the shared download+extract engine;
