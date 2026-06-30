@@ -3,6 +3,29 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🧩 DXMT as a second graphics backend — deterministic foundation landed (2026-06-30, 264 tests green).**
+  Reverses the GPTK-only stance (and M87's DXVK removal) per the user's dual-bottle design; `CLAUDE.md`
+  "Graphics backends" rewritten to match. **Done + green:**
+  - `GraphicsBackend{gptk,dxmt}` = single source of truth (per-backend `dllOverrides`,
+    `overlaysExternalFramework`); `makePlan` emits exactly one backend's builtin override set
+    (determinism test: DXMT never leaks GPTK's overrides).
+  - `GraphicsLinker.overlayDXMT` (winemetal.so → x86_64-unix; d3d11/d3d10core/dxgi/winemetal → x86_64-windows;
+    no lib/external). `linkGraphics`/launch pipeline are backend-aware.
+  - `RuntimeVariants` (GPTK in place; DXMT = APFS clonefile clone + overlay) + `BottleResolver`
+    (`(game,backend) → {prefix,wineBinary,graphics}`, the one dispatch point; refuses an unconfigured
+    secondary backend). `AppPaths.steamBottle(_:)` → `SteamBottle` (GPTK) / `SteamBottle-DXMT`.
+  - `ManualGame.backend` (tolerant decode) + `SteamApp.backend` (discovery-derived).
+  - **Manual games work end-to-end:** `playManual` routes through the resolver → a DXMT manual game runs on
+    its cloned DXMT runtime in its own bottle (VM test asserts `/wine-dxmt` + `…winemetal=b`). UI: backend
+    picker in Add-a-Game + manual settings, DXMT chip on the tile. `GraphicsFallback` backend-aware.
+  - **Decision:** GPTK keeps the existing `SteamBottle` dir (no migration of the multi-GB prefix); DXMT is a
+    sibling. Branch `dxmt-dual-bottle-backend`.
+  - **PENDING (next):** (1) **Build DXMT** from `crossover-sources` (has DXMT v0.72) in `build-wine.sh`/CI —
+    produce the 4 artifacts, then a DXMT importer + Runtimes-settings UI to populate
+    `BackendConfig.dxmtLibDirPath`. (2) **Two Steam bottles**: provision `SteamBottle-DXMT`, parameterize
+    `SteamBottle`/`SteamClientSession` by backend, first-run onboarding (GPTK/DXMT/both), `SteamLoginSync`
+    (copy `loginusers.vdf`+`ssfn*` so you log in once), one-live-client-at-a-time, discover across both
+    bottles + tag backend, library backend badge. (3) On-device: validate DXMT renders Overcooked 2.
 - **✨ Tier-1 features from the Whisky study (2026-06-30, 239 tests green).** Five features mined from
   Whisky (the closest analog launcher) + Apple's GPTK materials, each with tests:
   1. **Retina/HiDPI toggle** for the Steam bottle (`WineTools.setRetinaMode` → `HKCU\…\Mac Driver\RetinaMode`;

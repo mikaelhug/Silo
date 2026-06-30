@@ -40,11 +40,28 @@ process with `WINEPREFIX` overridden to the isolated prefix).
    problem is to be **fixed on this from-source CrossOver-FOSS Wine** — debug the build flags, Wine
    registry, env, and Silo's launch code; never answer "use a different runtime." Decided 2026-06-28.
 
-## Two runtime roles
-- `BottleRole.steam` → a **simple/vanilla** Wine bottle (Steam is finicky; no GPTK overrides).
-- `BottleRole.game` → **Apple GPTK / D3DMetal** is the single graphics path (D3DMetal overlaid into the
-  wine runtime by `GraphicsLinker.overlayGPTK`). No DXVK/CrossOver-backend fallback — when GPTK isn't
-  configured the game simply runs on wine's own wined3d.
+## Graphics backends (GPTK + DXMT — decided 2026-06-30, reverses the GPTK-only stance)
+Two Metal translation layers, selectable **per game**: **GPTK / D3DMetal** (Apple's, D3D10/11/12 → Metal,
+the default) and **DXMT** (3Shain's, D3D10/11 → Metal directly, the fallback for titles GPTK's
+device-creation can't run, e.g. Overcooked 2). DXMT is built from the **same CrossOver-FOSS source** as
+Wine (it bundles `DXMT v0.72`), so constraint #8 still holds — never a third-party prebuilt. DXVK was
+evaluated and rejected (needs a Vulkan/MoltenVK stack; DXMT is Metal-direct).
+
+**The deterministic rule — backend ⇔ runtime ⇔ bottle** (`GraphicsBackend` is the single source of truth):
+- Both backends overlay a **builtin** `d3d11`/`dxgi` into a runtime's `lib/wine` tree, so they can't share
+  one runtime. `RuntimeVariants` prepares each: GPTK overlays the base runtime in place (the proven path,
+  unchanged); DXMT gets an **APFS clone** of the base + `GraphicsLinker.overlayDXMT`.
+- `BottleResolver` is the ONE place that maps `(game, backend) → {prefix, wineBinary, graphics}`. Every
+  launch/provision/tool path routes through it — never hard-code `paths.steamBottle` or
+  `backend.wineBinaryPath`. A launch emits exactly that backend's `WINEDLLOVERRIDES` builtin set, so it can
+  never cross GPTK↔DXMT or silently land on wined3d (it refuses an unconfigured secondary backend).
+- **Steam game backend = its bottle.** Each backend gets its own shared Steam bottle (`SteamBottle` for
+  GPTK, `SteamBottle-DXMT` for DXMT) — a separate Steam install/login, since one Steam client per prefix.
+  A Steam game's backend is *discovered* from which bottle it's installed in (modern → GPTK, older → DXMT).
+- **Manual (non-Steam) games** pick a backend per game (`ManualGame.backend`); each runs in its own
+  isolated bottle under that backend's runtime.
+- When a backend isn't configured, GPTK degrades to wine's own wined3d (the baseline); a secondary backend
+  refuses rather than mis-route. `GraphicsFallback` is backend-aware (surfaces a silent wined3d fallback).
 
 ## Steam Presence Strategy (per-game, the DRM answer)
 Steamworks IPC is **prefix-scoped**: a game can only reach a Steam client running in its OWN Wine prefix
