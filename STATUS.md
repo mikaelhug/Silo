@@ -3,6 +3,22 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🛠️ GPTK D3DMetal silent-fallback bug FIXED (2026-06-30).** Native D3D11 games (e.g. Overcooked! 2) were
+  failing graphics init: GPTK's `libd3dshared` is loaded by wine via the `d3d11.so` **symlink** in
+  `lib/wine/x86_64-unix`, so dyld resolved its only `@rpath` (`@loader_path`) to THAT dir and dlopened
+  `@rpath/D3DMetal.framework` from there — where it wasn't reachable → assertion `"Failed to dlopen
+  D3DMetal"` → wine **silently** fell back to wined3d (which can't create the device). Diagnosed
+  empirically against the live bottle (Step-0-first, which killed a wrong `D3DMETAL_FRAMEWORK_PATH` fix).
+  **Fix:** `GraphicsLinker.overlayGPTK` now ALSO symlinks `D3DMetal.framework` into `x86_64-unix`
+  (`linkD3DMetalFramework`), with self-repair for already-overlaid runtimes; proven on-device (Overcooked:
+  0 dlopen failures, 0 wined3d-fallback signatures, graphics error gone). Also broadened the builtin
+  `WINEDLLOVERRIDES` to the full GPTK set (`+d3d10_1,d3d10core,d3d12core`) so the bottle's native redist
+  wined3d DLLs can't shadow GPTK. **Guardrail:** new `GraphicsFallback` parser + `GraphicsFallbackMonitor`
+  watch the launch log and surface "GPTK didn't engage — running on fallback graphics" instead of a silent
+  "Launched" — this class of regression can never hide again (it was invisible because GPTK is untestable
+  in CI + the only validation was a one-time manual gate + the failure was silent). 224 tests / 37 suites
+  green; clean build; app reassembled. **SoE/ANGLE is a SEPARATE genuine limit** (ANGLE's D3D11 won't init
+  on D3DMetal even when loaded → still falls to D3D9; workaround = its bundled `otclient_gl.exe`).
 - **🏷️ Release v0.2.1 (2026-06-29).** Patch over v0.2.0. (a) **Adversarial multi-agent quality audit**
   closed in four tiers — P0: readiness **TOCTOU** fixed (kqueue is edge-triggered; re-check after arming) +
   the M114 event-driven gate now tested **live** (`FileWatch` + readiness, previously never run with

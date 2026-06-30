@@ -76,7 +76,7 @@ struct MakePlanTests {
         // Modules live in wine's own lib/wine now (overlaid), so there is NO WINEDLLPATH; the translated
         // d3d modules are just forced to builtin so GPTK's overlaid versions win.
         #expect(plan.environment["WINEDLLPATH"] == nil)
-        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d10,d3d11,d3d12,dxgi=b")
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
     }
 
     @Test("User WINEDEBUG via extra flags is preserved")
@@ -98,7 +98,7 @@ struct MakePlanTests {
         let plan = try LaunchOrchestrator.makePlan(
             config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
         // GPTK's d3d overrides are APPENDED (semicolon-joined), not overwriting the user's.
-        #expect(plan.environment["WINEDLLOVERRIDES"] == "winemenubuilder.exe=d;d3d10,d3d11,d3d12,dxgi=b")
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "winemenubuilder.exe=d;d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
     }
 
     @Test("Perf env-flags (MetalHUD / MetalFX / DXR / AVX) propagate into the launch plan's environment")
