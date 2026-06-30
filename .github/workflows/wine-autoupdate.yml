@@ -59,3 +59,15 @@ jobs:
     with:
       crossover_version: ${{ needs.detect.outputs.version }}
       release_tag: wine-cx-${{ needs.detect.outputs.version }}
+
+  # Keep DXMT paired with wine: after a NEW wine is published, rebuild DXMT against it and publish a
+  # matched dxmt-<ver>-cx<wine> release. Runs only on a new CrossOver (inherits `build`'s idempotency),
+  # so it doesn't fire every Monday. (Bumping DXMT_VERSION alone → run build-dxmt.yml manually.)
+  dxmt:
+    needs: [detect, build]
+    if: needs.detect.outputs.should_build == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-dxmt.yml
+    with:
+      wine_release_tag: wine-cx-${{ needs.detect.outputs.version }}
