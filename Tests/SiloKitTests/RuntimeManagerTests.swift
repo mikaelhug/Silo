@@ -151,6 +151,28 @@ struct RuntimeManagerTests {
         #expect(fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
     }
 
+    @Test("matchedDXMTRelease prefers the DXMT built against the configured wine, else the newest")
+    func matchDXMT() throws {
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Releases newest-first (as GitHub returns them): two DXMT builds (per-wine tags) + a wine + an app tag.
+        let releases = try decoder.decode([GitHubRelease].self, from: Data("""
+        [{"tag_name":"dxmt-v0.72-cx26.3.0","assets":[]},
+         {"tag_name":"wine-cx-26.3.0","assets":[]},
+         {"tag_name":"dxmt-v0.72-cx26.2.0","assets":[]},
+         {"tag_name":"v0.2.1","assets":[]}]
+        """.utf8))
+        // Installed wine 26.2.0 → the DXMT built against it, NOT the newest.
+        #expect(RuntimeManager.matchedDXMTRelease(releases, forWine: "wine-cx-26.2.0")?.tagName == "dxmt-v0.72-cx26.2.0")
+        // No matching cx → newest dxmt-*.
+        #expect(RuntimeManager.matchedDXMTRelease(releases, forWine: "wine-cx-99.9.9")?.tagName == "dxmt-v0.72-cx26.3.0")
+        // No wine configured → newest dxmt-*.
+        #expect(RuntimeManager.matchedDXMTRelease(releases, forWine: nil)?.tagName == "dxmt-v0.72-cx26.3.0")
+        // No DXMT published at all → nil.
+        let noDXMT = try decoder.decode([GitHubRelease].self,
+            from: Data(#"[{"tag_name":"wine-cx-26.3.0","assets":[]}]"#.utf8))
+        #expect(RuntimeManager.matchedDXMTRelease(noDXMT, forWine: "wine-cx-26.3.0") == nil)
+    }
+
     @Test("installWine verifies a published SHA-256 and rejects a mismatch")
     func checksum() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
