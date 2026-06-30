@@ -40,7 +40,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macos-26 matches the app build (release.yml) + the runtime's deploy target (macOS 26). The build is
+    # x86_64 under Rosetta regardless of the runner's host arch.
+    runs-on: macos-26
     timeout-minutes: 120
     env:
       # CrossOver is x86_64 (runs on Apple Silicon via Rosetta); build the x86_64 Wine.

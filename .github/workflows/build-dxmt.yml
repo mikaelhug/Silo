@@ -43,8 +43,9 @@ concurrency:
 
 jobs:
   build:
-    # macos-15 ships Xcode 16 (the Metal toolchain DXMT's shader compile needs).
-    runs-on: macos-15
+    # macos-26 matches the app build (release.yml) and the runtime's deploy target; it ships Xcode with
+    # the Metal toolchain DXMT's shader compile needs.
+    runs-on: macos-26
     timeout-minutes: 120
     env:
       # DXMT must be x86_64 to match the x86_64 CrossOver Wine + winemetal.so (Rosetta).
@@ -57,12 +58,12 @@ jobs:
       - name: Select Xcode + ensure Metal toolchain
         run: |
           set -eo pipefail
-          # GitHub's macos-15 image ships full Xcode 16.x at /Applications/Xcode_16*.app — pick one.
+          # Prefer Xcode 16 (the toolchain DXMT v0.72 is upstream-tested with) if the runner still ships
+          # it; otherwise use the runner's default Xcode (macos-26's Xcode also has the Metal toolchain).
           shopt -s nullglob
           xcodes=(/Applications/Xcode_16*.app)
-          XCODE="${xcodes[0]:-/Applications/Xcode.app}"
-          sudo xcode-select -s "$XCODE"
-          echo "Using $XCODE"
+          if [ ${#xcodes[@]} -gt 0 ]; then sudo xcode-select -s "${xcodes[0]}"; fi
+          echo "Using $(xcode-select -p)"
           # Xcode 16 split the Metal shader compiler into a separately-downloadable component. It's
           # normally pre-installed on the runner; fetch it if not (idempotent — no-op when present).
           xcrun -sdk macosx -f metal >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain || true
