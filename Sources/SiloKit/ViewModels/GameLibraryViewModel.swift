@@ -79,7 +79,12 @@ public final class GameLibraryViewModel {
     public var isAnythingRunning: Bool { !runningPIDs.isEmpty || !manualRunningPIDs.isEmpty }
 
     public var canLaunch: Bool { backend.isWineConfigured }
-    public var steamReady: Bool { bottle.isSteamInstalled }
+    /// At least one Steam bottle (GPTK or DXMT) has its Steam client installed.
+    public var steamReady: Bool { GraphicsBackend.allCases.contains { steamInstalled($0) } }
+
+    private func steamInstalled(_ graphics: GraphicsBackend) -> Bool {
+        FileManager.default.fileExists(atPath: paths.steamBottleExe(graphics).path)
+    }
 
     /// Search filter over the installed Steam games (already name-sorted by `DiscoveryEngine`).
     public var filtered: [SteamApp] {
@@ -107,21 +112,31 @@ public final class GameLibraryViewModel {
 
     // MARK: - Library
 
-    /// Re-scan the bottle's Steam library for installed games, plus the persisted manual (non-Steam) games.
+    /// Re-scan BOTH Steam bottles (GPTK + DXMT) for installed games, plus the persisted manual games.
+    /// Each Steam game is tagged with the backend of the bottle it was discovered in — a Steam game's
+    /// backend IS its bottle.
     public func load() async {
         manualGames = sortedManual(await configStore.load().manualGames)
-        // Manual games also live in the bottle prefix, so the library still gates on the bottle existing
-        // (notReady drives the onboarding until Steam is set up).
-        guard bottle.isSteamInstalled else { loadState = .notReady; return }
-        do {
-            games = try await discovery.discoverGames(steamRoot: paths.steamBottleClientDir)
-            loadState = (games.isEmpty && manualGames.isEmpty) ? .empty : .loaded
-        } catch DiscoveryEngine.DiscoveryError.steamDirNotFound {
-            games = []   // Steam installed but its library dir doesn't exist yet
-            loadState = manualGames.isEmpty ? .empty : .loaded
-        } catch {
-            games = []; loadState = .error((error as NSError).localizedDescription)
+        // Manual games also live in a bottle, so the library still gates on at least one Steam bottle
+        // existing (notReady drives the onboarding until Steam is set up).
+        guard steamReady else { loadState = .notReady; return }
+        var seen = Set<Int>()   // dedup by appID (first wins) in case a title is installed in both bottles
+        let discovered = await discoverAllBottles().filter { seen.insert($0.appID).inserted }
+        games = discovered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        loadState = (games.isEmpty && manualGames.isEmpty) ? .empty : .loaded
+    }
+
+    /// Discover games across every installed Steam bottle, tagging each with its bottle's backend. A bottle
+    /// whose library dir doesn't exist yet (or fails to parse) contributes nothing rather than failing the
+    /// whole load — one bad bottle never hides the other's games.
+    private func discoverAllBottles() async -> [SteamApp] {
+        var all: [SteamApp] = []
+        for graphics in GraphicsBackend.allCases where steamInstalled(graphics) {
+            let apps = (try? await discovery.discoverGames(
+                steamRoot: paths.steamBottleClientDir(graphics))) ?? []
+            all += apps.map { var app = $0; app.backend = graphics; return app }
         }
+        return all
     }
 
     private func sortedManual(_ list: [ManualGame]) -> [ManualGame] {

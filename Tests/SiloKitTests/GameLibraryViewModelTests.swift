@@ -57,6 +57,29 @@ struct GameLibraryViewModelTests {
         #expect(vm.games.map(\.appID) == [220])
     }
 
+    @Test("load discovers across BOTH Steam bottles, tagging each game with its bottle's backend")
+    func loadsAcrossBothBottles() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+
+        // Install Steam + one game manifest in EACH backend's bottle.
+        for (graphics, appID, name) in [(GraphicsBackend.gptk, 220, "HL2"), (.dxmt, 400, "Portal")] {
+            let client = paths.steamBottleClientDir(graphics)
+            try FileManager.default.createDirectory(
+                at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: paths.steamBottleExe(graphics).path, contents: Data())
+            let acf = #""AppState" { "appid" "\#(appID)" "name" "\#(name)" "StateFlags" "4" "installdir" "\#(name)" "LastOwner" "76561197960287930" "SizeOnDisk" "12000000" }"#
+            try acf.write(to: client.appendingPathComponent("steamapps/appmanifest_\(appID).acf"),
+                          atomically: true, encoding: .utf8)
+        }
+
+        await vm.load()
+        #expect(vm.loadState == .loaded)
+        // Both games present; each carries the backend of the bottle it came from.
+        #expect(vm.games.first { $0.appID == 220 }?.backend == .gptk)
+        #expect(vm.games.first { $0.appID == 400 }?.backend == .dxmt)
+    }
+
     @Test("load → notReady when the bottle has no Steam installed")
     func notReadyWithoutSteam() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
