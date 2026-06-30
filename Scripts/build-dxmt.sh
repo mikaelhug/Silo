@@ -53,11 +53,18 @@ SRC="$WORK/dxmt"
 
 echo "==> Preflight"
 # (1) Full Xcode + Metal toolchain — DXMT compiles .metal shaders via `xcrun metal` (meson.build).
+echo "    Xcode: $(xcode-select -p 2>/dev/null || echo '?')"
+# Xcode 16+ (incl. Xcode 26 on macOS 26 Tahoe) ship the Metal shader compiler as a SEPARATE component.
+# Fetch it if missing (idempotent), then re-check — DXMT compiles .metal shaders, so this is required.
+if ! xcrun -sdk macosx -f metal >/dev/null 2>&1; then
+  echo "    Metal compiler not found — fetching the Metal toolchain component (one-time, ~GB)…"
+  xcodebuild -downloadComponent MetalToolchain 2>/dev/null || true
+fi
 xcrun -sdk macosx -f metal >/dev/null 2>&1 || {
-  echo "ERROR: the Metal shader compiler (xcrun metal) isn't available. DXMT compiles .metal shaders."
-  echo "  - If you only have Command Line Tools: install full Xcode, then"
+  echo "ERROR: the Metal shader compiler (xcrun metal) still isn't available. DXMT compiles .metal shaders."
+  echo "  - If 'xcode-select -p' shows /Library/Developer/CommandLineTools, point it at full Xcode:"
   echo "      sudo xcode-select -s /Applications/Xcode.app"
-  echo "  - If you HAVE Xcode 16+ but metal is missing (Apple split it into a separate component):"
+  echo "  - Then install the Metal toolchain component:"
   echo "      xcodebuild -downloadComponent MetalToolchain"
   exit 1
 }
