@@ -3,31 +3,48 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **🟡 GPTK D3DMetal — dlopen layer fixed + guardrail added, but device creation STILL fails (2026-06-30,
-  UNRESOLVED).** Honest status after exhaustive on-device diagnosis. TWO layers:
-  1. **dlopen layer — FIXED + shipped.** `libd3dshared` is loaded via the `d3d11.so` symlink in
-     `x86_64-unix`, so dyld resolved its only `@rpath` (`@loader_path`) to THAT dir; `@rpath/
-     D3DMetal.framework` wasn't reachable there → `"Failed to dlopen D3DMetal"` → silent wined3d fallback.
-     `GraphicsLinker.overlayGPTK` now symlinks `D3DMetal.framework` into `x86_64-unix`
-     (`linkD3DMetalFramework`, self-repairing). After this, `"Failed to dlopen D3DMetal"` is gone (count 0).
-  2. **device-creation layer — STILL BROKEN.** With Steam co-resident (clean repro, no Steam-bootstrap
-     noise), Overcooked! 2's own thread loads GPTK's d3d11 + dlopens D3DMetal OK, but `D3D11CreateDevice`
-     via D3DMetal **fails**, so GPTK's d3d11 (it's built from wine d3d11 source + a D3DMetal backend, with a
-     `unix_call_fallback`) falls back to wined3d → `None of the requested D3D feature levels is supported`
-     → the game's "failed to initialize graphics". **Overcooked does NOT render on D3DMetal.**
-  RULED OUT: arch mismatch (all x86_64), native redist DLLs shadowing (removed them — no change; `=b`
-  already neutralizes), Metal unavailable (MTLCreateSystemDefaultDevice works under Rosetta), the dlopen
-  (fixed). The remaining failure is inside Apple's CLOSED GPTK d3d11↔D3DMetal `unix_call` path, with ZERO
-  observability (D3DMetal's own `d3dm_print` is a unix call that fails alongside device creation; os_log
-  empty). **CORRECTION of my earlier claim:** my "0 wined3d-fallback / graphics error gone" results were
-  FALSE POSITIVES — bare-wine launches had Overcooked exiting on the Steam bootstrap BEFORE reaching d3d11,
-  so the absent fallback signatures meant "didn't get there," not "succeeded." The symlink fix + guardrail
-  are real and kept; Overcooked is NOT fixed. **This casts doubt on whether GPTK D3DMetal renders ANY game
-  in this `GPTK-4.0_beta_1` + `wine-cx-26.2.0` runtime right now** — the M83 "Bloons renders" gate may have
-  been a similar one-time visual claim, or the runtime regressed. Need a confirmed-rendering reference to
-  diff against; likely the d3d11↔D3DMetal unix-call bridge in this GPTK/wine pairing.
-  **Guardrail (shipped, working):** `GraphicsFallback` + `GraphicsFallbackMonitor` now correctly surface
-  "GPTK didn't engage — fallback graphics" for Overcooked instead of a silent "Launched". 224 tests green.
+- **🟢 GPTK D3DMetal CONFIRMED working — it IS Silo's active graphics path (2026-06-30).** Decisive
+  on-device positive control: **We Were Here (582500)** launched co-resident under GPTK with verbose
+  logging renders **D3D11 through D3DMetal**, proven by THREE independent signals (not a single-signal
+  overclaim): (1) `d3d11.dll` + `dxgi.dll` load as **`builtin`** (GPTK's overlaid DLLs, not the native
+  wined3d redist copies); (2) its Unity `Player.log` reports `Direct3D 11.0 [level 11.1]`, adapter
+  **"AMD Compatibility Mode (ID=0x66af)"** — D3DMetal's signature fake adapter (wined3d-on-MoltenVK would
+  report "Apple M4 Pro"); (3) **ZERO** wined3d/Vulkan/dlopen/feature-level signatures across 405 verbose
+  lines (wined3d ALWAYS prints `err:winediag:…Using the Vulkan renderer` — absent). So the M83 "Bloons
+  renders" gate is **vindicated**, the `GPTK-4.0_beta_1` + `wine-cx-26.2.0` pairing works, and the
+  dlopen-layer fix (`linkD3DMetalFramework` symlink, self-repairing) holds.
+  - **"How did wined3d slip in?" — it didn't.** wined3d lives *inside Apple's GPTK `d3d11.dll`* (built
+    from wine d3d11 source + a D3DMetal backend + a `unix_call_fallback`). Silo is GPTK-only (DXVK removed
+    M87) and never added a wined3d path. The fallback is GPTK's own, triggered only when a specific game's
+    D3DMetal device-creation fails.
+  - **Overcooked! 2 is a GAME-SPECIFIC exception, not a global failure.** Its `D3D11CreateDevice` via
+    D3DMetal fails (opaque — inside closed GPTK; `d3dm_print`/os_log give nothing), so GPTK's d3d11 falls
+    to its internal wined3d → `None of the requested D3D feature levels is supported` → "failed to
+    initialize graphics." We Were Here (same Unity/D3D11 family) succeeds, so this is Overcooked-specific.
+    **Prime lever: a different / non-beta GPTK version** (user can supply other `.dmg`s) — the beta likely
+    matters for this class. RULED OUT for the global path: arch, native-redist shadowing, Metal-unavailable,
+    dlopen. **Correction of my prior STATUS:** "device creation STILL fails (UNRESOLVED, casts doubt on
+    whether GPTK renders ANYTHING)" was overgeneralized from Overcooked alone and is now disproven.
+  - **Verbose wine logging for local builds (07c1c1e):** `Silo.wineDebug` = `+loaddll` locally, `-all`
+    under CI (gated on `SILO_QUIET_WINE`, set by `build-app.sh` only when `$CI`). `WINEDEBUG=-all` had been
+    *hiding* the very fallback `fixme:winediag` signatures the `GraphicsFallback` guardrail keys on — so the
+    guardrail can now actually fire in dev. Shipped app stays silent automatically.
+  - **Guardrail (shipped, working):** `GraphicsFallback` + `GraphicsFallbackMonitor` surface "GPTK didn't
+    engage — fallback graphics" for the failing class instead of a silent "Launched". 224 tests green.
+  - **GPTK 4 best-practice investigation (2026-06-30, read Apple's docs + cloned `apple/game-porting-toolkit`).**
+    Key correction to the premise: **GPTK 4 is a NATIVE-Metal-porting toolkit** (AI agent skills + Metal
+    Shader Converter + metal-cpp + native samples; prereqs macOS 27 / Xcode 27). The Windows-game
+    "evaluation environment" (the D3DMetal that Silo overlays) is positioned as a **developer triage/eval
+    tool**, not a documented end-user runtime. The repo has **ZERO** Wine/D3DMetal launcher-integration
+    guidance (grepped the whole tree) — the only launch-env vars Apple documents are Metal-level
+    (`MTL_HUD_ENABLED`, `MTL_HUD_LOG_ENABLED`, `MTL_CAPTURE_ENABLED`). So there is **no Apple reference
+    implementation to "match"** for Silo's overlay-into-CrossOver-wine approach; Silo's launch env already
+    matches the de-facto launcher standard (WINEPREFIX iso, WINEMSYNC, `ROSETTA_ADVERTISE_AVX=1` default-on,
+    DYLD→lib/external, builtin d3d overrides, the D3DMetal.framework symlink) and is **proven working**
+    (We Were Here). Overcooked-class device-creation failures are **D3DMetal's own feature/format limits**
+    (Apple's `debugging-rendering-issues` skill flags Apple-GPU format gaps, e.g. `DXGI_FORMAT_D24_UNORM_S8_UINT`
+    is not universally supported) — NOT a Silo implementation bug. Levers for that class: a different/non-beta
+    **GPTK 4** build, or per-game Unity graphics args (`-force-feature-level-11-0` / `-force-d3d11-no-singlethreaded`).
 - **🏷️ Release v0.2.1 (2026-06-29).** Patch over v0.2.0. (a) **Adversarial multi-agent quality audit**
   closed in four tiers — P0: readiness **TOCTOU** fixed (kqueue is edge-triggered; re-check after arming) +
   the M114 event-driven gate now tested **live** (`FileWatch` + readiness, previously never run with
