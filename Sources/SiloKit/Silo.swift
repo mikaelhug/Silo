@@ -35,14 +35,15 @@ public enum Silo {
     public static let winePrefixInitOverrides = "mscoree,mshtml="
 
     /// `WINEDEBUG` for every wine invocation. **LOCAL builds: `+loaddll` — wine's default diagnostics
-    /// (err/warn/fixme, incl. the graphics-fallback `winediag` lines the `GraphicsFallback` guardrail keys
-    /// on) PLUS module-load tracing, so launch logs are useful while developing. CI/distribution builds:
-    /// `-all` (silent) — verbose logs are noise for end users.** Gated on the `SILO_QUIET_WINE` compile
-    /// flag, which `Scripts/build-app.sh` sets only when `$CI` is present, so the shipped app is silent
-    /// automatically (no manual flip).
+    /// (err/warn/fixme) PLUS module-load tracing, so launch logs are useful while developing.
+    /// CI/distribution builds: `-all,+winediag` — quiet EXCEPT wine's `winediag` channel, which carries the
+    /// graphics-fallback signatures (`Using the Vulkan renderer`, `None of the requested D3D feature levels`)
+    /// that the `GraphicsFallback` guardrail keys on. A plain `-all` would hide them and leave the guardrail
+    /// blind in the shipped app.** Gated on the `SILO_QUIET_WINE` compile flag, which `Scripts/build-app.sh`
+    /// sets only when `$CI` is present, so the shipped app is quiet automatically (no manual flip).
     public static let wineDebug: String = {
         #if SILO_QUIET_WINE
-        return "-all"
+        return "-all,+winediag"
         #else
         return "+loaddll"
         #endif

@@ -18,6 +18,9 @@ public enum GraphicsFallback: Sendable {
     static let fallbackSignatures = [
         "Failed to dlopen D3DMetal",                                 // GPTK's Metal backend never loaded
         "None of the requested D3D feature levels is supported",     // wined3d couldn't create the d3d1x device
+        "Using the Vulkan renderer",                                 // wined3d IS driving d3d1x (i.e. NOT GPTK) —
+                                                                     // the definitive "GPTK didn't engage" signal,
+                                                                     // present even when wined3d then runs OK
     ]
 
     /// Classify a launch-log tail. Pure; case-insensitive substring match.
