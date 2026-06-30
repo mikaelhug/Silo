@@ -253,16 +253,12 @@ public final class AppEnvironment {
         }
     }
 
-    /// Open a Wine maintenance tool (winecfg / regedit / Control Panel) on the shared Steam bottle so the
-    /// user can fix the prefix by hand.
-    public func openWineTool(_ tool: WineTools.Tool) async {
-        guard let wine = wineBinary else { bottleToolsMessage = "Set up Wine first."; return }
-        do {
-            try await wineTools.open(tool, prefix: paths.steamBottle, wine: wine, logURL: paths.steamBottleLog)
-            bottleToolsMessage = "Opened \(tool.rawValue)."
-        } catch {
-            bottleToolsMessage = "Couldn't open \(tool.rawValue): \((error as NSError).localizedDescription)"
-        }
+    /// Open a Wine maintenance tool (winecfg / regedit / control) on the shared Steam bottle so the user
+    /// can fix the prefix by hand. Routes through the shared `runWineTool` (single tool-launch path).
+    public func openWineTool(_ tool: String) async {
+        guard wineBinary != nil else { bottleToolsMessage = "Set up Wine first."; return }
+        await orchestrator.runWineTool(tool, prefix: paths.steamBottle, backend: backendSettings.config)
+        bottleToolsMessage = "Opened \(tool)."
     }
 
     /// Build a per-game settings view model with the game's persisted config.
