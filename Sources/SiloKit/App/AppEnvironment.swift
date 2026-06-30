@@ -261,6 +261,20 @@ public final class AppEnvironment {
         bottleToolsMessage = "Opened \(tool)."
     }
 
+    /// Generate a Game-Mode-tagged `.app` on the Desktop that launches `game` directly under GPTK (so it's
+    /// startable from Spotlight/Dock). The launch env is snapshotted from the same `makePlan` Silo launches
+    /// with. Returns the bundle URL, or nil if Wine isn't configured / the write failed. Manual games only —
+    /// they don't need the co-resident Steam client.
+    public func makeManualGameShortcut(_ game: ManualGame) -> URL? {
+        guard let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first,
+              let plan = try? LaunchOrchestrator.makePlan(
+                config: GameConfig(appID: 0, envFlags: game.envFlags, presence: .none, customArgs: game.customArgs),
+                backend: backendSettings.config, gameExe: game.executablePath,
+                prefix: paths.manualBottle(game.id), logURL: paths.manualLog(game.id))
+        else { return nil }
+        return try? GameAppShortcut(name: game.name, plan: plan).write(into: desktop)
+    }
+
     /// Build a per-game settings view model with the game's persisted config.
     public func makeGameSettings(appID: Int) async -> GameSettingsViewModel {
         let state = await configStore.load()

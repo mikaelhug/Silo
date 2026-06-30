@@ -76,6 +76,17 @@ struct ManualGameTileView: View {
         }
         Button("Wine Config…") { Task { await env.gameLibrary.openManualWinecfg(game) } }
             .disabled(!env.gameLibrary.canLaunch)
+        Button("Create Desktop Shortcut") {
+            Task {
+                guard let app = env.makeManualGameShortcut(game) else { return }
+                // Best-effort: stamp the game's icon on the bundle, then reveal it.
+                if let icon = await ManualIconCache.shared.icon(for: game.executablePath) {
+                    NSWorkspace.shared.setIcon(icon, forFile: app.path, options: [])
+                }
+                NSWorkspace.shared.activateFileViewerSelecting([app])
+            }
+        }
+        .disabled(!env.gameLibrary.canLaunch)
         Button("View in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([game.executablePath])
         }
