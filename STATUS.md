@@ -3,22 +3,31 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **🛠️ GPTK D3DMetal silent-fallback bug FIXED (2026-06-30).** Native D3D11 games (e.g. Overcooked! 2) were
-  failing graphics init: GPTK's `libd3dshared` is loaded by wine via the `d3d11.so` **symlink** in
-  `lib/wine/x86_64-unix`, so dyld resolved its only `@rpath` (`@loader_path`) to THAT dir and dlopened
-  `@rpath/D3DMetal.framework` from there — where it wasn't reachable → assertion `"Failed to dlopen
-  D3DMetal"` → wine **silently** fell back to wined3d (which can't create the device). Diagnosed
-  empirically against the live bottle (Step-0-first, which killed a wrong `D3DMETAL_FRAMEWORK_PATH` fix).
-  **Fix:** `GraphicsLinker.overlayGPTK` now ALSO symlinks `D3DMetal.framework` into `x86_64-unix`
-  (`linkD3DMetalFramework`), with self-repair for already-overlaid runtimes; proven on-device (Overcooked:
-  0 dlopen failures, 0 wined3d-fallback signatures, graphics error gone). Also broadened the builtin
-  `WINEDLLOVERRIDES` to the full GPTK set (`+d3d10_1,d3d10core,d3d12core`) so the bottle's native redist
-  wined3d DLLs can't shadow GPTK. **Guardrail:** new `GraphicsFallback` parser + `GraphicsFallbackMonitor`
-  watch the launch log and surface "GPTK didn't engage — running on fallback graphics" instead of a silent
-  "Launched" — this class of regression can never hide again (it was invisible because GPTK is untestable
-  in CI + the only validation was a one-time manual gate + the failure was silent). 224 tests / 37 suites
-  green; clean build; app reassembled. **SoE/ANGLE is a SEPARATE genuine limit** (ANGLE's D3D11 won't init
-  on D3DMetal even when loaded → still falls to D3D9; workaround = its bundled `otclient_gl.exe`).
+- **🟡 GPTK D3DMetal — dlopen layer fixed + guardrail added, but device creation STILL fails (2026-06-30,
+  UNRESOLVED).** Honest status after exhaustive on-device diagnosis. TWO layers:
+  1. **dlopen layer — FIXED + shipped.** `libd3dshared` is loaded via the `d3d11.so` symlink in
+     `x86_64-unix`, so dyld resolved its only `@rpath` (`@loader_path`) to THAT dir; `@rpath/
+     D3DMetal.framework` wasn't reachable there → `"Failed to dlopen D3DMetal"` → silent wined3d fallback.
+     `GraphicsLinker.overlayGPTK` now symlinks `D3DMetal.framework` into `x86_64-unix`
+     (`linkD3DMetalFramework`, self-repairing). After this, `"Failed to dlopen D3DMetal"` is gone (count 0).
+  2. **device-creation layer — STILL BROKEN.** With Steam co-resident (clean repro, no Steam-bootstrap
+     noise), Overcooked! 2's own thread loads GPTK's d3d11 + dlopens D3DMetal OK, but `D3D11CreateDevice`
+     via D3DMetal **fails**, so GPTK's d3d11 (it's built from wine d3d11 source + a D3DMetal backend, with a
+     `unix_call_fallback`) falls back to wined3d → `None of the requested D3D feature levels is supported`
+     → the game's "failed to initialize graphics". **Overcooked does NOT render on D3DMetal.**
+  RULED OUT: arch mismatch (all x86_64), native redist DLLs shadowing (removed them — no change; `=b`
+  already neutralizes), Metal unavailable (MTLCreateSystemDefaultDevice works under Rosetta), the dlopen
+  (fixed). The remaining failure is inside Apple's CLOSED GPTK d3d11↔D3DMetal `unix_call` path, with ZERO
+  observability (D3DMetal's own `d3dm_print` is a unix call that fails alongside device creation; os_log
+  empty). **CORRECTION of my earlier claim:** my "0 wined3d-fallback / graphics error gone" results were
+  FALSE POSITIVES — bare-wine launches had Overcooked exiting on the Steam bootstrap BEFORE reaching d3d11,
+  so the absent fallback signatures meant "didn't get there," not "succeeded." The symlink fix + guardrail
+  are real and kept; Overcooked is NOT fixed. **This casts doubt on whether GPTK D3DMetal renders ANY game
+  in this `GPTK-4.0_beta_1` + `wine-cx-26.2.0` runtime right now** — the M83 "Bloons renders" gate may have
+  been a similar one-time visual claim, or the runtime regressed. Need a confirmed-rendering reference to
+  diff against; likely the d3d11↔D3DMetal unix-call bridge in this GPTK/wine pairing.
+  **Guardrail (shipped, working):** `GraphicsFallback` + `GraphicsFallbackMonitor` now correctly surface
+  "GPTK didn't engage — fallback graphics" for Overcooked instead of a silent "Launched". 224 tests green.
 - **🏷️ Release v0.2.1 (2026-06-29).** Patch over v0.2.0. (a) **Adversarial multi-agent quality audit**
   closed in four tiers — P0: readiness **TOCTOU** fixed (kqueue is edge-triggered; re-check after arming) +
   the M114 event-driven gate now tested **live** (`FileWatch` + readiness, previously never run with
