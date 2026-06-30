@@ -15,30 +15,32 @@ name: Build DXMT (older-games backend)
 
 on:
   workflow_dispatch:
+    # All versions come from versions.env (the single source of truth); these are OPTIONAL overrides —
+    # leave blank to use versions.env. Keeps the workflow from drifting out of sync with the repo.
     inputs:
       dxmt_version:
-        description: "DXMT upstream git tag, e.g. v0.72 (must exist in 3Shain/dxmt)"
-        required: true
-        default: "v0.72"
+        description: "Override DXMT tag (blank = DXMT_VERSION from versions.env)"
+        required: false
+        default: ""
       llvm_mingw_version:
-        description: "mstorsjo/llvm-mingw version DXMT's cross-file pins, e.g. 20231017"
-        required: true
-        default: "20231017"
+        description: "Override llvm-mingw version (blank = LLVM_MINGW_VERSION from versions.env)"
+        required: false
+        default: ""
       wine_release_tag:
-        description: "This repo's CrossOver Wine release to build against, e.g. wine-cx-26.2.0"
-        required: true
-        default: "wine-cx-26.2.0"
+        description: "Override the CrossOver Wine release to build against (blank = wine-cx-<CROSSOVER_VERSION>)"
+        required: false
+        default: ""
       release_tag:
-        description: "Release tag to publish, e.g. dxmt-v0.72"
-        required: true
-        default: "dxmt-v0.72"
+        description: "Override the published release tag (blank = dxmt-<DXMT_VERSION>)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
 concurrency:
-  # One build per DXMT version; don't cancel an in-flight build.
-  group: dxmt-build-${{ inputs.dxmt_version }}
+  # One DXMT build at a time; don't cancel an in-flight build.
+  group: dxmt-build
   cancel-in-progress: false
 
 jobs:
@@ -50,10 +52,33 @@ jobs:
     env:
       # DXMT must be x86_64 to match the x86_64 CrossOver Wine + winemetal.so (Rosetta).
       ARCH_PREFIX: "arch -x86_64"
-      MINGW_DIR: "llvm-mingw-${{ inputs.llvm_mingw_version }}-ucrt-macos-universal"
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Resolve versions (versions.env is the single source of truth; inputs override)
+        env:
+          IN_DXMT: ${{ inputs.dxmt_version }}
+          IN_MINGW: ${{ inputs.llvm_mingw_version }}
+          IN_WINE: ${{ inputs.wine_release_tag }}
+          IN_REL: ${{ inputs.release_tag }}
+        run: |
+          set -eo pipefail
+          # shellcheck disable=SC1091
+          set -a; . ./versions.env; set +a
+          DXMT_VER="${IN_DXMT:-$DXMT_VERSION}"
+          MINGW_VER="${IN_MINGW:-$LLVM_MINGW_VERSION}"
+          WINE_TAG="${IN_WINE:-wine-cx-$CROSSOVER_VERSION}"
+          REL_TAG="${IN_REL:-dxmt-$DXMT_VER}"
+          {
+            echo "DXMT_REPO=$DXMT_REPO"
+            echo "DXMT_VER=$DXMT_VER"
+            echo "MINGW_VER=$MINGW_VER"
+            echo "MINGW_DIR=llvm-mingw-$MINGW_VER-ucrt-macos-universal"
+            echo "WINE_TAG=$WINE_TAG"
+            echo "REL_TAG=$REL_TAG"
+          } >> "$GITHUB_ENV"
+          echo "Building $DXMT_REPO@$DXMT_VER against $WINE_TAG → publishing $REL_TAG"
 
       - name: Select Xcode + ensure Metal toolchain
         run: |
@@ -104,7 +129,7 @@ jobs:
           set -eo pipefail
           # The wine-cx-* release (built by build-wine.yml) carries wine.tar.xz = a full Wine install with
           # the headers + import libs (winecrt0/ntdll/dbghelp) DXMT's winemetal.so links against.
-          gh release download "${{ inputs.wine_release_tag }}" --repo "$GITHUB_REPOSITORY" \
+          gh release download "$WINE_TAG" --repo "$GITHUB_REPOSITORY" \
             --pattern 'wine.tar.xz' --dir "$RUNNER_TEMP/wine-dl"
           mkdir -p "$RUNNER_TEMP/wine-install"
           tar -xJf "$RUNNER_TEMP/wine-dl/wine.tar.xz" -C "$RUNNER_TEMP/wine-install"
@@ -115,11 +140,11 @@ jobs:
         run: |
           set -eo pipefail
           # Keep .git so meson stamps the version from the tag (vcs_tag → version.h).
-          git clone --depth 1 --branch "${{ inputs.dxmt_version }}" --recurse-submodules --shallow-submodules \
-            https://github.com/3Shain/dxmt.git "$RUNNER_TEMP/dxmt"
+          git clone --depth 1 --branch "$DXMT_VER" --recurse-submodules --shallow-submodules \
+            "https://github.com/${DXMT_REPO}.git" "$RUNNER_TEMP/dxmt"
           # The cross toolchain DXMT's build-win64.txt pins, placed where @GLOBAL_SOURCE_ROOT@ expects it.
           mkdir -p "$RUNNER_TEMP/dxmt/toolchains"
-          curl -fL "https://github.com/mstorsjo/llvm-mingw/releases/download/${{ inputs.llvm_mingw_version }}/${MINGW_DIR}.tar.xz" -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
+          curl -fL "https://github.com/mstorsjo/llvm-mingw/releases/download/${MINGW_VER}/${MINGW_DIR}.tar.xz" -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
           tar -xf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C "$RUNNER_TEMP/dxmt/toolchains"
           test -x "$RUNNER_TEMP/dxmt/toolchains/$MINGW_DIR/bin/x86_64-w64-mingw32-gcc"
           echo "DXMT_SRC=$RUNNER_TEMP/dxmt" >> "$GITHUB_ENV"
@@ -167,9 +192,9 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ inputs.release_tag }}
-          name: ${{ inputs.release_tag }}
+          tag_name: ${{ env.REL_TAG }}
+          name: ${{ env.REL_TAG }}
           files: |
             dxmt.tar.xz
             dxmt.tar.xz.sha256
-          body: "DXMT ${{ inputs.dxmt_version }} (3Shain/dxmt) built against this repo's CrossOver Wine (${{ inputs.wine_release_tag }}) — the older-games D3D10/11 backend. In Silo: Settings → DXMT → Import the extracted lib/wine/x86_64-windows folder."
+          body: "DXMT ${{ env.DXMT_VER }} (${{ env.DXMT_REPO }}) built against this repo's CrossOver Wine (${{ env.WINE_TAG }}) — the older-games D3D10/11 backend. In Silo: Settings → DXMT → Import the extracted lib/wine/x86_64-windows folder."
