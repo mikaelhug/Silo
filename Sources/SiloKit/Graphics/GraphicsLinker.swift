@@ -33,8 +33,10 @@ public struct GraphicsLinker: Sendable {
     /// D3DMetal-backed Direct3D directly. For each GPTK graphics module the PE `.dll` is copied into
     /// `<wine>/lib/wine/x86_64-windows` and its unix `.so` (a *relative* symlink to
     /// `../../external/libd3dshared.dylib`) is recreated in `<wine>/lib/wine/x86_64-unix`; GPTK's
-    /// `lib/external` (`libd3dshared.dylib` + `D3DMetal.framework`) is copied into `<wine>/lib/external`
-    /// so those symlinks — and the launch DYLD fallback paths — resolve. The runtime is then
+    /// `lib/external` (`libd3dshared.dylib` + `D3DMetal.framework`) is copied into `<wine>/lib/external`.
+    /// Critically, `D3DMetal.framework` is ALSO symlinked into `x86_64-unix` (see `linkD3DMetalFramework`):
+    /// wine loads the d3d `.so` from there, so dyld resolves libd3dshared's `@loader_path`-relative `@rpath`
+    /// against that dir — and that's where libd3dshared dlopens `D3DMetal.framework`. The runtime is then
     /// self-contained for D3DMetal: GPTK isn't consulted at launch.
     ///
     /// Idempotent: a no-op once the runtime already carries this GPTK's modules, so it's safe to call
@@ -58,6 +60,12 @@ public struct GraphicsLinker: Sendable {
             .filter { Self.isGPTKModule($0.lastPathComponent) }
         guard !modules.isEmpty else { return }
 
+        // Ensure D3DMetal.framework is reachable from the unix-modules dir. Runs on EVERY call (idempotent)
+        // so a runtime overlaid before this fix self-repairs — it MUST precede the witness early-return
+        // below, which would otherwise skip a runtime whose modules are in place but whose framework link
+        // is missing (the silent-wined3d-fallback regression).
+        try linkD3DMetalFramework(unixDir: wineUnixDir, externalDir: wineExternal)
+
         // Idempotent: if a witness module is already byte-identical, the runtime carries THIS GPTK — skip.
         let witness = modules.first { $0.lastPathComponent == "d3d11.dll" } ?? modules[0]
         if fileManager.contentsEqual(
@@ -72,13 +80,38 @@ public struct GraphicsLinker: Sendable {
                 (dll.lastPathComponent as NSString).deletingPathExtension + ".so")
             if isSymlink(so) || fileManager.fileExists(atPath: so.path) { try replace(so, in: wineUnixDir) }
         }
-        // libd3dshared.dylib + D3DMetal.framework (the Metal backend the `.so` symlinks + DYLD resolve).
+        // libd3dshared.dylib + D3DMetal.framework (the Metal backend the `.so` symlinks resolve against).
         for item in (try? fileManager.contentsOfDirectory(at: gptkExternal, includingPropertiesForKeys: nil)) ?? [] {
             try replace(item, in: wineExternal)
         }
+        // Now that D3DMetal.framework is in lib/external, link it into the unix-modules dir (the pre-witness
+        // call above was a no-op on a fresh runtime where the framework didn't exist yet).
+        try linkD3DMetalFramework(unixDir: wineUnixDir, externalDir: wineExternal)
     }
 
     // MARK: - Helpers
+
+    /// The relative symlink target from `<wine>/lib/wine/x86_64-unix` to the overlaid framework.
+    static let d3dMetalUnixLinkTarget = "../../external/D3DMetal.framework"
+
+    /// Make `D3DMetal.framework` reachable from the unix-modules dir. wine loads GPTK's d3d `.so` via a
+    /// symlink in `x86_64-unix`, so dyld resolves libd3dshared's `@loader_path` (its only `@rpath`) to THAT
+    /// dir; libd3dshared then dlopens `@rpath/D3DMetal.framework/D3DMetal`, which must therefore resolve
+    /// from `x86_64-unix`. Without this link the dlopen fails (`"Failed to dlopen D3DMetal"`) and wine
+    /// silently falls back to wined3d — GPTK never engages. Idempotent; a no-op until the framework exists
+    /// in `lib/external` (so the first, pre-copy call on a fresh runtime does nothing) and once correctly
+    /// linked.
+    private func linkD3DMetalFramework(unixDir: URL, externalDir: URL) throws {
+        guard fileManager.fileExists(atPath: externalDir.appendingPathComponent("D3DMetal.framework").path)
+        else { return }
+        let link = unixDir.appendingPathComponent("D3DMetal.framework")
+        if (try? fileManager.destinationOfSymbolicLink(atPath: link.path)) == Self.d3dMetalUnixLinkTarget {
+            return   // already correctly linked
+        }
+        if isSymlink(link) || fileManager.fileExists(atPath: link.path) { try fileManager.removeItem(at: link) }
+        try fileManager.createDirectory(at: unixDir, withIntermediateDirectories: true)
+        try fileManager.createSymbolicLink(atPath: link.path, withDestinationPath: Self.d3dMetalUnixLinkTarget)
+    }
 
     /// Place `src` into `dir` under its own name, replacing any existing entry. A symlink is **recreated**
     /// with the same (relative) target — not dereferenced — so GPTK's `.so` links keep resolving against

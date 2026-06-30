@@ -35,6 +35,9 @@ public final class GameLibraryViewModel {
     private var backend: BackendConfig
     private var runObservers: [Int: any ProcessObservation] = [:]
     private var manualObservers: [UUID: any ProcessObservation] = [:]
+    /// Per-launch watchers that surface a silent GPTK→wined3d graphics fallback (keyed like the observers).
+    private var graphicsMonitors: [Int: GraphicsFallbackMonitor] = [:]
+    private var manualGraphicsMonitors: [UUID: GraphicsFallbackMonitor] = [:]
     /// The single owner of the live bottle Steam client (shared with the settings pane).
     private let session: SteamClientSession
     /// Boots the per-game isolated bottles that manual (non-Steam) games run in.
@@ -65,6 +68,8 @@ public final class GameLibraryViewModel {
     isolated deinit {
         runObservers.values.forEach { $0.cancel() }
         manualObservers.values.forEach { $0.cancel() }
+        graphicsMonitors.values.forEach { $0.stop() }
+        manualGraphicsMonitors.values.forEach { $0.stop() }
     }
 
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
@@ -162,6 +167,9 @@ public final class GameLibraryViewModel {
             runningPIDs[game.appID] = pid
             observeRun(appID: game.appID, pid: pid)
             setStatus("Launched \(game.name).")
+            // Last, so a detected fallback (which usually arrives a beat later as the log is written, but
+            // may already be present) overrides the "Launched" status rather than being clobbered by it.
+            watchGraphics(appID: game.appID, log: paths.log(forAppID: game.appID), name: game.name)
         } catch {
             setStatus("\(game.name): \((error as NSError).localizedDescription)")
         }
@@ -268,6 +276,7 @@ public final class GameLibraryViewModel {
             manualRunningPIDs[game.id] = pid
             observeManualRun(id: game.id, pid: pid)
             setStatus("Launched \(game.name).")
+            watchManualGraphics(id: game.id, log: paths.manualLog(game.id), name: game.name)   // last (see play)
         } catch {
             setStatus("\(game.name): \((error as NSError).localizedDescription)")
         }
@@ -310,6 +319,27 @@ public final class GameLibraryViewModel {
     private func clearManualRun(_ id: UUID) {
         manualRunningPIDs[id] = nil
         manualObservers[id]?.cancel(); manualObservers[id] = nil
+        manualGraphicsMonitors[id]?.stop(); manualGraphicsMonitors[id] = nil
+    }
+
+    /// Start watching a Steam game's launch log; surface a status if GPTK silently fell back to wined3d.
+    private func watchGraphics(appID: Int, log: URL, name: String) {
+        let monitor = GraphicsFallbackMonitor()
+        graphicsMonitors[appID] = monitor
+        monitor.start(url: log) { [weak self] in
+            self?.setStatus("\(name): GPTK (D3DMetal) didn't engage — running on fallback graphics (wined3d).")
+            self?.graphicsMonitors[appID] = nil
+        }
+    }
+
+    /// Same, for a manual game's own bottle log.
+    private func watchManualGraphics(id: UUID, log: URL, name: String) {
+        let monitor = GraphicsFallbackMonitor()
+        manualGraphicsMonitors[id] = monitor
+        monitor.start(url: log) { [weak self] in
+            self?.setStatus("\(name): GPTK (D3DMetal) didn't engage — running on fallback graphics (wined3d).")
+            self?.manualGraphicsMonitors[id] = nil
+        }
     }
 
     private func observeRun(appID: Int, pid: Int32) {
@@ -327,5 +357,6 @@ public final class GameLibraryViewModel {
     private func clearRunState(_ id: Int) {
         runningPIDs[id] = nil
         runObservers[id]?.cancel(); runObservers[id] = nil
+        graphicsMonitors[id]?.stop(); graphicsMonitors[id] = nil
     }
 }

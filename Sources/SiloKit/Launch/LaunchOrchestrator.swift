@@ -58,15 +58,18 @@ public struct LaunchOrchestrator: Sendable {
         // GPTK's D3DMetal d3d modules are overlaid into the wine runtime's own lib/wine tree
         // (GraphicsLinker.overlayGPTK), so wine loads them directly — no WINEDLLPATH needed. Point the
         // DYLD fallbacks at the runtime's lib/external (where the overlay placed libd3dshared.dylib +
-        // D3DMetal.framework) and force the translated d3d modules to builtin so GPTK's overlaid
-        // versions beat any game-shipped native dll. Only the modules GPTK actually translates are
-        // forced; d3d9 (wined3d) is left untouched.
+        // D3DMetal.framework) and force the FULL set of GPTK-translated d3d modules to builtin so GPTK's
+        // overlaid versions beat the native wined3d copies that the in-bottle Steam client's redist
+        // (Steamworks Common Redistributables) drops into system32. The set must include d3d10core/d3d10_1/
+        // d3d12core, not just d3d10/11/12/dxgi — a native `d3d10core` etc. would otherwise pull wined3d into
+        // the device-creation path. d3d9 (wined3d, intentional) and d3dcompiler_* (a helper, not a renderer
+        // — keep the redist's native one) are deliberately left untouched.
         if backend.gptkLibDirPath != nil {
             let external = wine.wineRuntimeExternalDir
             environment["DYLD_FALLBACK_LIBRARY_PATH"] = "\(external.path):\(wine.siloDyldFallback)"
             environment["DYLD_FALLBACK_FRAMEWORK_PATH"] = external.path
             environment["WINEDLLOVERRIDES"] = mergeOverride(
-                environment["WINEDLLOVERRIDES"], "d3d10,d3d11,d3d12,dxgi=b")
+                environment["WINEDLLOVERRIDES"], "d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
         }
 
         return LaunchPlan(

@@ -133,6 +133,43 @@ struct GraphicsLinkerTests {
         #expect(mtime == mtime2)   // not re-copied (guards the re-copy-every-launch failure mode)
     }
 
+    @Test("overlayGPTK links D3DMetal.framework into the unix-modules dir (so libd3dshared's @rpath resolves it)")
+    func overlayLinksD3DMetalFramework() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let gptkLibDir = try makeGPTK(tmp)
+        let wine = try makeWine(tmp)
+
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+
+        // wine loads the d3d `.so` from x86_64-unix, so libd3dshared's @loader_path resolves there — the
+        // framework must be reachable from that dir or the D3DMetal dlopen fails → silent wined3d fallback.
+        let link = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-unix/D3DMetal.framework")
+        #expect((try link.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true)
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+            == "../../external/D3DMetal.framework")
+    }
+
+    @Test("overlayGPTK self-repairs a runtime missing the D3DMetal.framework unix link (the pre-fix regression)")
+    func overlaySelfRepairsMissingFrameworkLink() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let gptkLibDir = try makeGPTK(tmp)
+        let wine = try makeWine(tmp)
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+
+        // Simulate the broken state: modules already overlaid (witness byte-identical) but the framework
+        // link deleted — exactly the runtime that silently fell back to wined3d before this fix.
+        let link = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-unix/D3DMetal.framework")
+        try FileManager.default.removeItem(at: link)
+        #expect(!FileManager.default.fileExists(atPath: link.path))
+
+        // The next overlay must re-create the link even though the witness short-circuits the module copy.
+        try linker.overlayGPTK(wineBinary: wine, gptkLibDir: gptkLibDir)
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+            == "../../external/D3DMetal.framework")
+    }
+
     @Test("overlayGPTK throws sourceMissing when GPTK's module dir does not exist")
     func overlaySourceMissing() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
