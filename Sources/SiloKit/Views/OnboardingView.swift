@@ -74,15 +74,12 @@ private struct DXMTOnboardingSection: View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(spacing: 12) {
                 StepRow(
-                    number: 1, title: "Import the DXMT runtime",
-                    subtitle: "Choose the DXMT module folder (x86_64-windows) built from the CrossOver source.",
-                    done: env.dxmtReady, locked: !env.wineReady,
-                    actionLabel: "Choose folder…",
-                    action: {
-                        if let dir = chooseDirectory(message: "Choose the DXMT x86_64-windows module folder.") {
-                            Task { await env.importDXMTRuntime(from: dir) }
-                        }
-                    })
+                    number: 1, title: "Install the DXMT runtime",
+                    subtitle: "Downloads the latest DXMT build from GitHub Releases (or import a folder later "
+                        + "in Settings → DXMT).",
+                    done: env.dxmtReady, busy: env.dxmtDownloading, locked: !env.wineReady,
+                    actionLabel: "Download…",
+                    action: { Task { await env.downloadLatestDXMT() } })
                 StepRow(
                     number: 2, title: "Set up the DXMT Steam bottle",
                     subtitle: "Installs a second Windows Steam client; sign in to install your older games here.",

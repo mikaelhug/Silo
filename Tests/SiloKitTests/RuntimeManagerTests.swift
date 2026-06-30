@@ -107,6 +107,50 @@ struct RuntimeManagerTests {
         #expect(fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
     }
 
+    @Test("locateDXMTLibDir finds the x86_64-windows module dir by its d3d11+winemetal signature")
+    func locateDXMT() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        try tmp.makeDir("rt/lib/wine/x86_64-windows")
+        try tmp.write("rt/lib/wine/x86_64-windows/d3d11.dll", "x")
+        try tmp.write("rt/lib/wine/x86_64-windows/winemetal.dll", "x")
+        let found = RuntimeManager.locateDXMTLibDir(in: tmp.url.appendingPathComponent("rt"))
+        #expect(found?.lastPathComponent == "x86_64-windows")   // exact-URL compare trips on /var→/private/var
+        #expect(found?.path.hasSuffix("/rt/lib/wine/x86_64-windows") == true)
+        // A tree without the winemetal marker → nil (so a Wine runtime never masquerades as DXMT).
+        #expect(RuntimeManager.locateDXMTLibDir(in: try tmp.makeDir("empty")) == nil)
+    }
+
+    @Test("installDXMT downloads + extracts via the SHARED engine and locates the x86_64-windows module dir")
+    func installDXMT() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let url = "https://e.com/dxmt.tar.xz"
+        FakeURLProtocol.stub(url, data: Data("ARCHIVE".utf8))
+        let fake = FakeProcessRunner()
+        // Simulate tar extracting a DXMT tree (lib/wine/{x86_64-windows,x86_64-unix}).
+        fake.onRun = { inv in
+            if inv.executable.lastPathComponent == "tar",
+               let i = inv.arguments.firstIndex(of: "-C"), i + 1 < inv.arguments.count {
+                let dest = URL(fileURLWithPath: inv.arguments[i + 1])
+                let win = dest.appendingPathComponent("lib/wine/x86_64-windows")
+                let unix = dest.appendingPathComponent("lib/wine/x86_64-unix")
+                try? FileManager.default.createDirectory(at: win, withIntermediateDirectories: true)
+                try? FileManager.default.createDirectory(at: unix, withIntermediateDirectories: true)
+                for f in ["d3d11.dll", "dxgi.dll", "d3d10core.dll", "winemetal.dll"] {
+                    FileManager.default.createFile(atPath: win.appendingPathComponent(f).path, contents: Data("x".utf8))
+                }
+                FileManager.default.createFile(atPath: unix.appendingPathComponent("winemetal.so").path, contents: Data("x".utf8))
+            }
+        }
+        let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())
+        let dxmt = try await manager.installDXMT(name: "dxmt-v0.72", from: URL(string: url)!)
+        #expect(dxmt.libDir?.lastPathComponent == "x86_64-windows")
+        #expect(dxmt.isUsable)
+        #expect(await manager.installedDXMT().map(\.name) == ["dxmt-v0.72"])
+        // winemetal.so is de-quarantined + ad-hoc re-signed (same hardening the engine gives Wine).
+        #expect(fake.invocations.contains { $0.executable.lastPathComponent == "xattr" && $0.arguments.contains("com.apple.quarantine") })
+        #expect(fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
+    }
+
     @Test("installWine verifies a published SHA-256 and rejects a mismatch")
     func checksum() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

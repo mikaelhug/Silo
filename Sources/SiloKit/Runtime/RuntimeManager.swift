@@ -113,10 +113,49 @@ public actor RuntimeManager {
             ?? candidates.first
     }
 
+    // MARK: - DXMT (reuses the same download+extract+harden engine as Wine)
+
+    /// A DXMT runtime's module dir inside an extracted release — the `x86_64-windows` folder, found by its
+    /// signature files (`d3d11.dll` + `winemetal.dll`) rather than assuming the exact tree depth. The DXMT
+    /// counterpart of `locateWineBinary`.
+    public static func locateDXMTLibDir(in dir: URL, fileManager: FileManager = .default) -> URL? {
+        guard let enumerator = fileManager.enumerator(at: dir, includingPropertiesForKeys: nil) else { return nil }
+        for case let url as URL in enumerator where url.lastPathComponent == "winemetal.dll" {
+            let parent = url.deletingLastPathComponent()
+            if fileManager.fileExists(atPath: parent.appendingPathComponent("d3d11.dll").path) { return parent }
+        }
+        return nil
+    }
+
+    /// DXMT builds installed under the Runtimes dir (dirs containing a locatable DXMT module dir).
+    public func installedDXMT() -> [DXMTInstall] {
+        guard let dirs = try? fileManager.contentsOfDirectory(
+            at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return dirs.compactMap { dir -> DXMTInstall? in
+            guard let lib = Self.locateDXMTLibDir(in: dir) else { return nil }
+            return DXMTInstall(name: dir.lastPathComponent, installDir: dir, libDir: lib)
+        }.sorted { $0.name > $1.name }   // newest tag first
+    }
+
+    /// Download + extract a DXMT build and locate its module dir — the DXMT counterpart of `installWine`,
+    /// sharing the exact same `install` engine (HTTPS-only, mandatory/best-effort SHA-256, safe extract,
+    /// de-quarantine + ad-hoc sign — `winemetal.so` needs the hardening just like Wine).
+    @discardableResult
+    public func installDXMT(
+        name: String, from downloadURL: URL, requireDigest: Bool = false
+    ) async throws -> DXMTInstall {
+        let safe = try Self.requireSafeComponent(name)
+        try await install(name: safe, from: downloadURL, requireDigest: requireDigest)
+        let dir = paths.runtimesDir.appendingPathComponent(safe, isDirectory: true)
+        return DXMTInstall(name: safe, installDir: dir, libDir: Self.locateDXMTLibDir(in: dir))
+    }
+
+    // MARK: - Shared download engine
+
     /// Download an asset and extract it into `Runtimes/<name>` (the shared download+extract engine;
-    /// `installWine` wraps it and locates the binary). `name` is sanitized to a single safe path
-    /// component before it builds any path (path-traversal defense). When `requireDigest` is true a
-    /// published `<url>.sha256` is mandatory (fail-closed) — see the integrity check below.
+    /// `installWine` / `installDXMT` wrap it and locate the binary / module dir). `name` is sanitized to a
+    /// single safe path component before it builds any path (path-traversal defense). When `requireDigest`
+    /// is true a published `<url>.sha256` is mandatory (fail-closed) — see the integrity check below.
     public func install(name: String, from downloadURL: URL, requireDigest: Bool = false) async throws {
         let safeName = try Self.requireSafeComponent(name)
         try DownloadGuard.requireHTTPS(downloadURL)   // reject http/file/other before any network call

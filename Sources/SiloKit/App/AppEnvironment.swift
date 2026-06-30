@@ -266,6 +266,52 @@ public final class AppEnvironment {
         await backendSettings.applyDXMTLibDir(dir)
     }
 
+    public private(set) var dxmtDownloading = false
+
+    /// Download + install the latest DXMT build published to Silo's Releases (built by `build-dxmt.yml`)
+    /// and adopt it as the backend's DXMT runtime — the auto-download counterpart of `importDXMTRuntime`.
+    /// Reuses the Wine downloader engine end-to-end: `RuntimeManager.availableReleases` → `preferredAsset`
+    /// → `installDXMT` (HTTPS-only, mandatory SHA-256 for our own repo, safe extract, de-quarantine +
+    /// ad-hoc sign), exactly like `RuntimeViewModel.installLatest`.
+    public func downloadLatestDXMT() async {
+        guard !dxmtDownloading else { return }
+        dxmtDownloading = true
+        defer { dxmtDownloading = false }
+        do {
+            // The repo also hosts the app's v* + the wine-cx-* releases, so pick the newest dxmt-* one.
+            let releases = try await runtimeManager.availableReleases(repo: Silo.wineRepo, limit: 15)
+            guard let release = releases.first(where: { $0.tagName.lowercased().hasPrefix("dxmt") }) else {
+                backendSettings.statusMessage =
+                    "No DXMT build published yet (the build-dxmt CI workflow must run first)."
+                return
+            }
+            // Already installed? Adopt it without re-downloading.
+            if let lib = await runtimeManager.installedDXMT()
+                .first(where: { $0.name == release.tagName })?.libDir {
+                await backendSettings.applyDXMTLibDir(lib, name: release.tagName)
+                backendSettings.statusMessage = "Latest DXMT (\(release.tagName)) is already installed."
+                return
+            }
+            guard let asset = RuntimeManager.preferredAsset(release) else {
+                backendSettings.statusMessage = "Latest DXMT release has no installable archive."
+                return
+            }
+            backendSettings.statusMessage = "Downloading DXMT \(release.tagName)…"
+            // Our own repo → a published SHA-256 is mandatory (fail-closed), like Wine.
+            let install = try await runtimeManager.installDXMT(
+                name: release.tagName, from: asset.browserDownloadUrl, requireDigest: Silo.wineRepo == Versions.githubRepo)
+            guard let lib = install.libDir else {
+                backendSettings.statusMessage =
+                    "Downloaded DXMT, but its x86_64-windows module folder wasn't found in the archive."
+                return
+            }
+            await backendSettings.applyDXMTLibDir(lib, name: release.tagName)
+            backendSettings.statusMessage = "Installed DXMT \(release.tagName)."
+        } catch {
+            backendSettings.statusMessage = "DXMT download failed: \((error as NSError).localizedDescription)"
+        }
+    }
+
     // MARK: - Steam-bottle Wine tools (Settings → General)
 
     /// Last result of a bottle-tool action (Retina toggle / winecfg / regedit), shown in Settings.

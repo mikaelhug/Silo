@@ -147,13 +147,17 @@ struct GeneralSettingsView: View {
         Section {
             LabeledContent("Runtime") {
                 HStack(spacing: 8) {
-                    Text(env.dxmtReady ? (env.backendSettings.config.dxmtRuntimeName ?? "Imported") : "Not imported")
+                    if env.dxmtDownloading { ProgressView().controlSize(.small) }
+                    Text(env.dxmtReady ? (env.backendSettings.config.dxmtRuntimeName ?? "Installed") : "Not installed")
                         .foregroundStyle(.secondary)
+                    Button("Download Latest") { Task { await env.downloadLatestDXMT() } }
+                        .disabled(env.dxmtDownloading)
                     Button(env.dxmtReady ? "Replace…" : "Import…") {
                         if let dir = chooseDirectory(message: "Choose the DXMT x86_64-windows module folder.") {
                             Task { await env.importDXMTRuntime(from: dir) }
                         }
                     }
+                    .disabled(env.dxmtDownloading)
                 }
             }
             Button("Set up DXMT Steam bottle") { Task { await bottle.setUp() } }
