@@ -34,13 +34,27 @@ public enum Silo {
     /// the fix is removing libSDL2 from the runtime: build `--without-sdl` + `RuntimeManager.stripBundledSDL`.)
     public static let winePrefixInitOverrides = "mscoree,mshtml="
 
+    /// `WINEDEBUG` for every wine invocation. **LOCAL builds: `+loaddll` — wine's default diagnostics
+    /// (err/warn/fixme, incl. the graphics-fallback `winediag` lines the `GraphicsFallback` guardrail keys
+    /// on) PLUS module-load tracing, so launch logs are useful while developing. CI/distribution builds:
+    /// `-all` (silent) — verbose logs are noise for end users.** Gated on the `SILO_QUIET_WINE` compile
+    /// flag, which `Scripts/build-app.sh` sets only when `$CI` is present, so the shipped app is silent
+    /// automatically (no manual flip).
+    public static let wineDebug: String = {
+        #if SILO_QUIET_WINE
+        return "-all"
+        #else
+        return "+loaddll"
+        #endif
+    }()
+
     /// The single source of truth for a wine invocation's base environment: the isolated `WINEPREFIX`,
-    /// quiet logging, and the bundled-dylib fallback path (so freetype/etc. resolve). Every wine launch
-    /// builds on this and merges its own overrides, so a fix here (e.g. the DYLD path) reaches them all.
+    /// logging (see `wineDebug`), and the bundled-dylib fallback path (so freetype/etc. resolve). Every wine
+    /// launch builds on this and merges its own overrides, so a fix here (e.g. the DYLD path) reaches them all.
     public static func wineEnvironment(prefix: URL, wine: URL) -> [String: String] {
         [
             "WINEPREFIX": prefix.path,
-            "WINEDEBUG": "-all",
+            "WINEDEBUG": wineDebug,
             "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback,
         ]
     }

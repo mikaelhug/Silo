@@ -30,7 +30,7 @@ struct MakePlanTests {
         // GPTK injects D3DMetal; with no GPTK lib dir set here there are no d3d overrides, so
         // WINEDLLOVERRIDES is unset (the SDL crash is fixed by removing libSDL2, not a DLL override).
         #expect(plan.environment["WINEDLLOVERRIDES"] == nil)
-        #expect(plan.environment["WINEDEBUG"] == "-all")           // quiet default
+        #expect(plan.environment["WINEDEBUG"] == Silo.wineDebug)   // build-gated (verbose local / -all CI)
         #expect(plan.currentDirectory.path == "/lib/steamapps/common/Half-Life 2")
         #expect(plan.logURL == log)
     }

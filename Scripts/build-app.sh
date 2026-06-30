@@ -15,8 +15,13 @@ set -a; . ./versions.env; set +a
 VERSION="$SILO_VERSION"
 BUILD=$(date +%Y%m%d%H%M)
 
-echo "==> swift build -c $CONFIG"
-swift build -c "$CONFIG"
+# CI/distribution builds compile wine logging OFF (SILO_QUIET_WINE → WINEDEBUG=-all); LOCAL builds stay
+# verbose (+loaddll) so launch logs carry the diagnostics we (and the GraphicsFallback guardrail) need
+# while developing. GitHub Actions sets $CI, so the shipped app is automatically silent.
+QUIET=""
+if [ -n "${CI:-}" ]; then QUIET="-Xswiftc -DSILO_QUIET_WINE"; echo "==> CI build: wine logging OFF"; fi
+echo "==> swift build -c $CONFIG $QUIET"
+swift build -c "$CONFIG" $QUIET
 BIN_PATH=".build/$CONFIG/$BIN_NAME"
 
 echo "==> assembling $APP (v$VERSION build $BUILD)"
