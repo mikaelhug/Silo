@@ -45,13 +45,55 @@ public struct AppPaths: Sendable, Hashable {
             || fm.fileExists(atPath: bottlesRoot.deletingLastPathComponent().path)
     }
 
-    /// The bottle directory names that relocate together (everything under `bottlesRoot`).
-    public static let bottleDirNames = ["SteamBottle", "ManualBottles"]
+    /// The bottle directory names that relocate together (everything under `bottlesRoot`). One shared
+    /// Steam bottle per graphics backend (GPTK keeps the historical `SteamBottle`; DXMT is a sibling) plus
+    /// the manual-games parent.
+    public static let bottleDirNames = ["SteamBottle", "SteamBottle-DXMT", "ManualBottles"]
 
-    // MARK: - Steam bottle (the shared prefix that hosts a logged-in Windows Steam client + its games)
+    // MARK: - Steam bottles (one shared prefix per backend, each hosting a Steam client + its games)
 
-    /// The single shared Wine prefix that runs the Windows Steam client and the games co-resident with it.
-    public var steamBottle: URL { bottlesRoot.appendingPathComponent("SteamBottle", isDirectory: true) }
+    /// A backend's shared Wine prefix — the Steam client + games co-resident under that backend's runtime.
+    /// GPTK and DXMT can't share a runtime/wineserver, so each backend gets its own bottle. GPTK (the
+    /// default) keeps the historical `SteamBottle` directory so the existing prefix needs no migration; a
+    /// secondary backend gets a suffixed sibling (`SteamBottle-DXMT`).
+    public func steamBottle(_ backend: GraphicsBackend) -> URL {
+        let name = backend == .gptk ? "SteamBottle" : "SteamBottle-\(backend.badge)"
+        return bottlesRoot.appendingPathComponent(name, isDirectory: true)
+    }
+
+    /// The Windows Steam install inside a backend's bottle (`drive_c/Program Files (x86)/Steam`).
+    public func steamBottleClientDir(_ backend: GraphicsBackend) -> URL {
+        steamBottle(backend)
+            .appendingPathComponent("drive_c", isDirectory: true)
+            .appendingPathComponent("Program Files (x86)", isDirectory: true)
+            .appendingPathComponent("Steam", isDirectory: true)
+    }
+
+    /// `steam.exe` inside a backend's bottle.
+    public func steamBottleExe(_ backend: GraphicsBackend) -> URL {
+        steamBottleClientDir(backend).appendingPathComponent("steam.exe")
+    }
+
+    /// The directory holding Steam's CEF binaries inside a backend's bottle. The leaf name varies by Steam
+    /// version (currently `cef.win7x64`), so callers that need the exact `steamwebhelper.exe` glob this
+    /// dir's children rather than assume the leaf — see `SteamBottle.webHelpers()`.
+    public func steamBottleCEFDir(_ backend: GraphicsBackend) -> URL {
+        steamBottleClientDir(backend).appendingPathComponent("bin/cef")
+    }
+
+    /// A backend's Steam log (`steam-bottle.log` for GPTK, `steam-bottle-dxmt.log` for DXMT).
+    public func steamBottleLog(_ backend: GraphicsBackend) -> URL {
+        let name = backend == .gptk ? "steam-bottle.log" : "steam-bottle-\(backend.rawValue).log"
+        return logsDir.appendingPathComponent(name)
+    }
+
+    // Convenience aliases for the GPTK (default/primary) bottle — the common path, and back-compat for
+    // callers written before the dual-bottle split.
+    public var steamBottle: URL { steamBottle(.gptk) }
+    public var steamBottleClientDir: URL { steamBottleClientDir(.gptk) }
+    public var steamBottleExe: URL { steamBottleExe(.gptk) }
+    public var steamBottleCEFDir: URL { steamBottleCEFDir(.gptk) }
+    public var steamBottleLog: URL { steamBottleLog(.gptk) }
 
     /// Parent of the per-game isolated bottles used by manual (non-Steam) games.
     public var manualBottlesDir: URL { bottlesRoot.appendingPathComponent("ManualBottles", isDirectory: true) }
@@ -60,27 +102,6 @@ public struct AppPaths: Sendable, Hashable {
     public func manualBottle(_ id: UUID) -> URL {
         manualBottlesDir.appendingPathComponent(id.uuidString, isDirectory: true)
     }
-
-    /// The Windows Steam install inside the bottle (`drive_c/Program Files (x86)/Steam`).
-    public var steamBottleClientDir: URL {
-        steamBottle
-            .appendingPathComponent("drive_c", isDirectory: true)
-            .appendingPathComponent("Program Files (x86)", isDirectory: true)
-            .appendingPathComponent("Steam", isDirectory: true)
-    }
-
-    /// `steam.exe` inside the bottle.
-    public var steamBottleExe: URL { steamBottleClientDir.appendingPathComponent("steam.exe") }
-
-    /// The directory holding Steam's CEF binaries inside the bottle. The leaf name varies by Steam version
-    /// (currently `cef.win7x64`), so callers that need the exact `steamwebhelper.exe` glob this dir's
-    /// children rather than assume the leaf — see `SteamBottle.webHelpers()`.
-    public var steamBottleCEFDir: URL {
-        steamBottleClientDir.appendingPathComponent("bin/cef")
-    }
-
-    /// The bottle's Steam log.
-    public var steamBottleLog: URL { logsDir.appendingPathComponent("steam-bottle.log") }
 
     /// Per-game launch log file.
     public func log(forAppID appID: Int) -> URL {
