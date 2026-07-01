@@ -3,6 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🧹 Full-project cleanup IN PROGRESS (2026-07-01, plan: 3 tiers — robustness, dedupe, structure).**
+  Branch `dxmt-dual-bottle-backend` merged to `main` (ff); cleanup lands phase-by-phase on `main`, each
+  green. Done so far:
+  - **Phase 0:** `.dxmt-build/` + `.dxmt-build-fullrun.log` gitignored (670 MB build artifacts).
+  - **Phase 1:** `ConfigStore` recovery copy — every save refreshes `config.json.bak`; a
+    present-but-corrupt primary restores the last good save (and self-heals the primary) instead of
+    silently wiping all state. A *missing* primary still resets (deliberate). 274 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**

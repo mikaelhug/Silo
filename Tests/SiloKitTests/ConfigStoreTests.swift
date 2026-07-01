@@ -42,6 +42,76 @@ struct ConfigStoreTests {
         #expect(!state.backend.isWineConfigured)
     }
 
+    // MARK: - .bak recovery (a corrupt config.json must never wipe all state)
+
+    @Test("save refreshes a .bak recovery copy alongside the primary")
+    func saveWritesBackup() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/runtimes/gptk/bin/wine64")
+        try await store.saveBackend(backend)
+
+        let bak = paths.configFile.appendingPathExtension("bak")
+        let restored = try JSONDecoder().decode(AppState.self, from: Data(contentsOf: bak))
+        #expect(restored.backend.wineBinaryPath?.path == "/runtimes/gptk/bin/wine64")
+    }
+
+    @Test("load() restores the last good save from .bak when the primary is corrupt, and self-heals it")
+    func corruptPrimaryRestoresFromBackup() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        var backend = BackendConfig()
+        backend.wineBinaryPath = URL(fileURLWithPath: "/runtimes/gptk/bin/wine64")
+        try await store.saveBackend(backend)
+        try await store.saveGame(GameConfig(appID: 220))
+
+        try Data("{ torn write".utf8).write(to: paths.configFile)   // corrupt the primary only
+
+        let state = await store.load()
+        #expect(state.backend.wineBinaryPath?.path == "/runtimes/gptk/bin/wine64")
+        #expect(state.games.map(\.appID) == [220])
+
+        // The primary was healed from the backup: it decodes again on its own.
+        let healed = try JSONDecoder().decode(AppState.self, from: Data(contentsOf: paths.configFile))
+        #expect(healed.games.map(\.appID) == [220])
+    }
+
+    @Test("the .bak tracks the LATEST save (a restore never resurrects stale state)")
+    func backupTracksLatestSave() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        try await store.saveGame(GameConfig(appID: 10))
+        try await store.saveGame(GameConfig(appID: 20))
+
+        try Data("{bad".utf8).write(to: paths.configFile)
+
+        let state = await store.load()
+        #expect(state.games.map(\.appID).sorted() == [10, 20])
+    }
+
+    @Test("corrupt primary + corrupt .bak still degrades to a fresh default, not a crash")
+    func corruptPrimaryAndBackupDefaults() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        try FileManager.default.createDirectory(at: paths.supportDir, withIntermediateDirectories: true)
+        try Data("{bad".utf8).write(to: paths.configFile)
+        try Data("also bad".utf8).write(to: paths.configFile.appendingPathExtension("bak"))
+        let state = await store.load()
+        #expect(state.games.isEmpty)
+        #expect(!state.backend.isWineConfigured)
+    }
+
+    @Test("a MISSING primary stays a fresh default even when a .bak exists (deleting config.json = reset)")
+    func missingPrimaryIgnoresBackup() async throws {
+        let (store, paths, tmp) = try makeStore()
+        defer { tmp.cleanup() }
+        try await store.saveGame(GameConfig(appID: 220))          // writes primary + bak
+        try FileManager.default.removeItem(at: paths.configFile)  // user resets by deleting
+        let state = await store.load()
+        #expect(state.games.isEmpty)                              // NOT restored from bak
+    }
+
     @Test("a corrupt config.json is recoverable by the next save")
     func corruptFileRecoverable() async throws {
         let (store, paths, tmp) = try makeStore()
