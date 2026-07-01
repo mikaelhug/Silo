@@ -10,22 +10,36 @@ public actor ConfigStore {
         self.fileManager = fileManager
     }
 
+    /// The recovery copy written on every save; `load()` falls back to it when the primary is corrupt.
+    private var backupFile: URL { paths.configFile.appendingPathExtension("bak") }
+
     /// Load the stored state, or a fresh default if nothing is saved / the file is unreadable.
+    /// A present-but-undecodable `config.json` (torn write, disk corruption) restores the `.bak` from the
+    /// last good save — instead of silently wiping every game/backend setting — and self-heals the primary.
+    /// A *missing* primary still loads a fresh default: deleting `config.json` stays a deliberate reset.
     public func load() -> AppState {
-        guard let data = try? Data(contentsOf: paths.configFile),
-              let state = try? JSONDecoder().decode(AppState.self, from: data) else {
+        if let data = try? Data(contentsOf: paths.configFile),
+           let state = try? JSONDecoder().decode(AppState.self, from: data) {
+            return state
+        }
+        guard fileManager.fileExists(atPath: paths.configFile.path),
+              let backup = try? Data(contentsOf: backupFile),
+              let restored = try? JSONDecoder().decode(AppState.self, from: backup) else {
             return AppState()
         }
-        return state
+        try? backup.write(to: paths.configFile, options: .atomic)   // self-heal, best-effort
+        return restored
     }
 
-    /// Write the whole state document atomically.
+    /// Write the whole state document atomically, then refresh the `.bak` recovery copy.
     public func save(_ state: AppState) throws {
         try fileManager.createDirectory(at: paths.supportDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(state)
         try data.write(to: paths.configFile, options: .atomic)
+        // Best-effort: a failed backup must not fail the save that just succeeded.
+        try? data.write(to: backupFile, options: .atomic)
     }
 
     /// Update only the backend config, preserving game configs.
