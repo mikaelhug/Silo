@@ -23,7 +23,7 @@ struct GameSettingsSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        if let vm { Task { await vm.save(); dismiss() } }
+                        if let vm { Task { if await vm.save() { dismiss() } } }
                     }
                 }
             }
@@ -39,6 +39,9 @@ struct GameSettingsSheet: View {
     private func form(_ model: GameSettingsViewModel) -> some View {
         @Bindable var vm = model
         Form {
+            if let message = vm.errorMessage {
+                Section { Text(message).foregroundStyle(.red) }
+            }
             Section {
                 Picker("Sync", selection: $vm.config.envFlags.syncMode) {
                     ForEach(SyncMode.allCases) { Text($0.displayName).tag($0) }

@@ -80,6 +80,89 @@ struct GameLibraryViewModelTests {
         #expect(vm.games.first { $0.appID == 400 }?.backend == .dxmt)
     }
 
+    @Test("an unreadable bottle library surfaces a status while the other bottle's games still load")
+    func unreadableBottleSurfacesStatus() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+
+        // GPTK bottle: Steam installed but its steamapps can't be listed (permissions).
+        try installSteam(paths)
+        let gptkSteamapps = paths.steamBottleClientDir.appendingPathComponent("steamapps")
+        try FileManager.default.createDirectory(at: gptkSteamapps, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: gptkSteamapps.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gptkSteamapps.path)
+        }
+
+        // DXMT bottle: healthy, with one game.
+        let client = paths.steamBottleClientDir(.dxmt)
+        try FileManager.default.createDirectory(
+            at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamBottleExe(.dxmt).path, contents: Data())
+        try #""AppState" { "appid" "400" "name" "Old" "StateFlags" "4" "installdir" "Old" "LastOwner" "1" "SizeOnDisk" "1" }"#
+            .write(to: client.appendingPathComponent("steamapps/appmanifest_400.acf"),
+                   atomically: true, encoding: .utf8)
+
+        await vm.load()
+        #expect(vm.loadState == .loaded)                    // one bad bottle never hides the other's games
+        #expect(vm.games.map(\.appID) == [400])
+        #expect(vm.statusMessage?.contains("Steam library") == true)
+    }
+
+    @Test("load → .error when the ONLY bottle's library is unreadable and there's nothing else to show")
+    func unreadableOnlyBottleIsLoadError() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        try installSteam(paths)
+        let steamapps = paths.steamBottleClientDir.appendingPathComponent("steamapps")
+        try FileManager.default.createDirectory(at: steamapps, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: steamapps.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: steamapps.path)
+        }
+        await vm.load()
+        guard case .error(let message) = vm.loadState else {
+            Issue.record("expected .error, got \(vm.loadState)")
+            return
+        }
+        #expect(message.contains("isn't readable"))
+    }
+
+    @Test("removeManual surfaces a bottle-deletion failure instead of silently leaking the dir")
+    func removeManualSurfacesDeleteFailure() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        let game = ManualGame(id: UUID(), name: "G", executablePath: URL(fileURLWithPath: "/g/g.exe"))
+        let bottle = paths.manualBottle(game.id)
+        try FileManager.default.createDirectory(at: bottle, withIntermediateDirectories: true)
+        let parent = bottle.deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: parent.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: parent.path)
+        }
+        await vm.removeManual(game)
+        #expect(vm.statusMessage?.contains("remove it in Finder") == true)
+        #expect(!vm.manualGames.contains { $0.id == game.id })   // still removed from the library
+    }
+
+    @Test("resolveMessage maps every launch-stack error to actionable text")
+    func resolveMessageTable() {
+        let cases: [(Error, String)] = [
+            (BottleResolver.ResolveError.backendNotConfigured(.dxmt), "isn't installed"),
+            (BottleResolver.ResolveError.wineNotConfigured, "No Wine configured."),
+            (LaunchOrchestrator.LaunchError.wineNotConfigured, "No Wine configured."),
+            (WinePrefixProvisioner.ProvisionError.wineNotConfigured, "No Wine configured."),
+            (LaunchOrchestrator.LaunchError.executableNotFound(URL(fileURLWithPath: "/g/Game")), "/g/Game"),
+            (WinePrefixProvisioner.ProvisionError.winebootFailed(1), "wineboot exited 1"),
+            (RuntimeVariants.VariantError.cloneFailed(URL(fileURLWithPath: "/rt-dxmt"), 28), "disk space"),
+            (GraphicsLinker.LinkError.sourceMissing(URL(fileURLWithPath: "/dxmt/lib")), "re-download"),
+        ]
+        for (error, expected) in cases {
+            #expect(GameLibraryViewModel.resolveMessage(error).contains(expected),
+                    "\(error) → \(GameLibraryViewModel.resolveMessage(error))")
+        }
+    }
+
     @Test("a DXMT Steam game launches in the DXMT bottle on the DXMT runtime (co-resident DXMT client)")
     func dxmtSteamGameRoutesToDXMTBottle() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

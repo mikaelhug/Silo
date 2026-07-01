@@ -140,22 +140,44 @@ public final class GameLibraryViewModel {
         // existing (notReady drives the onboarding until Steam is set up).
         guard steamReady else { loadState = .notReady; return }
         var seen = Set<Int>()   // dedup by appID (first wins) in case a title is installed in both bottles
-        let discovered = await discoverAllBottles().filter { seen.insert($0.appID).inserted }
-        games = discovered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let (discovered, failures) = await discoverAllBottles()
+        games = discovered.filter { seen.insert($0.appID).inserted }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        if !failures.isEmpty {
+            // A bottle's library couldn't be READ (permissions/IO — not the benign no-library-yet case).
+            // With nothing else to show that's the load's error state; if the other bottle still produced
+            // games, keep the library up and surface the failure as a status instead.
+            guard !games.isEmpty || !manualGames.isEmpty else {
+                loadState = .error(failures.joined(separator: "\n"))
+                return
+            }
+            setStatus(failures.joined(separator: "\n"))
+        }
         loadState = (games.isEmpty && manualGames.isEmpty) ? .empty : .loaded
     }
 
     /// Discover games across every installed Steam bottle, tagging each with its bottle's backend. A bottle
-    /// whose library dir doesn't exist yet (or fails to parse) contributes nothing rather than failing the
-    /// whole load — one bad bottle never hides the other's games.
-    private func discoverAllBottles() async -> [SteamApp] {
+    /// whose library dir doesn't exist yet contributes nothing (benign — a fresh Steam install has no
+    /// library), and one whose library can't be READ contributes a failure message instead of silently
+    /// hiding its games — either way one bad bottle never hides the other's games.
+    private func discoverAllBottles() async -> (apps: [SteamApp], failures: [String]) {
         var all: [SteamApp] = []
+        var failures: [String] = []
         for graphics in GraphicsBackend.allCases where steamInstalled(graphics) {
-            let apps = (try? await discovery.discoverGames(
-                steamRoot: paths.steamBottleClientDir(graphics))) ?? []
-            all += apps.map { var app = $0; app.backend = graphics; return app }
+            do {
+                let apps = try await discovery.discoverGames(steamRoot: paths.steamBottleClientDir(graphics))
+                all += apps.map { var app = $0; app.backend = graphics; return app }
+            } catch DiscoveryEngine.DiscoveryError.steamDirNotFound {
+                // Steam is installed but hasn't created its library yet — drives onboarding, not alarms.
+            } catch DiscoveryEngine.DiscoveryError.libraryUnreadable(let url) {
+                failures.append("Couldn't read the \(graphics.displayName) Steam library — "
+                    + "\(url.path) isn't readable.")
+            } catch {
+                failures.append("Couldn't read the \(graphics.displayName) Steam library: "
+                    + (error as NSError).localizedDescription)
+            }
         }
-        return all
+        return (all, failures)
     }
 
     private func sortedManual(_ list: [ManualGame]) -> [ManualGame] {
@@ -208,10 +230,16 @@ public final class GameLibraryViewModel {
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: launchBackend, graphics: game.backend,
                 prefix: context.prefix, logURL: paths.log(forAppID: game.appID))
-            _ = try? await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
             runningPIDs[game.appID] = pid
             observeRun(appID: game.appID, pid: pid)
-            setStatus("Launched \(game.name).")
+            do {
+                _ = try await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
+                setStatus("Launched \(game.name).")
+            } catch {
+                // The game IS running, but config.json is unwritable — say so (settings won't stick either).
+                setStatus("Launched \(game.name), but couldn't save its play date: "
+                    + (error as NSError).localizedDescription)
+            }
             // Last, so a detected fallback (which usually arrives a beat later as the log is written, but
             // may already be present) overrides the "Launched" status rather than being clobbered by it.
             watchGraphics(appID: game.appID, log: paths.log(forAppID: game.appID),
@@ -256,14 +284,16 @@ public final class GameLibraryViewModel {
             try await provisioner.provision(prefix: paths.manualBottle(id), wine: wine)
             return true
         } catch {
-            setStatus("Couldn't set up the game's bottle: \((error as NSError).localizedDescription)")
+            setStatus("Couldn't set up the game's bottle: \(Self.resolveMessage(error))")
             return false
         }
     }
 
     /// Delete a draft bottle that was provisioned but never added to the library (Add sheet cancel).
     public func discardManualBottle(_ id: UUID) async {
-        await deleteBottle(id)
+        if await !deleteBottle(id) {
+            setStatus("Couldn't delete the draft bottle — remove it in Finder: \(paths.manualBottle(id).path)")
+        }
     }
 
     /// Run an installer `.exe` in a specific game's bottle (detached) so it installs into THAT bottle's
@@ -274,7 +304,7 @@ public final class GameLibraryViewModel {
             _ = try await orchestrator.runInstaller(
                 exe: installer, backend: backend, prefix: paths.manualBottle(id), logURL: paths.manualLog(id))
             setStatus("Running installer… finish it, then choose the installed .exe.")
-        } catch { setStatus("Installer failed: \((error as NSError).localizedDescription)") }
+        } catch { setStatus("Installer failed: \(Self.resolveMessage(error))") }
     }
 
     /// Add a non-Steam game pointing at an absolute `.exe`, provisioning its private bottle. Pass the same
@@ -314,9 +344,11 @@ public final class GameLibraryViewModel {
         guard manualRunningPIDs[game.id] == nil else { return }
         _ = try? await configStore.removeManualGame(id: game.id)
         manualGames.removeAll { $0.id == game.id }
-        await deleteBottle(game.id)
+        let deleted = await deleteBottle(game.id)
         if games.isEmpty && manualGames.isEmpty { loadState = .empty }
-        setStatus("Removed \(game.name).")
+        setStatus(deleted ? "Removed \(game.name)."
+            : "Removed \(game.name), but couldn't delete its bottle — remove it in Finder: "
+              + paths.manualBottle(game.id).path)
     }
 
     /// Launch a manual game in its OWN bottle under its chosen backend (GPTK or DXMT; no Steam needed).
@@ -344,25 +376,42 @@ public final class GameLibraryViewModel {
             let pid = try await orchestrator.launchManualGame(
                 game, backend: launchBackend, graphics: context.graphics,
                 prefix: context.prefix, logURL: paths.manualLog(game.id))
-            _ = try? await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
             manualRunningPIDs[game.id] = pid
             observeManualRun(id: game.id, pid: pid)
-            setStatus("Launched \(game.name).")
+            do {
+                _ = try await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
+                setStatus("Launched \(game.name).")
+            } catch {
+                // The game IS running, but config.json is unwritable — say so (settings won't stick either).
+                setStatus("Launched \(game.name), but couldn't save its play date: "
+                    + (error as NSError).localizedDescription)
+            }
             watchManualGraphics(id: game.id, log: paths.manualLog(game.id),
                                 name: game.name, backend: game.backend)   // last (see play)
         } catch {
-            setStatus("\(game.name): \((error as NSError).localizedDescription)")
+            setStatus("\(game.name): \(Self.resolveMessage(error))")
         }
     }
 
-    /// Human-readable text for a `BottleResolver.ResolveError` (a missing secondary runtime is the common
-    /// case a user can act on).
-    private static func resolveMessage(_ error: Error) -> String {
+    /// Human-readable, actionable text for the errors the launch/provision paths throw. (Steam-client
+    /// startup failures don't reach here — `SteamClientSession.launchError` surfaces those.) Falls back
+    /// to the system description for anything unmapped.
+    static func resolveMessage(_ error: Error) -> String {
         switch error {
         case BottleResolver.ResolveError.backendNotConfigured(let graphics):
             "\(graphics.displayName) runtime isn't installed — set it up in Settings first."
-        case BottleResolver.ResolveError.wineNotConfigured:
+        case BottleResolver.ResolveError.wineNotConfigured,
+             LaunchOrchestrator.LaunchError.wineNotConfigured,
+             WinePrefixProvisioner.ProvisionError.wineNotConfigured:
             "No Wine configured."
+        case LaunchOrchestrator.LaunchError.executableNotFound(let url):
+            "couldn't find the game's .exe (looked in \(url.path)) — pick one in the game's settings."
+        case WinePrefixProvisioner.ProvisionError.winebootFailed(let code):
+            "the game's bottle failed to initialize (wineboot exited \(code)) — check Wine in Settings."
+        case RuntimeVariants.VariantError.cloneFailed(let url, let errno):
+            "couldn't prepare the DXMT runtime copy at \(url.path) (errno \(errno)) — check free disk space."
+        case GraphicsLinker.LinkError.sourceMissing(let url):
+            "the graphics runtime's modules are missing (\(url.path)) — re-download it in Settings."
         default:
             (error as NSError).localizedDescription
         }
@@ -384,10 +433,18 @@ public final class GameLibraryViewModel {
         await orchestrator.runWineTool("winecfg", prefix: paths.manualBottle(game.id), backend: backend)
     }
 
-    /// Remove a manual game's bottle directory off the main actor (it can be large once a game is installed).
-    private func deleteBottle(_ id: UUID) async {
+    /// Remove a manual game's bottle directory off the main actor (it can be large once a game is
+    /// installed). Returns whether the bottle is gone — an already-absent dir counts as success (the Add
+    /// sheet can cancel before its draft bottle ever provisioned).
+    private func deleteBottle(_ id: UUID) async -> Bool {
         let url = paths.manualBottle(id)
-        await Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: url) }.value
+        return await Task.detached(priority: .utility) {
+            do { try FileManager.default.removeItem(at: url) } catch {
+                let nsError = error as NSError
+                return nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileNoSuchFileError
+            }
+            return true
+        }.value
     }
 
     private func observeManualRun(id: UUID, pid: Int32) {

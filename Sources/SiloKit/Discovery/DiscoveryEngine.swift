@@ -4,7 +4,8 @@ import Foundation
 ///
 /// Reads the primary `steamapps` directory plus any additional libraries listed in
 /// `libraryfolders.vdf`, parses every `appmanifest_*.acf`, and returns the games sorted by name.
-/// Unparseable manifests and missing extra libraries are skipped rather than failing the whole scan.
+/// Unparseable manifests and missing extra libraries are skipped rather than failing the whole scan;
+/// an *unreadable* primary library (permissions/IO) throws `libraryUnreadable` so the UI can say so.
 public actor DiscoveryEngine {
     private let fileManager: FileManager
     private let manifestDecoder = AppManifestDecoder()
@@ -16,6 +17,9 @@ public actor DiscoveryEngine {
 
     public enum DiscoveryError: Error, Sendable, Equatable {
         case steamDirNotFound(URL)
+        /// The primary library exists but couldn't be listed (permissions/IO) — a real failure the UI
+        /// should surface, unlike `steamDirNotFound` (a fresh bottle that has no library yet).
+        case libraryUnreadable(URL)
     }
 
     /// Discover all games reachable from `steamRoot` (the primary Steam install directory).
@@ -29,10 +33,10 @@ public actor DiscoveryEngine {
 
         var apps: [SteamApp] = []
         var seen = Set<Int>()
-        for root in libraryRoots {
+        for (index, root) in libraryRoots.enumerated() {
             // Skip shared system packages (Steamworks Common Redistributables, runtimes, tools): Steam
             // installs them with `LastOwner == 0`, so they aren't games — see `SteamApp.isSharedSystemApp`.
-            for app in scanLibrary(root: root)
+            for app in try scanLibrary(root: root, required: index == 0)
             where !app.isSharedSystemApp && seen.insert(app.appID).inserted {
                 apps.append(app)
             }
@@ -63,11 +67,17 @@ public actor DiscoveryEngine {
         return roots
     }
 
-    private func scanLibrary(root: URL) -> [SteamApp] {
+    /// `required` marks the primary library: a listing failure there throws `libraryUnreadable` (the UI
+    /// surfaces it); extra libraries from `libraryfolders.vdf` keep the documented skip-on-missing behavior.
+    private func scanLibrary(root: URL, required: Bool) throws -> [SteamApp] {
         let steamapps = root.appendingPathComponent("steamapps", isDirectory: true)
-        guard let entries = try? fileManager.contentsOfDirectory(
-            at: steamapps, includingPropertiesForKeys: nil
-        ) else { return [] }
+        let entries: [URL]
+        do {
+            entries = try fileManager.contentsOfDirectory(at: steamapps, includingPropertiesForKeys: nil)
+        } catch {
+            if required { throw DiscoveryError.libraryUnreadable(steamapps) }
+            return []
+        }
 
         var apps: [SteamApp] = []
         for entry in entries
