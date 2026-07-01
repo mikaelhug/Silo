@@ -426,6 +426,36 @@ public final class GameLibraryViewModel {
         clearManualRun(game.id)
     }
 
+    /// Generate a Game-Mode-tagged `.app` in `directory` (default: the Desktop) that launches the game
+    /// directly under ITS backend — startable from Spotlight/Dock without Silo. Routes through
+    /// `BottleResolver` exactly like `playManual`, so the snapshotted env carries the game's variant
+    /// runtime + dll overrides (a DXMT game's shortcut launches on the DXMT runtime, never the base).
+    /// Returns the bundle URL, or nil with the failure surfaced in the status bar. Manual games only —
+    /// they don't need the co-resident Steam client.
+    @discardableResult
+    public func makeShortcut(for game: ManualGame, into directory: URL? = nil) async -> URL? {
+        guard let dir = directory
+            ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first else { return nil }
+        let cfg = backend
+        do {
+            let context = try await Task.detached { [paths] in
+                try BottleResolver(paths: paths).manual(game, config: cfg)
+            }.value
+            var launchBackend = cfg
+            launchBackend.wineBinaryPath = context.wineBinary
+            let plan = try LaunchOrchestrator.makePlan(
+                config: GameConfig(appID: 0, envFlags: game.envFlags, presence: .none, customArgs: game.customArgs),
+                backend: launchBackend, graphics: context.graphics, gameExe: game.executablePath,
+                prefix: context.prefix, logURL: paths.manualLog(game.id))
+            let app = try GameAppShortcut(name: game.name, plan: plan).write(into: dir)
+            setStatus("Created a shortcut for \(game.name).")
+            return app
+        } catch {
+            setStatus("Couldn't create the shortcut: \(Self.resolveMessage(error))")
+            return nil
+        }
+    }
+
     /// Open `winecfg` for a manual game's OWN bottle (Windows version, libraries — isolated per game).
     public func openManualWinecfg(_ game: ManualGame) async {
         guard backend.isWineConfigured else { setStatus("No Wine configured."); return }

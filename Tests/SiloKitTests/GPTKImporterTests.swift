@@ -67,6 +67,23 @@ struct GPTKImporterTests {
         #expect(importer.installed().map(\.name) == ["GPTK-4.0"])
     }
 
+    @Test("a failed de-quarantine fires onWarning naming the install (import still succeeds)")
+    func importWarnsOnHardeningFailure() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let eval = try makeEvalMount(tmp, named: "flatMount")   // flat layout: single attach
+        let fake = FakeProcessRunner()
+        fake.queueResult(attachPlist(mountPoint: eval.path))    // attach ok
+        fake.queueResult(ProcessResult(exitCode: 1))            // xattr fails (no codesign; reSign: false)
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let warning = LockedBox<String?>(nil)
+        let result = try await GPTKImporter(runner: fake, paths: paths).importGPTK(
+            fromDMG: tmp.url.appendingPathComponent("GPTK.dmg"), name: "GPTK-warn",
+            onWarning: { warning.set($0) })
+        #expect(result.name == "GPTK-warn")   // non-fatal: the import completed
+        let message = try #require(warning.value)
+        #expect(message.contains("quarantine") && message.contains("GPTK-warn"))
+    }
+
     @Test("Imports from a nested-DMG layout (GPTK 4.x) and extracts redist/lib")
     func nestedImport() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

@@ -48,6 +48,24 @@ struct RuntimeManagerTests {
         #expect(await manager.installedWines().isEmpty)
     }
 
+    @Test("install remembers a hardening failure (lastHardeningIssue) and clears it on a clean install")
+    func installSurfacesHardeningIssue() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        FakeURLProtocol.stub("https://e.com/wine-q.tar.xz", data: Data("ARCHIVE".utf8))
+        FakeURLProtocol.stub("https://e.com/wine-ok.tar.xz", data: Data("ARCHIVE".utf8))
+        let fake = FakeProcessRunner()
+        let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())
+
+        fake.queueResult(ProcessResult(exitCode: 0))   // tar
+        fake.queueResult(ProcessResult(exitCode: 1))   // xattr → quarantine NOT cleared
+        try await manager.install(name: "Wine-Q", from: URL(string: "https://e.com/wine-q.tar.xz")!)
+        let issue = try #require(await manager.lastHardeningIssue)
+        #expect(issue.contains("quarantine") && issue.contains("Wine-Q"))
+
+        try await manager.install(name: "Wine-OK", from: URL(string: "https://e.com/wine-ok.tar.xz")!)
+        #expect(await manager.lastHardeningIssue == nil)   // clean pass resets the warning
+    }
+
     @Test("stripBundledSDL removes the crashy libSDL2 dylibs from a runtime")
     func stripsSDL() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

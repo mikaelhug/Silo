@@ -63,7 +63,11 @@ public final class RuntimeViewModel {
             if defaultName == nil, let new = installed.first(where: { $0.name == release.tagName }) {
                 setDefault(new)
             }
-            statusMessage = "Installed \(release.version)."
+            // A failed de-quarantine/re-sign means Gatekeeper may block this runtime — warn now, at
+            // install time, instead of leaving the eventual launch failure unexplained.
+            let warning = await manager.lastHardeningIssue
+            statusMessage = warning.map { "Installed \(release.version) — ⚠️ \($0)" }
+                ?? "Installed \(release.version)."
         } catch {
             statusMessage = "Install failed: \((error as NSError).localizedDescription)"
         }
