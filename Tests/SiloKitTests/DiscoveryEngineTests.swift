@@ -53,6 +53,20 @@ struct DiscoveryEngineTests {
         #expect(apps.map(\.appID) == [220])
     }
 
+    @Test("Throws libraryUnreadable when the primary steamapps exists but can't be listed")
+    func unreadablePrimaryLibrary() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let steamRoot = try makeSteamRoot(tmp, named: "Steam", manifests: ["appmanifest_220.acf"])
+        let steamapps = steamRoot.appendingPathComponent("steamapps")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: steamapps.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: steamapps.path)
+        }
+        await #expect(throws: DiscoveryEngine.DiscoveryError.libraryUnreadable(steamapps)) {
+            try await DiscoveryEngine().discoverGames(steamRoot: steamRoot)
+        }
+    }
+
     @Test("Throws when the steamapps directory is missing")
     func missingSteamapps() async throws {
         let tmp = try TempDir()

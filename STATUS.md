@@ -9,7 +9,15 @@
   - **Phase 0:** `.dxmt-build/` + `.dxmt-build-fullrun.log` gitignored (670 MB build artifacts).
   - **Phase 1:** `ConfigStore` recovery copy — every save refreshes `config.json.bak`; a
     present-but-corrupt primary restores the last good save (and self-heals the primary) instead of
-    silently wiping all state. A *missing* primary still resets (deliberate). 274 tests green.
+    silently wiping all state. A *missing* primary still resets (deliberate).
+  - **Phase 2:** swallowed errors surfaced. `DiscoveryEngine` distinguishes an *unreadable* primary
+    library (`libraryUnreadable`, thrown) from the benign no-library-yet (`steamDirNotFound`, silently
+    skipped); the library shows a per-bottle failure status (or `.error` when nothing else can show —
+    LibraryGridView's error case is now reachable). `GameSettingsViewModel.save() -> Bool` +
+    `errorMessage` (sheet only dismisses on success). A failed `lastPlayed` write after launch says the
+    config is unwritable. `deleteBottle` failures say "remove it in Finder: <path>". `resolveMessage`
+    maps the whole launch stack (exe-not-found / wineboot / DXMT-clone / linker-source-missing) to
+    actionable text and all catch-sites route through it. 282 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**

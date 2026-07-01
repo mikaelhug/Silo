@@ -21,6 +21,29 @@ struct ViewModelTests {
         #expect(await ConfigStore(paths: paths).load().backend.wineBinaryPath?.path == "/w/wine64")
     }
 
+    @Test("GameSettings save reports success and clears any earlier error")
+    func gameSettingsSaveSucceeds() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let vm = GameSettingsViewModel(config: GameConfig(appID: 220), configStore: ConfigStore(paths: paths))
+        vm.config.customArgs = ["-novid"]
+        #expect(await vm.save())
+        #expect(vm.errorMessage == nil)
+        #expect(await ConfigStore(paths: paths).load().config(for: 220).customArgs == ["-novid"])
+    }
+
+    @Test("GameSettings save failure returns false + surfaces errorMessage (sheet must NOT dismiss)")
+    func gameSettingsSaveFails() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // A FILE where the support DIR must go → ConfigStore.save's createDirectory throws.
+        let supportDir = tmp.url.appendingPathComponent("Silo")
+        FileManager.default.createFile(atPath: supportDir.path, contents: Data())
+        let paths = AppPaths(supportDir: supportDir)
+        let vm = GameSettingsViewModel(config: GameConfig(appID: 220), configStore: ConfigStore(paths: paths))
+        #expect(await vm.save() == false)
+        #expect(vm.errorMessage?.contains("Couldn't save") == true)
+    }
+
     @Test("RuntimeViewModel lists installed Wine builds")
     func runtimeVM() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
