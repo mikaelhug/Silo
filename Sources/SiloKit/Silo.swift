@@ -59,6 +59,25 @@ public enum Silo {
             "DYLD_FALLBACK_LIBRARY_PATH": wine.siloDyldFallback,
         ]
     }
+
+    /// Enforce the co-residency sync rule on a wine environment: `WINEMSYNC=1`, any `WINEESYNC` removed.
+    /// Wine starts a SEPARATE wineserver per (prefix, sync-mode), and everything Silo runs in a bottle —
+    /// the Steam client, the games co-resident with it, `taskkill`, registry edits, maintenance tools —
+    /// must attach to the SAME wineserver: a mismatched sync mode silently forks a second server, which
+    /// breaks Steamworks IPC (games) or aims a tool at the wrong server. This is the ONE place the rule
+    /// lives; every bottle-sharing launch path applies it.
+    public static func enforceMsync(_ env: inout [String: String]) {
+        env["WINEMSYNC"] = "1"
+        env["WINEESYNC"] = nil
+    }
+
+    /// `wineEnvironment` + `enforceMsync` — the base env for anything Silo runs inside a bottle that must
+    /// share that bottle's wineserver.
+    public static func msyncWineEnvironment(prefix: URL, wine: URL) -> [String: String] {
+        var env = wineEnvironment(prefix: prefix, wine: wine)
+        enforceMsync(&env)
+        return env
+    }
 }
 
 extension URL {

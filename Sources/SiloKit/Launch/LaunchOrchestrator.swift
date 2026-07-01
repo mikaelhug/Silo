@@ -48,13 +48,11 @@ public struct LaunchOrchestrator: Sendable {
             environment[key] = value
         }
         environment["WINEPREFIX"] = prefix.path
-        // The game shares ONE wineserver with the co-resident Steam client — and Wine starts a SEPARATE
-        // wineserver per (prefix, sync-mode). Steam runs with msync (SteamBottle.steamEnvironment), so force
-        // the game to msync too: an esync/none per-game override would split the wineserver and silently
-        // break Steamworks IPC (the exact failure the shared bottle exists to avoid). This deliberately
-        // overrides whatever EnvFlags.syncMode (and any WINEMSYNC/WINEESYNC in envFlags.extra) produced.
-        environment["WINEMSYNC"] = "1"
-        environment["WINEESYNC"] = nil
+        // The game shares ONE wineserver with the co-resident Steam client (see `Silo.enforceMsync`).
+        // This deliberately overrides whatever EnvFlags.syncMode (and any WINEMSYNC/WINEESYNC in
+        // envFlags.extra) produced — an esync/none per-game override would split the wineserver and
+        // silently break Steamworks IPC, the exact failure the shared bottle exists to avoid.
+        Silo.enforceMsync(&environment)
 
         // The active backend's translated d3d modules are overlaid into the wine runtime's own lib/wine
         // tree (GraphicsLinker.overlayGPTK / overlayDXMT), so wine loads them directly — no WINEDLLPATH.
@@ -176,11 +174,9 @@ public struct LaunchOrchestrator: Sendable {
     public func stopGame(pid: Int32, exeName: String?, prefix: URL, backend: BackendConfig) async {
         runner.terminate(pid: pid)
         guard let exeName, let wine = backend.wineBinaryPath else { return }
-        var env = Silo.wineEnvironment(prefix: prefix, wine: wine)
-        env["WINEMSYNC"] = "1"
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: ["taskkill", "/F", "/IM", exeName],
-            environment: env, currentDirectory: nil,
+            environment: Silo.msyncWineEnvironment(prefix: prefix, wine: wine), currentDirectory: nil,
             logURL: prefix.appendingPathComponent("winetool.log"))
     }
 
@@ -194,16 +190,13 @@ public struct LaunchOrchestrator: Sendable {
         runner.observeExit(pid: pid, onExit: onExit)
     }
 
-    /// Run a built-in wine tool (e.g. `winecfg`) against `prefix`, detached.
+    /// Run a built-in wine tool (e.g. `winecfg`) against `prefix`, detached. Msync env so the tool shares
+    /// the bottle's wineserver instead of forking a second one on the same prefix.
     public func runWineTool(_ tool: String, prefix: URL, backend: BackendConfig) async {
         guard let wine = backend.wineBinaryPath else { return }
-        // WINEMSYNC=1 so the tool shares the bottle's wineserver instead of forking a second one on the
-        // same prefix (the co-residency rule the launch + stop paths follow).
-        var env = Silo.wineEnvironment(prefix: prefix, wine: wine)
-        env["WINEMSYNC"] = "1"
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: [tool],
-            environment: env, currentDirectory: nil,
+            environment: Silo.msyncWineEnvironment(prefix: prefix, wine: wine), currentDirectory: nil,
             logURL: prefix.appendingPathComponent("winetool.log"))
     }
 
