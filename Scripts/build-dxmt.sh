@@ -120,16 +120,21 @@ EOF
 # -Dnative_llvm_path — so keep them AFTER the system dirs on PATH (system clang/ld/ar win for bare names).
 export PATH="$PATH:$SRC/toolchains/$MINGW_DIR/bin:$LLVM15/bin"
 rm -rf build install
+# -Dwine_builtin_dll=true: install d3d10core/d3d11/dxgi AND winemetal all into x86_64-windows as BUILTIN
+# (v0.72 defaults false, which drops the d3d dlls in system32 as native). Silo overlays them into the
+# runtime's lib/wine as builtin (GraphicsLinker.overlayDXMT) + forces `…=b`, so this is the layout it needs.
 $ARCH meson setup \
   --cross-file build-win64.txt --native-file silo-osx.txt \
   -Dnative_llvm_path="$LLVM15" \
   -Dwine_install_path="$WINE_INSTALL" \
+  -Dwine_builtin_dll=true \
   build --buildtype release --prefix "$SRC/install" --strip
 $ARCH meson compile -C build
 $ARCH meson install -C build
 
 echo "==> Verify the artifacts Silo overlays (GraphicsLinker.overlayDXMT)"
-WINDIR="install/lib/wine/x86_64-windows"; UNIXDIR="install/lib/wine/x86_64-unix"
+# wine_builtin_dll=true → all dlls in x86_64-windows (builtin) + winemetal.so in the x86_64-unix sibling.
+WINDIR="install/x86_64-windows"; UNIXDIR="install/x86_64-unix"
 missing=""
 for f in "$WINDIR/d3d11.dll" "$WINDIR/dxgi.dll" "$WINDIR/d3d10core.dll" "$WINDIR/winemetal.dll" \
          "$UNIXDIR/winemetal.so"; do
@@ -143,11 +148,12 @@ file "$UNIXDIR/winemetal.so" | grep -q "x86_64" \
 
 echo "==> Package"
 mkdir -p "$ROOT/dist"
-# Ship lib/ only (the importable tree); drop build-time import libs (*.a) — Silo overlays only .dll/.so.
-( cd install && tar -cJf "$ROOT/dist/dxmt.tar.xz" --exclude='*.a' lib )
+# Ship the x86_64-windows + x86_64-unix dirs as siblings (overlayDXMT reads winemetal.so from the unix
+# sibling of the imported x86_64-windows folder); drop build-time import libs (*.a) — Silo overlays .dll/.so.
+( cd install && tar -cJf "$ROOT/dist/dxmt.tar.xz" --exclude='*.a' x86_64-windows x86_64-unix )
 ( cd "$ROOT/dist" && shasum -a 256 dxmt.tar.xz > dxmt.tar.xz.sha256 )
 echo "Built: $ROOT/dist/dxmt.tar.xz (+ .sha256)"
-echo "Import in Silo (Settings → DXMT → Import…): <extracted>/lib/wine/x86_64-windows"
+echo "Import in Silo (Settings → DXMT → Import…): <extracted>/x86_64-windows"
 echo
 echo "Publish BOTH as Release assets (NOT committed to git):"
 echo "  gh release create $TAG \"$ROOT/dist/dxmt.tar.xz\" \"$ROOT/dist/dxmt.tar.xz.sha256\" -t \"$TAG\" -n \"DXMT $VER (built against CrossOver Wine $CROSSOVER_VERSION)\""
