@@ -32,13 +32,17 @@ public final class GPTKManagerViewModel {
         defer { isImporting = false }
         statusMessage = "Importing \(dmgURL.lastPathComponent)…"
         do {
-            let result = try await importer.importGPTK(fromDMG: dmgURL)
+            // The warning callback fires off the main actor mid-import; collect it in a box and fold it
+            // into the final status (a Task hop could land before OR after the "Imported" assignment).
+            let warning = LockedBox<String?>(nil)
+            let result = try await importer.importGPTK(fromDMG: dmgURL, onWarning: { warning.set($0) })
             refresh()
             // Adopt the newly-imported version as default if none is set yet.
             if defaultName == nil, let new = installs.first(where: { $0.name == result.name }) {
                 setDefault(new)
             }
-            statusMessage = "Imported \(result.name)."
+            statusMessage = warning.value.map { "Imported \(result.name) — ⚠️ \($0)" }
+                ?? "Imported \(result.name)."
         } catch {
             statusMessage = "Import failed: \((error as NSError).localizedDescription)"
         }

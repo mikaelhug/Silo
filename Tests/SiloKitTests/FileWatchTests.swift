@@ -34,6 +34,37 @@ struct FileWatchTests {
         let watch = FileWatch(url: URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)/x")) {}
         #expect(watch == nil)
     }
+
+    @MainActor
+    @Test("LogTailer creates a missing log file OFF the main actor, arms, and publishes writes")
+    func logTailerCreatesAndTails() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let log = tmp.url.appendingPathComponent("not-yet.log")
+        let tailer = LogTailer()
+        tailer.start(url: log)
+
+        // Bounded wait for the detached create + main-actor watch arming.
+        for _ in 0..<200 where !tailer.isWatching {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(tailer.isWatching)
+        #expect(FileManager.default.fileExists(atPath: log.path))
+
+        // Append in place (an atomic replace would swap the watched vnode out).
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("wine: launched".utf8))
+        try handle.close()
+
+        for _ in 0..<200 where !tailer.contents.contains("wine: launched") {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(tailer.contents.contains("wine: launched"))
+
+        // stop() invalidates any in-flight start: a stale arm must not resurrect the watch.
+        tailer.stop()
+        #expect(!tailer.isWatching)
+    }
 }
 
 /// Lock-guarded boolean for bridging a background `@Sendable` callback back into an async test.

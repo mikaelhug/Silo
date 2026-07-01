@@ -59,9 +59,10 @@ public struct GameAppShortcut: Sendable {
         do {
             if fileManager.fileExists(atPath: app.path) { try fileManager.removeItem(at: app) }
             try fileManager.createDirectory(at: macOS, withIntermediateDirectories: true)
-            try Data(infoPlist().utf8).write(to: app.appendingPathComponent("Contents/Info.plist"))
+            try Data(infoPlist().utf8).write(
+                to: app.appendingPathComponent("Contents/Info.plist"), options: .atomic)
             let script = macOS.appendingPathComponent("launch")
-            try Data(launchScript().utf8).write(to: script)
+            try Data(launchScript().utf8).write(to: script, options: .atomic)
             try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
         } catch {
             throw ShortcutError.writeFailed((error as NSError).localizedDescription)

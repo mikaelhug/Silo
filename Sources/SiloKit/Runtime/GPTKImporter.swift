@@ -67,7 +67,8 @@ public struct GPTKImporter: Sendable {
     public func importGPTK(
         fromDMG dmg: URL,
         name: String? = nil,
-        progress: (@Sendable (Stage) -> Void)? = nil
+        progress: (@Sendable (Stage) -> Void)? = nil,
+        onWarning: (@Sendable (String) -> Void)? = nil
     ) async throws -> GPTKInstall {
         let runtimeName = name ?? Self.runtimeName(forDMG: dmg)
         let fileManager = FileManager.default
@@ -105,7 +106,9 @@ public struct GPTKImporter: Sendable {
             try fileManager.copyItem(at: redistLib, to: stagingLib)
 
             // Strip quarantine so the libs load; do NOT re-sign (preserve Apple's D3DMetal signature).
-            await deQuarantine(staging, reSign: false, using: runner)
+            // A failure is non-fatal but worth a warning — Gatekeeper may refuse the libs later.
+            let hardening = await deQuarantine(staging, reSign: false, using: runner)
+            if let issue = hardening.issue(for: installDir) { onWarning?(issue) }
 
             // Atomic publish: replace any prior install only now that the staging tree is complete.
             if fileManager.fileExists(atPath: installDir.path) { try fileManager.removeItem(at: installDir) }

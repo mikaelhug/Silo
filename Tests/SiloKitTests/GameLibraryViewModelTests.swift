@@ -145,6 +145,45 @@ struct GameLibraryViewModelTests {
         #expect(!vm.manualGames.contains { $0.id == game.id })   // still removed from the library
     }
 
+    @Test("a DXMT manual game's shortcut launches on the DXMT variant runtime (resolver-routed)")
+    func dxmtManualShortcutUsesVariantRuntime() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+
+        // Real base wine + DXMT source so the resolver can clone the variant + overlay.
+        let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
+        try tmp.makeDir("wine/lib/wine/x86_64-windows"); try tmp.makeDir("wine/lib/wine/x86_64-unix")
+        let dxmtLib = try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
+        for m in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
+            try tmp.write("dxmt/lib/wine/x86_64-windows/\(m)", "DXMT")
+        }
+        try tmp.makeDir("dxmt/lib/wine/x86_64-unix")
+        try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WM")
+        var backend = BackendConfig(); backend.wineBinaryPath = wine; backend.dxmtLibDirPath = dxmtLib
+
+        let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        session.readinessTimeout = 0
+        let vm = GameLibraryViewModel(
+            bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
+            provisioner: WinePrefixProvisioner(runner: fake))
+
+        let game = ManualGame(name: "OldGame",
+                              executablePath: tmp.url.appendingPathComponent("game/old.exe"),
+                              backend: .dxmt)
+        let dest = try tmp.makeDir("shortcut-dest")
+        let app = try #require(await vm.makeShortcut(for: game, into: dest))
+
+        let script = try String(
+            contentsOf: app.appendingPathComponent("Contents/MacOS/launch"), encoding: .utf8)
+        #expect(script.contains("wine-dxmt"))       // the cloned DXMT variant runtime, not the base wine
+        #expect(script.contains("winemetal=b"))     // DXMT's builtin override set…
+        #expect(!script.contains("d3d12"))          // …and never GPTK's (which includes d3d12)
+    }
+
     @Test("resolveMessage maps every launch-stack error to actionable text")
     func resolveMessageTable() {
         let cases: [(Error, String)] = [

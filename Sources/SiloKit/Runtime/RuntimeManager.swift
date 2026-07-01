@@ -237,9 +237,13 @@ public actor RuntimeManager {
         Self.stripBundledSDL(in: dest, fileManager: fileManager)
 
         // Downloaded Wine is unsigned and may be quarantined → Gatekeeper blocks it. Strip quarantine
-        // and ad-hoc re-sign so it launches on a clean Mac.
-        await harden(dest, reSign: true)
+        // and ad-hoc re-sign so it launches on a clean Mac. Best-effort, but remember what failed so the
+        // installing UI can warn instead of leaving a later Gatekeeper block unexplained.
+        lastHardeningIssue = await harden(dest, reSign: true).issue(for: dest)
     }
+
+    /// The warning from the most recent install's hardening pass, or nil when it applied cleanly.
+    public private(set) var lastHardeningIssue: String?
 
     /// Remove any bundled `libSDL2*` from a runtime (see `install`). Idempotent; no-op if absent.
     @discardableResult
@@ -271,7 +275,8 @@ public actor RuntimeManager {
     }
 
     /// De-quarantine (and optionally ad-hoc re-sign) an extracted runtime tree so macOS will run it.
-    func harden(_ dir: URL, reSign: Bool) async {
+    @discardableResult
+    func harden(_ dir: URL, reSign: Bool) async -> HardeningOutcome {
         await deQuarantine(dir, reSign: reSign, using: runner)
     }
 }

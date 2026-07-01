@@ -18,6 +18,16 @@
     config is unwritable. `deleteBottle` failures say "remove it in Finder: <path>". `resolveMessage`
     maps the whole launch stack (exe-not-found / wineboot / DXMT-clone / linker-source-missing) to
     actionable text and all catch-sites route through it. 282 tests green.
+  - **Phase 3:** correctness fixes. (1) **Manual-game shortcuts route through `BottleResolver`**
+    (`GameLibraryViewModel.makeShortcut`, replaces `AppEnvironment.makeManualGameShortcut`) — a DXMT
+    game's Desktop `.app` now snapshots the DXMT variant runtime + overrides instead of silently using
+    the base/GPTK env; failures surface in the status bar. (2) Bottle tools (`setSteamBottleRetina` /
+    `openWineTool`) take a `GraphicsBackend` (default `.gptk`) so the DXMT bottle can get Retina/winecfg
+    (UI row lands with Phase 7's shared component). (3) `GameAppShortcut` writes atomically.
+    (4) `deQuarantine` returns a `HardeningOutcome`; `RuntimeManager.lastHardeningIssue` +
+    GPTK-import `onWarning` surface a failed de-quarantine/re-sign at install time ("Gatekeeper may
+    refuse…") instead of a cryptic launch failure (new `LockedBox` Mutex util). (5) `LogTailer.start`
+    creates/reads the log OFF the main actor (generation-guarded against stale arms). 287 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**

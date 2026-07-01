@@ -309,7 +309,11 @@ public final class AppEnvironment {
                 return
             }
             await backendSettings.applyDXMTLibDir(lib, name: release.tagName)
-            backendSettings.statusMessage = "Installed DXMT \(release.tagName)."
+            // Same warning the Wine installer surfaces: a failed de-quarantine/re-sign means Gatekeeper
+            // may block winemetal.so — say so now rather than at a mysterious launch failure.
+            let warning = await runtimeManager.lastHardeningIssue
+            backendSettings.statusMessage = warning.map { "Installed DXMT \(release.tagName) — ⚠️ \($0)" }
+                ?? "Installed DXMT \(release.tagName)."
         } catch {
             backendSettings.statusMessage = "DXMT download failed: \((error as NSError).localizedDescription)"
         }
@@ -324,42 +328,28 @@ public final class AppEnvironment {
     /// The wine binary games launch with (nil until Wine is configured).
     public var wineBinary: URL? { backendSettings.config.wineBinaryPath }
 
-    /// Toggle macOS Retina/HiDPI mode for the shared Steam bottle: persist the choice, then write the
-    /// `RetinaMode` registry key into the bottle prefix. Takes effect on the next game launch.
-    public func setSteamBottleRetina(_ on: Bool) async {
+    /// Toggle macOS Retina/HiDPI mode for a backend's Steam bottle: persist the choice, then write the
+    /// `RetinaMode` registry key into that bottle's prefix. Takes effect on the next game launch.
+    public func setSteamBottleRetina(_ on: Bool, for graphics: GraphicsBackend = .gptk) async {
         guard let wine = wineBinary else { bottleToolsMessage = "Set up Wine first."; return }
         guard !bottleToolsBusy else { return }
         bottleToolsBusy = true; defer { bottleToolsBusy = false }
         backendSettings.config.retinaMode = on
         await backendSettings.save()
         do {
-            try await wineTools.setRetinaMode(on, prefix: paths.steamBottle, wine: wine)
+            try await wineTools.setRetinaMode(on, prefix: paths.steamBottle(graphics), wine: wine)
             bottleToolsMessage = "Retina mode \(on ? "on" : "off") — applies on the next game launch."
         } catch {
             bottleToolsMessage = "Couldn't update Retina mode: \((error as NSError).localizedDescription)"
         }
     }
 
-    /// Open a Wine maintenance tool (winecfg / regedit / control) on the shared Steam bottle so the user
-    /// can fix the prefix by hand. Routes through the shared `runWineTool` (single tool-launch path).
-    public func openWineTool(_ tool: String) async {
+    /// Open a Wine maintenance tool (winecfg / regedit / control) on a backend's Steam bottle so the user
+    /// can fix that prefix by hand. Routes through the shared `runWineTool` (single tool-launch path).
+    public func openWineTool(_ tool: String, for graphics: GraphicsBackend = .gptk) async {
         guard wineBinary != nil else { bottleToolsMessage = "Set up Wine first."; return }
-        await orchestrator.runWineTool(tool, prefix: paths.steamBottle, backend: backendSettings.config)
+        await orchestrator.runWineTool(tool, prefix: paths.steamBottle(graphics), backend: backendSettings.config)
         bottleToolsMessage = "Opened \(tool)."
-    }
-
-    /// Generate a Game-Mode-tagged `.app` on the Desktop that launches `game` directly under GPTK (so it's
-    /// startable from Spotlight/Dock). The launch env is snapshotted from the same `makePlan` Silo launches
-    /// with. Returns the bundle URL, or nil if Wine isn't configured / the write failed. Manual games only —
-    /// they don't need the co-resident Steam client.
-    public func makeManualGameShortcut(_ game: ManualGame) -> URL? {
-        guard let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first,
-              let plan = try? LaunchOrchestrator.makePlan(
-                config: GameConfig(appID: 0, envFlags: game.envFlags, presence: .none, customArgs: game.customArgs),
-                backend: backendSettings.config, gameExe: game.executablePath,
-                prefix: paths.manualBottle(game.id), logURL: paths.manualLog(game.id))
-        else { return nil }
-        return try? GameAppShortcut(name: game.name, plan: plan).write(into: desktop)
     }
 
     /// Build a per-game settings view model with the game's persisted config.

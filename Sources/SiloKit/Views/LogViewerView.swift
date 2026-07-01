@@ -70,19 +70,32 @@ final class LogTailer {
     private var watch: FileWatch?
     private var pendingTail: String?
     private var flushScheduled = false
+    /// Invalidates in-flight `start` work: bumped by every `start`/`stop`, checked before a stale
+    /// creation/read may arm a watch the caller already superseded.
+    private var generation = 0
 
-    /// Begin watching `url` (reads the current tail immediately, then updates on each write).
+    /// Begin watching `url`. The file creation + initial tail read run OFF the main actor (the log can
+    /// live on a slow or external volume); the watch arms once the first tail is published.
     func start(url: URL) {
         stop()
-        // Ensure the file exists so it can be watched — logs are created at launch, but the user may open
-        // the viewer for a game that hasn't run yet.
-        if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-        }
-        contents = url.tailString(maxBytes: logTailBytes)
-        watch = FileWatch(url: url) {
-            let tail = url.tailString(maxBytes: logTailBytes)   // read off the main actor
-            Task { @MainActor [weak self] in self?.enqueue(tail) }
+        generation &+= 1
+        let expected = generation
+        contents = ""
+        Task.detached(priority: .userInitiated) { [weak self] in
+            // Ensure the file exists so it can be watched — logs are created at launch, but the user may
+            // open the viewer for a game that hasn't run yet.
+            if !FileManager.default.fileExists(atPath: url.path) {
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+            }
+            let tail = url.tailString(maxBytes: logTailBytes)
+            await MainActor.run { [weak self] in
+                guard let self, self.generation == expected else { return }   // superseded start/stop won
+                self.contents = tail
+                self.watch = FileWatch(url: url) {
+                    let tail = url.tailString(maxBytes: logTailBytes)   // read off the main actor
+                    Task { @MainActor [weak self] in self?.enqueue(tail) }
+                }
+            }
         }
     }
 
@@ -102,6 +115,9 @@ final class LogTailer {
         }
     }
 
+    /// Whether the watch is armed (the async `start` completed) — observable seam for tests.
+    var isWatching: Bool { watch != nil }
+
     /// Stops watching (also happens automatically when this tailer is deallocated, via `FileWatch`).
-    func stop() { watch = nil; pendingTail = nil }
+    func stop() { generation &+= 1; watch = nil; pendingTail = nil }
 }
