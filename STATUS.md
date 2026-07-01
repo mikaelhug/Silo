@@ -28,6 +28,14 @@
     GPTK-import `onWarning` surface a failed de-quarantine/re-sign at install time ("Gatekeeper may
     refuse…") instead of a cryptic launch failure (new `LockedBox` Mutex util). (5) `LogTailer.start`
     creates/reads the log OFF the main actor (generation-guarded against stale arms). 287 tests green.
+  - **Phase 4:** no more sync disk probes in SwiftUI body evaluation (bottles can live on a
+    slow/disconnected external volume). `GameLibraryViewModel.steamInstalledBackends` = off-main cache
+    (probed by `refreshSteamInstalled()`, called by every `load()`); `steamReady`/`steamInstalled(_:)`
+    + `AppEnvironment.dxmtSteamReady` read it. `SteamBottleViewModel.steamInstalled` cached the same way
+    (`refreshInstalled()` at bootstrap; `setUp` sets it). **Invalidation wiring:** `onSteamInstalled`
+    fires after a fresh install → AppEnvironment reloads the library, so the onboarding gate flips
+    without a relaunch (pinned by a wiring test — a missed invalidation would stall onboarding).
+    290 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**

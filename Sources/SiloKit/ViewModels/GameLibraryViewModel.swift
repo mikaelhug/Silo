@@ -99,10 +99,26 @@ public final class GameLibraryViewModel {
 
     public var canLaunch: Bool { backend.isWineConfigured }
     /// At least one Steam bottle (GPTK or DXMT) has its Steam client installed.
-    public var steamReady: Bool { GraphicsBackend.allCases.contains { steamInstalled($0) } }
+    public var steamReady: Bool { !steamInstalledBackends.isEmpty }
 
-    private func steamInstalled(_ graphics: GraphicsBackend) -> Bool {
-        FileManager.default.fileExists(atPath: paths.steamBottleExe(graphics).path)
+    /// Backends whose Steam bottle has a Windows Steam client installed. Cached (probed OFF the main
+    /// actor by `refreshSteamInstalled`) because `bottlesRoot` can live on a slow or disconnected
+    /// external volume, and `steamReady` gates SwiftUI body evaluation — a blocking `fileExists` there
+    /// can stall the UI for seconds. Refreshed by every `load()` and after a bottle's Steam install.
+    public private(set) var steamInstalledBackends: Set<GraphicsBackend> = []
+
+    public func steamInstalled(_ graphics: GraphicsBackend) -> Bool {
+        steamInstalledBackends.contains(graphics)
+    }
+
+    /// Re-probe which bottles have Steam installed (off the main actor), updating the cached set.
+    public func refreshSteamInstalled() async {
+        let paths = self.paths
+        steamInstalledBackends = await Task.detached {
+            Set(GraphicsBackend.allCases.filter {
+                FileManager.default.fileExists(atPath: paths.steamBottleExe($0).path)
+            })
+        }.value
     }
 
     /// Search filter over the installed Steam games (already name-sorted by `DiscoveryEngine`).
@@ -135,6 +151,7 @@ public final class GameLibraryViewModel {
     /// Each Steam game is tagged with the backend of the bottle it was discovered in — a Steam game's
     /// backend IS its bottle.
     public func load() async {
+        await refreshSteamInstalled()
         manualGames = sortedManual(await configStore.load().manualGames)
         // Manual games also live in a bottle, so the library still gates on at least one Steam bottle
         // existing (notReady drives the onboarding until Steam is set up).
