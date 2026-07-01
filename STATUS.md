@@ -27,18 +27,25 @@
     de-quarantine/ad-hoc-sign) OR manual folder import. One-click "Download…" in onboarding + Settings.
   - **Decision:** GPTK keeps the existing `SteamBottle` dir (no migration of the multi-GB prefix); DXMT is a
     sibling. Dropped the plan's `SteamBottle-GPTK` rename + `SteamLoginSync`.
-  - **DXMT build (scripted + lint-clean, 2026-06-30):** `Scripts/build-dxmt.sh` (local, verbose) +
-    `.github/workflows/build-dxmt.yml` (CI) build **DXMT v0.72 from upstream `3Shain/dxmt`** (the version
-    CrossOver 26 bundles) against the published `wine-cx-*` CrossOver Wine, via DXMT's canonical Meson build
-    (llvm-mingw `20231017` cross + Homebrew `llvm@15` airconv + full-Xcode Metal), x86_64 to match the Wine.
-    Output `dxmt.tar.xz` (`lib/wine/{x86_64-windows,x86_64-unix}`) → import the `x86_64-windows` folder in
-    Silo. Pins live in `versions.env` (`DXMT_REPO`/`DXMT_VERSION`/`LLVM_MINGW_VERSION`). Validated:
-    `shellcheck`+`actionlint` clean, source structure + build commands verified against DXMT's own CI, local
-    preflight runs. The actual ~1-2h compile needs full Xcode + the Wine install (can't run headlessly here).
+  - **DXMT build — BUILDS on-device (macOS 26 Tahoe + Xcode 26.6, 2026-06-30):** `Scripts/build-dxmt.sh`
+    (local) + `.github/workflows/build-dxmt.yml` (CI) build **DXMT v0.72 from upstream `3Shain/dxmt`** (the
+    version CrossOver 26 bundles) against the published `wine-cx-*` CrossOver Wine, via DXMT's canonical
+    Meson build, x86_64 to match the Wine. Full `meson compile` succeeds; `dxmt.tar.xz` (6.5 MB) ships
+    `x86_64-windows/{d3d11,dxgi,d3d10core,winemetal}.dll` + `x86_64-unix/winemetal.so` (all builtin) — the
+    exact tree `importDXMTRuntime`/`overlayDXMT` expect. Pins in `versions.env`. Real bugs fixed while
+    validating:
+    - **Toolchain:** llvm-mingw (clang) is REQUIRED — v0.72 doesn't compile with Homebrew GCC-mingw (tested:
+      `std::setfill`/libc++ deps). It's DXMT's own pinned, intended toolchain.
+    - **Native clang:** pin `/usr/bin/clang -arch x86_64` via a meson native file — llvm-mingw/llvm@15 both
+      ship a bare `clang` that shadowed the Apple clang → `ld: library 'System' not found`.
+    - **Metal:** Xcode 26 ships `metal` but its toolchain is a separate ~688 MB component; fetch it + probe
+      an actual compile (a `-f metal` check is insufficient).
+    - **Layout:** `-Dwine_builtin_dll=true` (v0.72 defaults false → d3d in system32); package the
+      `x86_64-windows` + `x86_64-unix` sibling dirs.
   - **Decision:** GPTK keeps the existing `SteamBottle` dir (no migration of the multi-GB prefix); DXMT is a
     sibling. Dropped the plan's `SteamBottle-GPTK` rename + `SteamLoginSync`.
-  - **PENDING (run + validate):** kick `build-dxmt.yml` (after a `wine-cx-*` release exists) → publish
-    `dxmt-v0.72`; import it in Silo; then **on-device:** confirm DXMT renders Overcooked 2.
+  - **PENDING (final on-device):** publish `dxmt-v0.72-cx26.2.0` (build-dxmt chained off wine-autoupdate, or
+    `gh release`), Download it in Silo → Settings → DXMT, then confirm DXMT renders Overcooked 2.
 - **✨ Tier-1 features from the Whisky study (2026-06-30, 239 tests green).** Five features mined from
   Whisky (the closest analog launcher) + Apple's GPTK materials, each with tests:
   1. **Retina/HiDPI toggle** for the Steam bottle (`WineTools.setRetinaMode` → `HKCU\…\Mac Driver\RetinaMode`;
