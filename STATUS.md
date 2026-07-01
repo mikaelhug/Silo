@@ -36,6 +36,10 @@
     fires after a fresh install → AppEnvironment reloads the library, so the onboarding gate flips
     without a relaunch (pinned by a wiring test — a missed invalidation would stall onboarding).
     290 tests green.
+  - **Phase 5:** the co-residency sync rule (`WINEMSYNC=1`, strip `WINEESYNC`) now lives in ONE place —
+    `Silo.enforceMsync` / `msyncWineEnvironment` — adopted by all five sites that each rebuilt it
+    (`makePlan`, `stopGame`, `runWineTool`, `WineTools.environment`, `SteamBottle.steamEnvironment`).
+    Zero behavior change (pinned by the exact env assertions across those suites). 292 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**

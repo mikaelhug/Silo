@@ -34,10 +34,8 @@ public struct WineTools: Sendable {
             at: #"HKCU\Software\Wine\Mac Driver"#, prefix: prefix, wine: wine)
     }
 
-    /// Base wine env + `WINEMSYNC=1` so the command shares the bottle's wineserver (no 2nd server fork).
+    /// Base wine env + the co-residency msync rule so the command shares the bottle's wineserver.
     private func environment(prefix: URL, wine: URL) -> [String: String] {
-        var env = Silo.wineEnvironment(prefix: prefix, wine: wine)
-        env["WINEMSYNC"] = "1"
-        return env
+        Silo.msyncWineEnvironment(prefix: prefix, wine: wine)
     }
 }

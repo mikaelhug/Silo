@@ -186,8 +186,7 @@ public struct SteamBottle: Sendable {
     /// co-residency Steamworks relies on). The winebus/SDL crash is fixed by removing libSDL2 (build
     /// `--without-sdl` + `stripBundledSDL`), NOT a DLL override; CEF presentation is the virtual desktop.
     private func steamEnvironment(wine: URL) -> [String: String] {
-        var env = Silo.wineEnvironment(prefix: prefixDir, wine: wine)
-        env["WINEMSYNC"] = "1"
+        var env = Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine)
         // Force steamwebhelper's Chromium onto bundled SwiftShader software GL — the route that actually
         // paints under Wine (the GPU/Metal path black-screens; an experimental GPU path was tried and
         // removed as it never rendered).

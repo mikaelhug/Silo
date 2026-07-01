@@ -17,4 +17,23 @@ struct SiloEnvironmentTests {
         #expect(env["DYLD_FALLBACK_LIBRARY_PATH"] == "/rt/lib/silo-bundled:/usr/lib")
         #expect(env.count == 3)   // base only — callers layer their own overrides
     }
+
+    @Test("enforceMsync sets WINEMSYNC and strips a user's WINEESYNC (the co-residency rule)")
+    func enforceMsync() {
+        var env = ["WINEESYNC": "1", "FOO": "bar"]
+        Silo.enforceMsync(&env)
+        #expect(env["WINEMSYNC"] == "1")
+        #expect(env["WINEESYNC"] == nil)   // a split sync mode would fork a second wineserver
+        #expect(env["FOO"] == "bar")       // everything else untouched
+    }
+
+    @Test("msyncWineEnvironment = the base wine env + the co-residency sync rule")
+    func msyncEnvironment() {
+        let wine = URL(fileURLWithPath: "/rt/bin/wine64")
+        let env = Silo.msyncWineEnvironment(prefix: URL(fileURLWithPath: "/bottle"), wine: wine)
+        #expect(env["WINEPREFIX"] == "/bottle")
+        #expect(env["WINEMSYNC"] == "1")
+        #expect(env["WINEESYNC"] == nil)
+        #expect(env["DYLD_FALLBACK_LIBRARY_PATH"] == wine.siloDyldFallback)
+    }
 }
