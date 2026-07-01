@@ -24,7 +24,20 @@ public final class SteamBottleViewModel {
         wineBinary = url
         session.updateWine(url)   // the session launches Steam with this wine
     }
-    public var steamInstalled: Bool { bottle.isSteamInstalled }
+
+    /// Cached (probed off-main by `refreshInstalled`; set directly by a successful `setUp`) — the bottle
+    /// can live on a slow/disconnected external volume, and this gates buttons in SwiftUI bodies.
+    public private(set) var steamInstalled = false
+    /// Fired after `setUp` completes a fresh install — AppEnvironment reloads the library so the
+    /// onboarding gate (`steamReady`) flips without an app restart.
+    public var onSteamInstalled: (() -> Void)?
+
+    /// Re-probe whether the bottle's Steam is installed (off the main actor). Called at bootstrap.
+    public func refreshInstalled() async {
+        let bottle = self.bottle
+        steamInstalled = await Task.detached { bottle.isSteamInstalled }.value
+    }
+
     public var canSetUp: Bool { wineBinary != nil && !busy }
 
     /// Install Windows Steam into the bottle (if needed).
@@ -36,6 +49,8 @@ public final class SteamBottleViewModel {
             try await bottle.installSteam(wine: wineBinary)
             if let wine = wineBinary { try? bottle.installWebHelperWrapper(wine: wine) }
             status = "Steam installed. Launch it, sign in once (it caches the login), then run a game."
+            steamInstalled = true
+            onSteamInstalled?()
         } catch {
             status = "Setup failed: \(message(error))"
         }

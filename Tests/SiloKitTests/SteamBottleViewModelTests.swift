@@ -17,6 +17,27 @@ struct SteamBottleViewModelTests {
         return (vm, fake, paths)
     }
 
+    @Test("steamInstalled is a cache: refreshInstalled() probes off-main; setUp sets it + fires the hook")
+    func steamInstalledCache() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        #expect(!vm.steamInstalled)
+
+        try FileManager.default.createDirectory(
+            at: paths.steamBottleClientDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        #expect(!vm.steamInstalled)          // still the cache — no probe yet
+        await vm.refreshInstalled()
+        #expect(vm.steamInstalled)
+
+        // setUp on an already-installed bottle: success path sets the flag + fires onSteamInstalled.
+        let hooked = LockedBox(false)
+        vm.onSteamInstalled = { hooked.set(true) }
+        vm.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        await vm.setUp()
+        #expect(vm.steamInstalled && hooked.value)
+    }
+
     @Test("canSetUp is gated on a configured wine binary")
     func canSetUpGate() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

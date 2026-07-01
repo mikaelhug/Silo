@@ -12,6 +12,39 @@ struct AppEnvironmentUpdateTests {
       {"name":"Silo.app.zip","browser_download_url":"https://example.com/Silo.app.zip","size":1}]}]
     """
 
+    @Test("a fresh Steam install flips the library's cached steamReady gate (onSteamInstalled wiring)")
+    func steamInstallFlipsLibraryGate() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        FakeURLProtocol.stub("https://api.github.com/repos/test/env-wiring/releases?per_page=30",
+                             data: Data("[]".utf8))
+        let runner = FakeProcessRunner()
+        let env = AppEnvironment(
+            paths: paths, runner: runner,
+            updater: Updater(repo: "test/env-wiring", currentVersion: "0.0.1",
+                             session: FakeURLProtocol.makeSession(), runner: runner))
+        await env.bootstrap()
+        #expect(env.gameLibrary.loadState == .notReady)   // no bottle yet
+        #expect(!env.steamReady)
+
+        // Put Steam's exe in the bottle out-of-band, then run the VM's setUp: installSteam sees it
+        // already installed (no download) and the success path fires onSteamInstalled → library reload.
+        try FileManager.default.createDirectory(
+            at: paths.steamBottleClientDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        env.steamBottleVM.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        await env.steamBottleVM.setUp()
+        #expect(env.steamBottleVM.steamInstalled)
+
+        // The wiring reloads the library in a fire-and-forget Task — bounded wait for the gate to flip.
+        // A missed invalidation here would permanently stall onboarding (the regression this test pins).
+        for _ in 0..<200 where !env.steamReady {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(env.steamReady)
+        #expect(env.gameLibrary.loadState != .notReady)
+    }
+
     // MARK: - installUpdate
 
     @Test("installUpdate fails cleanly (no process work) when not running from an .app bundle")

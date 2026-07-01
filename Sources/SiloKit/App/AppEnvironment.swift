@@ -93,6 +93,10 @@ public final class AppEnvironment {
         runtime.onDefaultChanged = { [weak self] wine in
             Task { await self?.backendSettings.applyDefaultWine(wine) }
         }
+        // A fresh Steam install must flip the library's cached `steamReady` gate (it drives onboarding);
+        // load() re-probes the cache off-main. Without this, onboarding would stall until a relaunch.
+        steamBottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
+        dxmtBottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
     }
 
     /// Fan out a backend-config change to the view models that depend on it.
@@ -115,6 +119,9 @@ public final class AppEnvironment {
         gptkManager.refresh()
         runtime.defaultName = state.backend.wineRuntimeName
         await runtime.refresh()
+        // Populate the bottle VMs' cached installed-flags (settings buttons gate on them).
+        await steamBottleVM.refreshInstalled()
+        await dxmtBottleVM.refreshInstalled()
         // Library = games installed in the Steam bottle.
         await gameLibrary.load()
         await checkForUpdate()   // best-effort; sets updateCheck + the "up to date" message (nil on offline)
@@ -247,10 +254,9 @@ public final class AppEnvironment {
 
     /// The DXMT runtime (its module dir, built from CrossOver source) is configured.
     public var dxmtReady: Bool { backendSettings.config.dxmtLibDirPath != nil }
-    /// The DXMT Steam bottle has its Windows Steam client installed.
-    public var dxmtSteamReady: Bool {
-        FileManager.default.fileExists(atPath: paths.steamBottleExe(.dxmt).path)
-    }
+    /// The DXMT Steam bottle has its Windows Steam client installed (the library's off-main cache — a
+    /// blocking `fileExists` here would run inside SwiftUI body evaluation).
+    public var dxmtSteamReady: Bool { gameLibrary.steamInstalled(.dxmt) }
 
     /// Import a DXMT runtime by pointing at its `x86_64-windows` module dir (the `d3d11`/`winemetal`
     /// artifacts built from the CrossOver source). Validates the folder, then adopts it as the backend's

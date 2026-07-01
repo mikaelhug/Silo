@@ -80,6 +80,19 @@ struct GameLibraryViewModelTests {
         #expect(vm.games.first { $0.appID == 400 }?.backend == .dxmt)
     }
 
+    @Test("steamReady is a cache: stale until load() re-probes off-main")
+    func steamReadyCacheRefreshes() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        await vm.load()
+        #expect(vm.loadState == .notReady && !vm.steamReady)
+        try installSteam(paths)
+        #expect(!vm.steamReady)          // the cache — nothing probed the disk yet
+        await vm.load()
+        #expect(vm.steamReady)
+        #expect(vm.loadState == .empty)  // ready, no games installed yet
+    }
+
     @Test("an unreadable bottle library surfaces a status while the other bottle's games still load")
     func unreadableBottleSurfacesStatus() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

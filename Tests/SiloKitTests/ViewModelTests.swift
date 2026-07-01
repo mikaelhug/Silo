@@ -157,6 +157,8 @@ struct ViewModelTests {
         #expect(!env.setupComplete)                       // Steam not installed in the bottle yet
         try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        #expect(!env.setupComplete)                       // steamReady is a CACHE — not probed yet
+        await env.gameLibrary.refreshSteamInstalled()
         #expect(env.setupComplete)
         #expect(env.wineReady && env.gptkReady && env.steamReady)
     }
