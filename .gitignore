@@ -12,6 +12,8 @@ dist/
 *.dmg
 *.tar.xz
 .wine-build/
+.dxmt-build/
+.dxmt-build-fullrun.log
 
 ## macOS
 .DS_Store
