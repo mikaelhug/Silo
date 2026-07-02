@@ -334,16 +334,19 @@ public final class AppEnvironment {
     /// The wine binary games launch with (nil until Wine is configured).
     public var wineBinary: URL? { backendSettings.config.wineBinaryPath }
 
-    /// Toggle macOS Retina/HiDPI mode for a backend's Steam bottle: persist the choice, then write the
-    /// `RetinaMode` registry key into that bottle's prefix. Takes effect on the next game launch.
-    public func setSteamBottleRetina(_ on: Bool, for graphics: GraphicsBackend = .gptk) async {
+    /// Toggle macOS Retina/HiDPI mode for the Steam bottles: persist the ONE preference, then write the
+    /// `RetinaMode` registry key into EVERY installed bottle's prefix (GPTK + DXMT stay consistent).
+    /// Takes effect on the next game launch.
+    public func setSteamBottleRetina(_ on: Bool) async {
         guard let wine = wineBinary else { bottleToolsMessage = "Set up Wine first."; return }
         guard !bottleToolsBusy else { return }
         bottleToolsBusy = true; defer { bottleToolsBusy = false }
         backendSettings.config.retinaMode = on
         await backendSettings.save()
         do {
-            try await wineTools.setRetinaMode(on, prefix: paths.steamBottle(graphics), wine: wine)
+            for graphics in GraphicsBackend.allCases where gameLibrary.steamInstalled(graphics) {
+                try await wineTools.setRetinaMode(on, prefix: paths.steamBottle(graphics), wine: wine)
+            }
             bottleToolsMessage = "Retina mode \(on ? "on" : "off") — applies on the next game launch."
         } catch {
             bottleToolsMessage = "Couldn't update Retina mode: \((error as NSError).localizedDescription)"

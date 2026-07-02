@@ -42,35 +42,8 @@ struct GameSettingsSheet: View {
             if let message = vm.errorMessage {
                 Section { Text(message).foregroundStyle(.red) }
             }
-            Section {
-                Picker("Sync", selection: $vm.config.envFlags.syncMode) {
-                    ForEach(SyncMode.allCases) { Text($0.displayName).tag($0) }
-                }
-                Toggle("Advertise AVX (Rosetta)", isOn: $vm.config.envFlags.advertiseAVX)
-                Toggle("Performance HUD (FPS / frame time)", isOn: $vm.config.envFlags.metalHUD)
-                Toggle("MetalFX upscaling", isOn: $vm.config.envFlags.metalFX)
-                Toggle("DirectX Raytracing (M3+)", isOn: $vm.config.envFlags.dxr)
-            } header: {
-                Text("Performance")
-            } footer: {
-                Text("MSync + advertise-AVX is the recommended Apple-Silicon baseline. The Performance "
-                     + "HUD overlays live FPS/frame time on the game. MetalFX upscales for more FPS; "
-                     + "Raytracing needs an M3 or newer.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section {
-                TextField("Launch options", text: $vm.config.launchOptionsString, axis: .vertical)
-                    .labelsHidden()
-                    .lineLimit(1...3)
-                    .multilineTextAlignment(.leading)
-                    .autocorrectionDisabled()
-            } header: {
-                Text("Launch options")
-            } footer: {
-                Text("Extra arguments passed to the game executable (space-separated).")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            PerformanceFlagsSection(flags: $vm.config.envFlags)
+            LaunchOptionsSection(text: $vm.config.launchOptionsString)
 
             Section("Executable") {
                 if executables.isEmpty {

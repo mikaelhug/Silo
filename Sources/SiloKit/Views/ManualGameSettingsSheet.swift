@@ -58,23 +58,8 @@ struct ManualGameSettingsSheet: View {
                     Text("The translation layer this game runs under. Switching takes effect next launch.")
                 }
 
-                Section("Performance") {
-                    Picker("Sync", selection: $game.envFlags.syncMode) {
-                        ForEach(SyncMode.allCases) { Text($0.displayName).tag($0) }
-                    }
-                    Toggle("Advertise AVX (Rosetta)", isOn: $game.envFlags.advertiseAVX)
-                    Toggle("Performance HUD (FPS / frame time)", isOn: $game.envFlags.metalHUD)
-                    Toggle("MetalFX upscaling", isOn: $game.envFlags.metalFX)
-                    Toggle("DirectX Raytracing (M3+)", isOn: $game.envFlags.dxr)
-                }
-
-                Section("Launch options") {
-                    TextField("Launch options", text: $game.launchOptionsString, axis: .vertical)
-                        .labelsHidden()
-                        .lineLimit(1...3)
-                        .multilineTextAlignment(.leading)
-                        .autocorrectionDisabled()
-                }
+                PerformanceFlagsSection(flags: $game.envFlags)
+                LaunchOptionsSection(text: $game.launchOptionsString)
             }
             .formStyle(.grouped)
             .navigationTitle(game.name)
