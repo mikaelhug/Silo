@@ -21,9 +21,7 @@ ARCH="arch -x86_64"   # CrossOver is x86_64; runs on Apple Silicon via Rosetta
 BREW=/usr/local/bin/brew
 
 echo "==> Rosetta + x86_64 Homebrew dependencies"
-softwareupdate --install-rosetta --agree-to-license 2>/dev/null || true
-[ -x "$BREW" ] || $ARCH /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-$ARCH "$BREW" install bison mingw-w64 freetype gnutls gstreamer sdl2 molten-vk cmake
+"$ROOT/Scripts/bootstrap-x86-brew.sh" bison mingw-w64 freetype gnutls gstreamer sdl2 molten-vk cmake
 
 echo "==> Fetch CrossOver source $VER"
 mkdir -p "$WORK" && cd "$WORK"
@@ -58,19 +56,8 @@ mkdir -p "$WORK/install/share/silo"
 WRAPPER="$WORK/install/share/silo/steamwebhelper-wrapper.exe"
 "$($ARCH "$BREW" --prefix mingw-w64)/bin/x86_64-w64-mingw32-gcc" -O2 -municode -mwindows \
   -o "$WRAPPER" "$ROOT/Scripts/steamwebhelper-wrapper.c"
-# Verify the compiled wrapper carries the CORRECT CEF flags (UTF-16LE in the PE) — guard against a stale
-# checkout or a regression silently shipping --single-process (which breaks Chromium's network service →
-# Steam login Transport Error). The wrapper is load-bearing, so fail the build if it's wrong.
-python3 - "$WRAPPER" <<'PY'
-import sys
-data = open(sys.argv[1], "rb").read()
-ok  = "--in-process-gpu".encode("utf-16-le") in data
-bad = "--single-process".encode("utf-16-le") in data
-if not ok or bad:
-    sys.exit("ERROR: steamwebhelper wrapper has wrong CEF flags "
-             f"(in-process-gpu={ok}, single-process={bad}) — check steamwebhelper-wrapper.c")
-print("wrapper CEF flags OK (--in-process-gpu)")
-PY
+# The wrapper is load-bearing — fail the build if its CEF flags are wrong (shared check, also run in CI).
+python3 "$ROOT/Scripts/check-webhelper-wrapper.py" "$WRAPPER"
 
 echo "==> Bundle dependency dylibs (self-contained runtime)"
 "$ROOT/Scripts/bundle-wine-dylibs.sh" "$WORK/install"

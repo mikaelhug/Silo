@@ -54,6 +54,11 @@
     a Repair row** (winecfg/regedit/control on the DXMT bottle, the Phase-3 backend-aware tools) and
     the **Retina toggle now writes the registry key into EVERY installed bottle** (one preference, both
     bottles consistent). No view tests per repo convention; logic unchanged (VM suites). 294 green.
+  - **Phase 8:** scripts dedupe. `Scripts/check-webhelper-wrapper.py` = the ONE load-bearing CEF-flag
+    guard (was duplicated between `build-wine.sh` and `build-wine.yml` — a drift there ships a broken
+    Steam login); verified on synthetic pass/fail PEs. `Scripts/bootstrap-x86-brew.sh` = the shared
+    Rosetta + x86_64-Homebrew bootstrap for `build-wine.sh` + `build-dxmt.sh`. `bash -n` + YAML-parse
+    clean; CI proper validates on the next workflow dispatch. Toolchain pins untouched.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**

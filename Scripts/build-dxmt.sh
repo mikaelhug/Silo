@@ -79,14 +79,8 @@ echo "    Metal toolchain: OK"
 }
 WINE_INSTALL="$(cd "$WINE_INSTALL" && pwd)"   # absolute (meson needs it)
 echo "    Wine install: $WINE_INSTALL"
-# (3) x86_64 Rosetta + Homebrew.
-softwareupdate --install-rosetta --agree-to-license 2>/dev/null || true
-# shellcheck disable=SC2016  # the $(...) must run inside the spawned bash, not expand here (brew installer)
-[ -x "$BREW" ] || $ARCH /bin/bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-
-echo "==> x86_64 Homebrew deps (llvm@15 for the airconv shader compiler, meson, ninja)"
-export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
-$ARCH "$BREW" install llvm@15 meson ninja
+echo "==> Rosetta + x86_64 Homebrew deps (llvm@15 for the airconv shader compiler, meson, ninja)"
+"$ROOT/Scripts/bootstrap-x86-brew.sh" llvm@15 meson ninja
 LLVM15="$($ARCH "$BREW" --prefix llvm@15)"   # = /usr/local/opt/llvm@15 (meson's default native_llvm_path)
 
 echo "==> Fetch DXMT $VER ($DXMT_REPO) + submodules (directx headers, nvapi)"

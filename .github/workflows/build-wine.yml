@@ -144,17 +144,9 @@ jobs:
           WRAPPER="$GITHUB_WORKSPACE/wine-install/share/silo/steamwebhelper-wrapper.exe"
           "$($ARCH_PREFIX $BREW --prefix mingw-w64)/bin/x86_64-w64-mingw32-gcc" -O2 -municode -mwindows \
             -o "$WRAPPER" "$GITHUB_WORKSPACE/Scripts/steamwebhelper-wrapper.c"
-          # Fail the build if the compiled wrapper carries the wrong CEF flags (UTF-16LE in the PE): it must
-          # have --in-process-gpu and NOT --single-process (which breaks Chromium's network → login error).
-          python3 - "$WRAPPER" <<'PY'
-          import sys
-          data = open(sys.argv[1], "rb").read()
-          ok  = "--in-process-gpu".encode("utf-16-le") in data
-          bad = "--single-process".encode("utf-16-le") in data
-          if not ok or bad:
-              sys.exit(f"ERROR: wrapper has wrong CEF flags (in-process-gpu={ok}, single-process={bad})")
-          print("wrapper CEF flags OK (--in-process-gpu)")
-          PY
+          # The wrapper is load-bearing — fail the build if its CEF flags are wrong. Same shared check the
+          # local Scripts/build-wine.sh runs, so the local + CI guards can't drift.
+          python3 "$GITHUB_WORKSPACE/Scripts/check-webhelper-wrapper.py" "$WRAPPER"
 
       - name: Bundle dependency dylibs (self-contained runtime)
         run: ./Scripts/bundle-wine-dylibs.sh "$GITHUB_WORKSPACE/wine-install"
