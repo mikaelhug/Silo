@@ -63,6 +63,8 @@ public final class AppEnvironment {
     private let updater: Updater
     /// The inline self-update flow (check / download / relaunch) — Settings → General → Updates.
     public let updates: UpdateCoordinator
+    /// The bottles-location move flow (Settings → General → Bottles).
+    public let bottles: BottlesRelocationCoordinator
     public private(set) var didBootstrap = false
     private var isBootstrapping = false
 
@@ -77,6 +79,7 @@ public final class AppEnvironment {
         let updater = updater ?? Updater(runner: runner)
         self.updater = updater
         self.updates = UpdateCoordinator(updater: updater, updatesDir: paths.updatesDir)
+        self.bottles = BottlesRelocationCoordinator(paths: paths, updater: updater)
 
         let configStore = ConfigStore(paths: paths)
         let linker = GraphicsLinker()
@@ -123,6 +126,8 @@ public final class AppEnvironment {
         for services in backends.values {
             services.bottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
         }
+        // Relocation must refuse while anything runs in a bottle (see `anythingRunning`).
+        bottles.isBlocked = { [weak self] in self?.anythingRunning ?? true }
     }
 
     /// Fan out a backend-config change to the view models that depend on it.
@@ -161,79 +166,11 @@ public final class AppEnvironment {
 
     // MARK: - Bottles location
 
-    public private(set) var bottlesBusy = false
-    public private(set) var bottlesMessage: String?
-    /// Copy progress during a cross-volume move (`0...1`), or nil when indeterminate / not moving.
-    public private(set) var bottlesProgress: Double?
-    /// Rejects a destination whose filesystem can't hold a Wine bottle (exFAT/FAT). Injectable for tests.
-    var bottlesFilesystemRejects: @Sendable (URL) -> Bool = { Filesystem.isFATFamily($0) }
-
     /// True while any game OR any bottle's Steam client is live — relocation is refused then (we'd be
     /// moving prefixes out from under running wineservers). Checks EVERY backend's session: a live DXMT
     /// client is just as much a running wineserver as the GPTK one.
     public var anythingRunning: Bool {
         gameLibrary.isAnythingRunning || backends.values.contains { $0.session.isRunning }
-    }
-
-    /// Move all bottles into a `Silo Bottles` folder inside `chosen` (a directory the user picked — e.g. an
-    /// external drive), so we never scatter prefixes directly into a shared location. Refuses an exFAT/FAT
-    /// destination — a Wine prefix needs POSIX symlinks.
-    public func moveBottles(to chosen: URL) async {
-        guard !bottlesFilesystemRejects(chosen) else {
-            bottlesMessage = "That location is exFAT/FAT, which can't hold a Wine bottle (no symlink "
-                + "support). Reformat the drive as APFS or Mac OS Extended, then try again."
-            return
-        }
-        await relocateBottles(to: chosen.appendingPathComponent("Silo Bottles", isDirectory: true))
-    }
-
-    /// Move bottles back to the default location (under Application Support).
-    public func resetBottlesLocation() async {
-        guard paths.bottlesRelocated else { return }
-        await relocateBottles(to: paths.supportDir)
-    }
-
-    /// Relocate the bottle dirs to `newRoot`, persist the choice, and relaunch to adopt it everywhere
-    /// (`AppPaths` is injected by value, so the clean way to re-point every consumer is a fresh launch).
-    private func relocateBottles(to newRoot: URL) async {
-        guard !bottlesBusy else { return }
-        guard !anythingRunning else {
-            bottlesMessage = "Stop running games and Steam before moving bottles."
-            return
-        }
-        let old = paths.bottlesRoot
-        guard newRoot.standardizedFileURL != old.standardizedFileURL else {
-            bottlesMessage = "Bottles are already there."
-            return
-        }
-        bottlesBusy = true
-        bottlesProgress = 0
-        bottlesMessage = "Moving bottles… this can take a while for installed games."
-        defer { bottlesBusy = false; bottlesProgress = nil }
-
-        let names = AppPaths.bottleDirNames
-        do {
-            // Off the main actor — a cross-volume move is a full copy of (potentially huge) game data.
-            // The progress callback hops back to the main actor to update the determinate bar.
-            try await Task.detached(priority: .userInitiated) { [weak self] in
-                try await BottleRelocator().move(names, from: old, to: newRoot) { fraction in
-                    Task { @MainActor in self?.bottlesProgress = fraction }
-                }
-            }.value
-        } catch {
-            bottlesMessage = "Couldn't move bottles: \((error as NSError).localizedDescription)"
-            return
-        }
-
-        // Persist (nil = back to the default), then adopt via relaunch.
-        let isDefault = newRoot.standardizedFileURL == paths.supportDir.standardizedFileURL
-        BottlesLocation.write(isDefault ? nil : newRoot, supportDir: paths.supportDir)
-        if let bundle = Updater.runningAppBundle() {
-            bottlesMessage = "Bottles moved. Relaunching…"
-            await updater.relaunch(bundle)   // launches the new instance + exit(0); never returns
-        } else {
-            bottlesMessage = "Bottles moved to \(newRoot.path). Restart Silo to use the new location."
-        }
     }
 
     // MARK: - Setup readiness (drives the Library onboarding)

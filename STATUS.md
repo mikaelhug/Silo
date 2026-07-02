@@ -67,6 +67,15 @@
     computed projections so the 507-line VM test suite passed UNMODIFIED. New coordinator tests pin the
     pid-match stale-exit guard, re-track cancellation, clear-stops-monitor, and exact-PID terminate.
     300 tests green.
+  - **Phase 10 (a/b/c):** AppEnvironment decomposition, three green commits. **(a)** `BackendServices`
+    = one keyed bundle (bottle + client session + settings VM) per `GraphicsBackend`, built in a loop
+    (killing the gptk/dxmt construction copy-paste); pre-bundle names kept as computed forwards so
+    views/tests were untouched. **Bonus fix:** `anythingRunning` now checks EVERY backend's session —
+    a live DXMT Steam client blocks bottle relocation like the GPTK one. **(b)** `UpdateCoordinator`
+    (`env.updates`) owns the inline self-update flow + its state. **(c)** `BottlesRelocationCoordinator`
+    (`env.bottles`, in Provisioning/ next to `BottleRelocator`) owns the move flow;
+    relocation-via-relaunch design unchanged; `isBlocked` late-bound to `env.anythingRunning`.
+    AppEnvironment is now ≈300 lines of composition + thin orchestration. 301 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**
