@@ -178,7 +178,7 @@ struct ViewModelTests {
         #expect(env.didBootstrap)
         #expect(env.backendSettings.config.wineBinaryPath?.path == "/w/wine64")
         #expect(env.gameLibrary.canLaunch)
-        #expect(env.updateCheck == nil)
+        #expect(env.updates.updateCheck == nil)
     }
 
     @Test("ExecutableResolver.allExecutables lists exes shallowest-first")

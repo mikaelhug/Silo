@@ -79,15 +79,15 @@ struct AppEnvironmentUpdateTests {
             updater: Updater(repo: "test/env-update-newer", currentVersion: "0.0.1",
                              session: FakeURLProtocol.makeSession(), runner: runner))
         await env.bootstrap()
-        #expect(env.updateCheck?.isNewer == true)
+        #expect(env.updates.updateCheck?.isNewer == true)
 
         let before = runner.invocations.count
-        await env.installUpdate()
+        await env.updates.installUpdate()
 
         // Under `swift test`, runningAppBundle() is nil (the xctest bundle has no .app ancestor):
         // the bundle guard fires BEFORE any download/install.
-        guard case let .failed(msg) = env.updateState else {
-            Issue.record("expected .failed, got \(env.updateState)"); return
+        guard case let .failed(msg) = env.updates.updateState else {
+            Issue.record("expected .failed, got \(env.updates.updateState)"); return
         }
         #expect(msg.contains("installed app bundle"))
         // No ditto/open leaked — the guard short-circuited before any process work.
@@ -112,11 +112,11 @@ struct AppEnvironmentUpdateTests {
             updater: Updater(repo: "test/env-update-same", currentVersion: "0.0.1",
                              session: FakeURLProtocol.makeSession(), runner: runner))
         await env.bootstrap()
-        #expect(env.updateCheck?.isNewer == false)
+        #expect(env.updates.updateCheck?.isNewer == false)
 
         let before = runner.invocations.count
-        await env.installUpdate()
-        #expect(env.updateState == .idle)               // early return, never entered .downloading
+        await env.updates.installUpdate()
+        #expect(env.updates.updateState == .idle)               // early return, never entered .downloading
         #expect(runner.invocations.count == before)     // zero process work
     }
 
@@ -131,12 +131,12 @@ struct AppEnvironmentUpdateTests {
             paths: paths, runner: runner,
             updater: Updater(repo: "test/manual-check", currentVersion: "0.0.1",
                              session: FakeURLProtocol.makeSession(), runner: runner))
-        #expect(env.updateCheck == nil)            // didn't bootstrap, so no auto-check yet
+        #expect(env.updates.updateCheck == nil)            // didn't bootstrap, so no auto-check yet
 
-        await env.checkForUpdate()
+        await env.updates.checkForUpdate()
 
-        #expect(env.updateCheck?.isNewer == true)  // the manual check found the v9.9.9 release
-        #expect(!env.isCheckingForUpdate)
+        #expect(env.updates.updateCheck?.isNewer == true)  // the manual check found the v9.9.9 release
+        #expect(!env.updates.isCheckingForUpdate)
     }
 
     // MARK: - Bottles relocation
