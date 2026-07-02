@@ -120,22 +120,11 @@ struct GeneralSettingsView: View {
     /// Stand up a shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
     /// co-resident with a logged-in Steam client.
     @ViewBuilder private var steamBottleSection: some View {
-        let bottle = env.steamBottleVM
         Section {
-            Button("Set up Steam bottle") { Task { await bottle.setUp() } }
-                .disabled(!bottle.canSetUp)
-            Button("Launch Steam") { Task { await bottle.launchSteam() } }
-                .disabled(bottle.busy || !bottle.steamInstalled)
-            Button("Reset Steam login") { Task { await bottle.resetLogin() } }
-                .disabled(bottle.busy || !bottle.steamInstalled)
-            Button("Open bottle log") {
-                openWindow(id: LogTarget.windowID,
-                           value: LogTarget(title: "Steam Bottle — Log", url: env.paths.steamBottleLog))
-            }
-            if bottle.busy { ProgressView().controlSize(.small) }
-            if !bottle.status.isEmpty {
-                Text(bottle.status).font(.caption).foregroundStyle(.secondary)
-            }
+            SteamBottleControls(
+                bottle: env.steamBottleVM, noun: "Steam",
+                logButtonTitle: "Open bottle log",
+                logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog)
         } header: {
             Text("Steam bottle")
         }
@@ -143,7 +132,6 @@ struct GeneralSettingsView: View {
 
     /// The optional DXMT backend: import its runtime + stand up its own Steam bottle (older DX10/11 games).
     @ViewBuilder private var dxmtSection: some View {
-        let bottle = env.dxmtBottleVM
         Section {
             LabeledContent("Runtime") {
                 HStack(spacing: 8) {
@@ -160,19 +148,17 @@ struct GeneralSettingsView: View {
                     .disabled(env.dxmtDownloading)
                 }
             }
-            Button("Set up DXMT Steam bottle") { Task { await bottle.setUp() } }
-                .disabled(!bottle.canSetUp)
-            Button("Launch DXMT Steam") { Task { await bottle.launchSteam() } }
-                .disabled(bottle.busy || !bottle.steamInstalled)
-            Button("Reset DXMT Steam login") { Task { await bottle.resetLogin() } }
-                .disabled(bottle.busy || !bottle.steamInstalled)
-            Button("Open DXMT bottle log") {
-                openWindow(id: LogTarget.windowID,
-                           value: LogTarget(title: "DXMT Steam Bottle — Log", url: env.paths.steamBottleLog(.dxmt)))
-            }
-            if bottle.busy { ProgressView().controlSize(.small) }
-            if !bottle.status.isEmpty {
-                Text(bottle.status).font(.caption).foregroundStyle(.secondary)
+            SteamBottleControls(
+                bottle: env.dxmtBottleVM, noun: "DXMT Steam",
+                logButtonTitle: "Open DXMT bottle log",
+                logWindowTitle: "DXMT Steam Bottle — Log", logURL: env.paths.steamBottleLog(.dxmt))
+            LabeledContent("Repair") {
+                HStack(spacing: 8) {
+                    Button("Wine Config") { Task { await env.openWineTool("winecfg", for: .dxmt) } }
+                    Button("Registry") { Task { await env.openWineTool("regedit", for: .dxmt) } }
+                    Button("Control Panel") { Task { await env.openWineTool("control", for: .dxmt) } }
+                }
+                .disabled(env.wineBinary == nil || !env.dxmtSteamReady)
             }
         } header: {
             Text("DXMT — older games (optional)")
@@ -314,5 +300,33 @@ struct GeneralSettingsView: View {
         isChecking = true
         await env.checkForUpdate()
         isChecking = false
+    }
+}
+
+/// The Setup / Launch / Reset-login / open-log control block a Steam bottle renders in Settings — one
+/// implementation shared by the GPTK and DXMT sections (identical flow, different bottle + labels).
+struct SteamBottleControls: View {
+    @Environment(\.openWindow) private var openWindow
+    let bottle: SteamBottleViewModel
+    /// How the buttons name this bottle's Steam ("Steam" / "DXMT Steam").
+    let noun: String
+    let logButtonTitle: String
+    let logWindowTitle: String
+    let logURL: URL
+
+    var body: some View {
+        Button("Set up \(noun) bottle") { Task { await bottle.setUp() } }
+            .disabled(!bottle.canSetUp)
+        Button("Launch \(noun)") { Task { await bottle.launchSteam() } }
+            .disabled(bottle.busy || !bottle.steamInstalled)
+        Button("Reset \(noun) login") { Task { await bottle.resetLogin() } }
+            .disabled(bottle.busy || !bottle.steamInstalled)
+        Button(logButtonTitle) {
+            openWindow(id: LogTarget.windowID, value: LogTarget(title: logWindowTitle, url: logURL))
+        }
+        if bottle.busy { ProgressView().controlSize(.small) }
+        if !bottle.status.isEmpty {
+            Text(bottle.status).font(.caption).foregroundStyle(.secondary)
+        }
     }
 }

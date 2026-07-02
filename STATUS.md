@@ -46,6 +46,14 @@
     (pre-witness framework-link self-repair → copy → re-link; no `wineWinDir` creation), DXMT keeps its
     dir creation. Pinned by the idempotency/self-repair/symlink suites + new direct helper tests.
     294 tests green.
+  - **Phase 7:** view dedupe. `GameTileCard` = the one library-tile chrome (artwork band, three-state
+    Play/Launching/Stop button, menu, hover treatment) — Steam + manual tiles now inject only their
+    artwork/subtitle/menu/confirmations. `PerformanceFlagsSection` + `LaunchOptionsSection` shared by
+    both settings sheets (manual sheet gains the guidance footers). `SteamBottleControls` = the one
+    Setup/Launch/Reset-login/log block for the GPTK + DXMT settings sections; the **DXMT section gains
+    a Repair row** (winecfg/regedit/control on the DXMT bottle, the Phase-3 backend-aware tools) and
+    the **Retina toggle now writes the registry key into EVERY installed bottle** (one preference, both
+    bottles consistent). No view tests per repo convention; logic unchanged (VM suites). 294 green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**
