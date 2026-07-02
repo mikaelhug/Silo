@@ -17,11 +17,16 @@ public final class GameLibraryViewModel {
     public private(set) var manualGames: [ManualGame] = []
     public private(set) var loadState: LoadState = .idle
     public private(set) var busyAppIDs: Set<Int> = []
-    /// Live launch tracking (values are wine loader PIDs). Module-internal, NOT public API — callers query
-    /// liveness via `isRunning(_:)` / `isAnythingRunning` rather than reaching into the PID tables.
-    private(set) var runningPIDs: [Int: Int32] = [:]
-    private(set) var manualRunningPIDs: [UUID: Int32] = [:]
     public private(set) var manualBusyIDs: Set<UUID> = []
+
+    /// Live launch tracking, projected from the process coordinator's keyed table. Module-internal, NOT
+    /// public API — callers query liveness via `isRunning(_:)` / `isAnythingRunning`.
+    var runningPIDs: [Int: Int32] {
+        processes.pids.reduce(into: [:]) { if case .steam(let appID) = $1.key { $0[appID] = $1.value } }
+    }
+    var manualRunningPIDs: [UUID: Int32] {
+        processes.pids.reduce(into: [:]) { if case .manual(let id) = $1.key { $0[id] = $1.value } }
+    }
     public var searchText: String = ""
     /// The most recent action result, shown in the library's status bar. Persists until the next action
     /// replaces it (no timed auto-dismiss — nothing in the app waits).
@@ -33,11 +38,9 @@ public final class GameLibraryViewModel {
     private let configStore: ConfigStore
     private let paths: AppPaths
     private var backend: BackendConfig
-    private var runObservers: [Int: any ProcessObservation] = [:]
-    private var manualObservers: [UUID: any ProcessObservation] = [:]
-    /// Per-launch watchers that surface a silent GPTK→wined3d graphics fallback (keyed like the observers).
-    private var graphicsMonitors: [Int: GraphicsFallbackMonitor] = [:]
-    private var manualGraphicsMonitors: [UUID: GraphicsFallbackMonitor] = [:]
+    /// Owns the live-process state (PIDs, exit observers, graphics-fallback monitors) for every launched
+    /// game, keyed by `GameID` — see `GameProcessCoordinator`.
+    private let processes: GameProcessCoordinator
     /// The owner of the GPTK Steam bottle's live client (shared with the settings pane), and — when the
     /// DXMT Steam bottle exists — the DXMT bottle's client. Keyed by backend so a game routes to its bottle.
     private let session: SteamClientSession
@@ -65,6 +68,7 @@ public final class GameLibraryViewModel {
         self.session = session
         self.dxmtSession = dxmtSession
         self.provisioner = provisioner
+        self.processes = GameProcessCoordinator(orchestrator: orchestrator)
     }
 
     /// The Steam client session that owns a given backend's bottle. Falls back to the GPTK session when a
@@ -82,20 +86,11 @@ public final class GameLibraryViewModel {
         }
     }
 
-    /// Defensive teardown (these VMs are process-lifetime singletons, so it normally never fires): cancel
-    /// any live exit observations so they can't outlive the model. `isolated` to touch its @MainActor state.
-    isolated deinit {
-        runObservers.values.forEach { $0.cancel() }
-        manualObservers.values.forEach { $0.cancel() }
-        graphicsMonitors.values.forEach { $0.stop() }
-        manualGraphicsMonitors.values.forEach { $0.stop() }
-    }
-
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
 
     /// Whether any game (Steam or manual) is currently tracked as running. Lets callers ask without
     /// reaching into the internal PID tables.
-    public var isAnythingRunning: Bool { !runningPIDs.isEmpty || !manualRunningPIDs.isEmpty }
+    public var isAnythingRunning: Bool { processes.anythingRunning }
 
     public var canLaunch: Bool { backend.isWineConfigured }
     /// At least one Steam bottle (GPTK or DXMT) has its Steam client installed.
@@ -133,9 +128,9 @@ public final class GameLibraryViewModel {
             : manualGames.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
-    public func isRunning(_ game: SteamApp) -> Bool { runningPIDs[game.appID] != nil }
+    public func isRunning(_ game: SteamApp) -> Bool { processes.pid(for: .steam(game.appID)) != nil }
     public func isBusy(_ game: SteamApp) -> Bool { busyAppIDs.contains(game.appID) }
-    public func isRunning(_ game: ManualGame) -> Bool { manualRunningPIDs[game.id] != nil }
+    public func isRunning(_ game: ManualGame) -> Bool { processes.pid(for: .manual(game.id)) != nil }
     public func isBusy(_ game: ManualGame) -> Bool { manualBusyIDs.contains(game.id) }
 
     public func sizeString(_ game: SteamApp) -> String? {
@@ -223,7 +218,8 @@ public final class GameLibraryViewModel {
     /// client up so Steamworks works. Routes prefix + runtime through `BottleResolver` (its backend = its
     /// bottle), and keeps only that bottle's Steam client online.
     public func play(_ game: SteamApp) async {
-        guard backend.isWineConfigured, !busyAppIDs.contains(game.appID), runningPIDs[game.appID] == nil else { return }
+        guard backend.isWineConfigured, !busyAppIDs.contains(game.appID),
+              processes.pid(for: .steam(game.appID)) == nil else { return }
         busyAppIDs.insert(game.appID); defer { busyAppIDs.remove(game.appID) }
         do {
             // Resolve the game's backend → its bottle prefix + prepared runtime (off-main; clones DXMT).
@@ -247,8 +243,7 @@ public final class GameLibraryViewModel {
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: launchBackend, graphics: game.backend,
                 prefix: context.prefix, logURL: paths.log(forAppID: game.appID))
-            runningPIDs[game.appID] = pid
-            observeRun(appID: game.appID, pid: pid)
+            processes.track(.steam(game.appID), pid: pid)
             do {
                 _ = try await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
                 setStatus("Launched \(game.name).")
@@ -259,7 +254,7 @@ public final class GameLibraryViewModel {
             }
             // Last, so a detected fallback (which usually arrives a beat later as the log is written, but
             // may already be present) overrides the "Launched" status rather than being clobbered by it.
-            watchGraphics(appID: game.appID, log: paths.log(forAppID: game.appID),
+            watchGraphics(.steam(game.appID), log: paths.log(forAppID: game.appID),
                           name: game.name, backend: game.backend)
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
@@ -269,21 +264,18 @@ public final class GameLibraryViewModel {
     /// Stop a running game. Terminates just the game (the shared bottle keeps Steam alive — a
     /// `wineserver -k` would kill the co-resident Steam client too). See `LaunchOrchestrator.stopGame`.
     public func stop(_ game: SteamApp) async {
-        guard let pid = runningPIDs[game.appID] else { return }
+        guard let pid = processes.pid(for: .steam(game.appID)) else { return }
         let config = await configStore.load().config(for: game.appID)
         let exeName = orchestrator.resolvedExecutableName(app: game, config: config)
         await orchestrator.stopGame(
             pid: pid, exeName: exeName, prefix: paths.steamBottle(game.backend), backend: backend)
-        clearRunState(game.appID)
+        processes.clear(.steam(game.appID))
     }
 
     /// SIGTERM every game Silo launched (Steam + manual), synchronously. Used at app quit (where there's no
     /// time for the async `taskkill`/`wineserver -k` cleanup): wine turns SIGTERM into terminating the hosted
     /// game, and we only signal the PIDs Silo spawned — the co-resident Steam client is never touched.
-    public func terminateAllSync() {
-        for pid in runningPIDs.values { orchestrator.terminate(pid: pid) }
-        for pid in manualRunningPIDs.values { orchestrator.terminate(pid: pid) }
-    }
+    public func terminateAllSync() { processes.terminateAllSync() }
 
     /// Open `winecfg` for a backend's Steam bottle prefix (prefix-wide, so not per-game — but per-bottle).
     public func openWinecfg(_ graphics: GraphicsBackend = .gptk) async {
@@ -358,7 +350,7 @@ public final class GameLibraryViewModel {
     /// Remove a manual game from the library AND delete its isolated bottle. A portable game's original
     /// files on disk (outside the bottle) are left untouched. Refuses while running.
     public func removeManual(_ game: ManualGame) async {
-        guard manualRunningPIDs[game.id] == nil else { return }
+        guard processes.pid(for: .manual(game.id)) == nil else { return }
         _ = try? await configStore.removeManualGame(id: game.id)
         manualGames.removeAll { $0.id == game.id }
         let deleted = await deleteBottle(game.id)
@@ -373,7 +365,7 @@ public final class GameLibraryViewModel {
     /// GPTK in place, or DXMT's cloned+overlaid variant. The clone/overlay runs off the main actor.
     public func playManual(_ game: ManualGame) async {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id),
-              manualRunningPIDs[game.id] == nil else { return }
+              processes.pid(for: .manual(game.id)) == nil else { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
         guard await ensureManualBottle(game.id) else { return }
         let cfg = backend
@@ -393,8 +385,7 @@ public final class GameLibraryViewModel {
             let pid = try await orchestrator.launchManualGame(
                 game, backend: launchBackend, graphics: context.graphics,
                 prefix: context.prefix, logURL: paths.manualLog(game.id))
-            manualRunningPIDs[game.id] = pid
-            observeManualRun(id: game.id, pid: pid)
+            processes.track(.manual(game.id), pid: pid)
             do {
                 _ = try await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
                 setStatus("Launched \(game.name).")
@@ -403,8 +394,8 @@ public final class GameLibraryViewModel {
                 setStatus("Launched \(game.name), but couldn't save its play date: "
                     + (error as NSError).localizedDescription)
             }
-            watchManualGraphics(id: game.id, log: paths.manualLog(game.id),
-                                name: game.name, backend: game.backend)   // last (see play)
+            watchGraphics(.manual(game.id), log: paths.manualLog(game.id),
+                          name: game.name, backend: game.backend)   // last (see play)
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
         }
@@ -436,11 +427,11 @@ public final class GameLibraryViewModel {
 
     /// Stop a running manual game (taskkill its exe in its own bottle).
     public func stopManual(_ game: ManualGame) async {
-        guard let pid = manualRunningPIDs[game.id] else { return }
+        guard let pid = processes.pid(for: .manual(game.id)) else { return }
         await orchestrator.stopGame(
             pid: pid, exeName: game.executablePath.lastPathComponent,
             prefix: paths.manualBottle(game.id), backend: backend)
-        clearManualRun(game.id)
+        processes.clear(.manual(game.id))
     }
 
     /// Generate a Game-Mode-tagged `.app` in `directory` (default: the Desktop) that launches the game
@@ -494,60 +485,12 @@ public final class GameLibraryViewModel {
         }.value
     }
 
-    private func observeManualRun(id: UUID, pid: Int32) {
-        manualObservers[id]?.cancel()
-        manualObservers[id] = orchestrator.observeExit(pid: pid) { [weak self] in
-            Task { @MainActor in self?.manualGameDidExit(id: id, pid: pid) }
-        }
-    }
-
-    private func manualGameDidExit(id: UUID, pid: Int32) {
-        guard manualRunningPIDs[id] == pid else { return }
-        clearManualRun(id)
-    }
-
-    private func clearManualRun(_ id: UUID) {
-        manualRunningPIDs[id] = nil
-        manualObservers[id]?.cancel(); manualObservers[id] = nil
-        manualGraphicsMonitors[id]?.stop(); manualGraphicsMonitors[id] = nil
-    }
-
-    /// Start watching a Steam game's launch log; surface a status if its backend silently fell back to wined3d.
-    private func watchGraphics(appID: Int, log: URL, name: String, backend: GraphicsBackend) {
-        let monitor = GraphicsFallbackMonitor()
-        graphicsMonitors[appID] = monitor
-        monitor.start(url: log, backend: backend) { [weak self] in
+    /// Watch a launched game's log via the coordinator; surface a status if its backend silently fell back
+    /// to wined3d. The message names the game's chosen backend (GPTK or DXMT) — the signal applies to
+    /// whichever translation layer was attempted.
+    private func watchGraphics(_ id: GameID, log: URL, name: String, backend: GraphicsBackend) {
+        processes.watchGraphics(id, log: log, backend: backend) { [weak self] in
             self?.setStatus("\(name): \(backend.displayName) didn't engage — running on fallback graphics (wined3d).")
-            self?.graphicsMonitors[appID] = nil
         }
-    }
-
-    /// Same, for a manual game's own bottle log. The message names the game's chosen backend (GPTK or DXMT),
-    /// since the "fell back to wined3d" signal applies to whichever translation layer was attempted.
-    private func watchManualGraphics(id: UUID, log: URL, name: String, backend: GraphicsBackend) {
-        let monitor = GraphicsFallbackMonitor()
-        manualGraphicsMonitors[id] = monitor
-        monitor.start(url: log, backend: backend) { [weak self] in
-            self?.setStatus("\(name): \(backend.displayName) didn't engage — running on fallback graphics (wined3d).")
-            self?.manualGraphicsMonitors[id] = nil
-        }
-    }
-
-    private func observeRun(appID: Int, pid: Int32) {
-        runObservers[appID]?.cancel()
-        runObservers[appID] = orchestrator.observeExit(pid: pid) { [weak self] in
-            Task { @MainActor in self?.gameDidExit(appID: appID, pid: pid) }
-        }
-    }
-
-    private func gameDidExit(appID: Int, pid: Int32) {
-        guard runningPIDs[appID] == pid else { return }
-        clearRunState(appID)
-    }
-
-    private func clearRunState(_ id: Int) {
-        runningPIDs[id] = nil
-        runObservers[id]?.cancel(); runObservers[id] = nil
-        graphicsMonitors[id]?.stop(); graphicsMonitors[id] = nil
     }
 }
