@@ -256,4 +256,31 @@ struct GraphicsLinkerTests {
             try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: missing)
         }
     }
+
+    @Test("isOverlayModule: only .dll/.so with a backend's module prefixes; the two filters diverge right")
+    func overlayModulePredicate() {
+        #expect(GraphicsLinker.isOverlayModule("d3d11.dll", prefixes: ["d3d"]))
+        #expect(GraphicsLinker.isOverlayModule("D3D11.DLL", prefixes: ["d3d"]))       // case-insensitive
+        #expect(!GraphicsLinker.isOverlayModule("d3d11.txt", prefixes: ["d3d"]))      // wrong extension
+        #expect(!GraphicsLinker.isOverlayModule("kernel32.dll", prefixes: ["d3d", "dxgi"]))   // guard
+        // The backend filters parameterize the shared predicate — their DIFFERENCES must survive:
+        #expect(GraphicsLinker.isGPTKModule("nvngx.dll") && !GraphicsLinker.isDXMTModule("nvngx.dll"))
+        #expect(GraphicsLinker.isDXMTModule("winemetal.so") && !GraphicsLinker.isGPTKModule("winemetal.so"))
+    }
+
+    @Test("witnessMatches: skip only when the witness is byte-identical in the runtime")
+    func witnessCheck() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        _ = try tmp.makeDir("src"); let win = try tmp.makeDir("win")
+        try tmp.write("src/d3d11.dll", "V1")
+        try tmp.write("src/dxgi.dll", "V1")
+        let modules = [tmp.url.appendingPathComponent("src/d3d11.dll"),
+                       tmp.url.appendingPathComponent("src/dxgi.dll")]
+        #expect(!linker.witnessMatches(modules, in: win))    // nothing overlaid yet
+        try tmp.write("win/d3d11.dll", "V1")
+        #expect(linker.witnessMatches(modules, in: win))     // this build already overlaid → skip
+        try tmp.write("win/d3d11.dll", "V2")
+        #expect(!linker.witnessMatches(modules, in: win))    // an updated build re-applies
+        #expect(!linker.witnessMatches([], in: win))         // no modules → never "already overlaid"
+    }
 }
