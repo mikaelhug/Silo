@@ -59,6 +59,14 @@
     Steam login); verified on synthetic pass/fail PEs. `Scripts/bootstrap-x86-brew.sh` = the shared
     Rosetta + x86_64-Homebrew bootstrap for `build-wine.sh` + `build-dxmt.sh`. `bash -n` + YAML-parse
     clean; CI proper validates on the next workflow dispatch. Toolchain pins untouched.
+  - **Phase 9:** `GameProcessCoordinator` — the live-process bookkeeping (PIDs, kqueue exit observers,
+    graphics-fallback monitors) moved out of `GameLibraryViewModel` into SINGLE tables keyed by
+    `GameID{.steam(appID)|.manual(uuid)}`, replacing the four parallel Steam/manual dictionaries + 8
+    observe/exit/clear/watch methods. The VM's public API (`isRunning`/`isBusy`/`isAnythingRunning`/
+    `terminateAllSync`) is unchanged (zero view edits); `runningPIDs`/`manualRunningPIDs` remain as
+    computed projections so the 507-line VM test suite passed UNMODIFIED. New coordinator tests pin the
+    pid-match stale-exit guard, re-track cancellation, clear-stops-monitor, and exact-PID terminate.
+    300 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**
