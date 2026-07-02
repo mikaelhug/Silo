@@ -48,7 +48,7 @@ struct LibraryGridView: View {
     /// its right when a newer release exists (apply it in Settings → General → Updates).
     private func subtitle(_ count: Int) -> String {
         let games = gameCountLabel(count)
-        guard let update = env.updateCheck, update.isNewer else { return games }
+        guard let update = env.updates.updateCheck, update.isNewer else { return games }
         return "\(games)   ·   Update \(update.latestVersion) available"
     }
 

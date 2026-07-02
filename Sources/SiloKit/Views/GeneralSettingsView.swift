@@ -218,7 +218,7 @@ struct GeneralSettingsView: View {
     @ViewBuilder private var phaseAction: some View {
         switch phase {
         case .updateAvailable:
-            Button { Task { await env.installUpdate() } } label: {
+            Button { Task { await env.updates.installUpdate() } } label: {
                 Label("Update & Relaunch", systemImage: "arrow.down.circle.fill")
             }
             .buttonStyle(.borderedProminent)
@@ -229,7 +229,7 @@ struct GeneralSettingsView: View {
             }
             .transition(.opacity)
         case .failed:
-            Button("Retry") { Task { await env.installUpdate() } }
+            Button("Retry") { Task { await env.updates.installUpdate() } }
                 .transition(.opacity)
         case .busy:
             EmptyView()
@@ -282,23 +282,23 @@ struct GeneralSettingsView: View {
     }
 
     private var phase: Phase {
-        switch env.updateState {
+        switch env.updates.updateState {
         case .downloading: return .busy("Downloading update…")
         case .installing:  return .busy("Installing update…")
         case .failed(let message): return .failed(message)
         case .idle:
             if isChecking { return .busy("Checking for updates…") }
-            if let check = env.updateCheck, check.isNewer { return .updateAvailable(check.latestVersion) }
-            return env.updateCheck != nil ? .upToDate : .unknown
+            if let check = env.updates.updateCheck, check.isNewer { return .updateAvailable(check.latestVersion) }
+            return env.updates.updateCheck != nil ? .upToDate : .unknown
         }
     }
 
     /// Run an update check; the spinner shows for exactly the real check duration, then the fresh
-    /// `env.updateCheck` cross-fades in. No artificial floor — nothing waits.
+    /// `env.updates.updateCheck` cross-fades in. No artificial floor — nothing waits.
     private func runCheck() async {
         guard !isChecking else { return }
         isChecking = true
-        await env.checkForUpdate()
+        await env.updates.checkForUpdate()
         isChecking = false
     }
 }

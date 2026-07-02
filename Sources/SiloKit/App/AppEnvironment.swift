@@ -61,17 +61,10 @@ public final class AppEnvironment {
     /// The DXMT Steam bottle's client session (one Steam install/login per backend).
     public var dxmtClientSession: SteamClientSession { services(for: .dxmt).session }
     private let updater: Updater
-    public private(set) var updateCheck: Updater.UpdateCheck?
-    public private(set) var updateState: UpdateState = .idle
-    public private(set) var isCheckingForUpdate = false
+    /// The inline self-update flow (check / download / relaunch) — Settings → General → Updates.
+    public let updates: UpdateCoordinator
     public private(set) var didBootstrap = false
     private var isBootstrapping = false
-
-    /// Progress of the inline (download + self-replace + relaunch) update.
-    public enum UpdateState: Sendable, Equatable {
-        case idle, downloading, installing
-        case failed(String)
-    }
 
     public init(
         paths: AppPaths = .standard(),
@@ -81,7 +74,9 @@ public final class AppEnvironment {
         self.paths = paths
         self.runner = runner
         self.wineTools = WineTools(runner: runner)
-        self.updater = updater ?? Updater(runner: runner)
+        let updater = updater ?? Updater(runner: runner)
+        self.updater = updater
+        self.updates = UpdateCoordinator(updater: updater, updatesDir: paths.updatesDir)
 
         let configStore = ConfigStore(paths: paths)
         let linker = GraphicsLinker()
@@ -153,7 +148,7 @@ public final class AppEnvironment {
         for services in backends.values { await services.bottleVM.refreshInstalled() }
         // Library = games installed in the Steam bottle.
         await gameLibrary.load()
-        await checkForUpdate()   // best-effort; sets updateCheck + the "up to date" message (nil on offline)
+        await updates.checkForUpdate()   // best-effort; nil updateCheck on offline
         didBootstrap = true
         isBootstrapping = false
     }
@@ -238,37 +233,6 @@ public final class AppEnvironment {
             await updater.relaunch(bundle)   // launches the new instance + exit(0); never returns
         } else {
             bottlesMessage = "Bottles moved to \(newRoot.path). Restart Silo to use the new location."
-        }
-    }
-
-    /// Manually re-check GitHub for a newer app release — the same check `bootstrap()` runs automatically,
-    /// surfaced as a "Check for Updates" button in Settings → General.
-    public func checkForUpdate() async {
-        guard !isCheckingForUpdate else { return }
-        isCheckingForUpdate = true
-        updateCheck = try? await updater.checkForUpdate()   // best-effort; nil on failure/offline
-        isCheckingForUpdate = false
-    }
-
-    /// Apply the available update **inline** (Sparkle-style): download the release, swap the running
-    /// `Silo.app` in place, and relaunch — no browser hop or manual install. No-op without a newer
-    /// release; surfaces a recoverable `.failed` state when not running from an `.app` bundle (dev/CLI)
-    /// or on a download/install error. On success it relaunches and never returns. Surfaced by the General
-    /// settings tab (`GeneralSettingsView`).
-    public func installUpdate() async {
-        guard let check = updateCheck, check.isNewer else { return }
-        guard let appBundle = Updater.runningAppBundle() else {
-            updateState = .failed("Silo isn't running from an installed app bundle.")
-            return
-        }
-        updateState = .downloading
-        do {
-            let zip = try await updater.downloadUpdate(check, into: paths.updatesDir)
-            updateState = .installing
-            try await updater.installUpdate(zip: zip, replacing: appBundle)
-            await updater.relaunch(appBundle)   // launches the new build + exit(0); never returns
-        } catch {
-            updateState = .failed(error.localizedDescription)
         }
     }
 
