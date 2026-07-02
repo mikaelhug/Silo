@@ -153,14 +153,14 @@ struct AppEnvironmentUpdateTests {
             atPath: paths.steamBottle.appendingPathComponent("marker").path, contents: Data("x".utf8))
 
         let dest = try tmp.makeDir("External")
-        await env.moveBottles(to: dest)
+        await env.bottles.moveBottles(to: dest)
 
         let newRoot = dest.appendingPathComponent("Silo Bottles")
         #expect(FileManager.default.fileExists(atPath: newRoot.appendingPathComponent("SteamBottle/marker").path))
         #expect(!FileManager.default.fileExists(atPath: paths.steamBottle.appendingPathComponent("marker").path))
         #expect(BottlesLocation.read(supportDir: paths.supportDir)?.path == newRoot.path)   // override persisted
-        #expect(env.bottlesMessage?.contains("Restart") == true)   // no .app bundle under swift test
-        #expect(!env.bottlesBusy)
+        #expect(env.bottles.message?.contains("Restart") == true)   // no .app bundle under swift test
+        #expect(!env.bottles.busy)
     }
 
     @Test("moveBottles refuses an exFAT/FAT destination (no move, no persist)")
@@ -168,17 +168,17 @@ struct AppEnvironmentUpdateTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
-        env.bottlesFilesystemRejects = { _ in true }   // simulate the destination being exFAT
+        env.bottles.filesystemRejects = { _ in true }   // simulate the destination being exFAT
         try FileManager.default.createDirectory(at: paths.steamBottle, withIntermediateDirectories: true)
         let dest = try tmp.makeDir("FATDrive")
 
-        await env.moveBottles(to: dest)
+        await env.bottles.moveBottles(to: dest)
 
-        #expect(env.bottlesMessage?.lowercased().contains("exfat") == true)
+        #expect(env.bottles.message?.lowercased().contains("exfat") == true)
         #expect(!FileManager.default.fileExists(           // not moved
             atPath: dest.appendingPathComponent("Silo Bottles/SteamBottle").path))
         #expect(BottlesLocation.read(supportDir: paths.supportDir) == nil)   // not persisted
-        #expect(!env.bottlesBusy)
+        #expect(!env.bottles.busy)
     }
 
     @Test("resetBottlesLocation moves bottles back to the default and clears the override")
@@ -195,7 +195,7 @@ struct AppEnvironmentUpdateTests {
             atPath: ext.appendingPathComponent("ManualBottles/uuid/m").path, contents: Data())
         BottlesLocation.write(ext, supportDir: support)
 
-        await env.resetBottlesLocation()
+        await env.bottles.resetBottlesLocation()
 
         #expect(FileManager.default.fileExists(atPath: support.appendingPathComponent("ManualBottles/uuid/m").path))
         #expect(BottlesLocation.read(supportDir: support) == nil)   // override cleared → default

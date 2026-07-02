@@ -78,8 +78,8 @@ struct GeneralSettingsView: View {
                       systemImage: "externaldrive.badge.exclamationmark")
                     .font(.caption).foregroundStyle(.orange)
             }
-            if env.bottlesBusy {
-                if let fraction = env.bottlesProgress, fraction > 0 {
+            if env.bottles.busy {
+                if let fraction = env.bottles.progress, fraction > 0 {
                     ProgressView(value: fraction) {
                         Text("Moving bottles…")
                     } currentValueLabel: {
@@ -88,7 +88,7 @@ struct GeneralSettingsView: View {
                 } else {
                     HStack(spacing: 10) {
                         ProgressView().controlSize(.small)
-                        Text(env.bottlesMessage ?? "Moving bottles…").foregroundStyle(.secondary)
+                        Text(env.bottles.message ?? "Moving bottles…").foregroundStyle(.secondary)
                     }
                 }
             } else {
@@ -96,19 +96,19 @@ struct GeneralSettingsView: View {
                     Button("Move…") {
                         if let dir = chooseDirectory(
                             message: "Choose where to keep Silo's bottles (e.g. an external drive).") {
-                            Task { await env.moveBottles(to: dir) }
+                            Task { await env.bottles.moveBottles(to: dir) }
                         }
                     }
                     .disabled(env.anythingRunning)
                     if env.paths.bottlesRelocated {
-                        Button("Reset to Default") { Task { await env.resetBottlesLocation() } }
+                        Button("Reset to Default") { Task { await env.bottles.resetBottlesLocation() } }
                             .disabled(env.anythingRunning)
                     }
                 }
                 if env.anythingRunning {
                     Text("Stop running games and Steam to move bottles.")
                         .font(.caption).foregroundStyle(.secondary)
-                } else if let message = env.bottlesMessage {
+                } else if let message = env.bottles.message {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
             }
