@@ -3,9 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **🧹 Full-project cleanup IN PROGRESS (2026-07-01, plan: 3 tiers — robustness, dedupe, structure).**
-  Branch `dxmt-dual-bottle-backend` merged to `main` (ff); cleanup lands phase-by-phase on `main`, each
-  green. Done so far:
+- **🧹 Full-project cleanup COMPLETE (2026-07-02, 3 tiers — robustness, dedupe, structure; 12 phases,
+  each landed green).** Branch `dxmt-dual-bottle-backend` merged to `main` (ff); all phases on `main`.
+  **Final verification:** `swift build` zero warnings, **305 tests green**, `Scripts/build-app.sh`
+  assembles + ad-hoc-signs `dist/Silo.app`, `SILO_SMOKE=1` run passes, `git status` clean.
+  Remaining (needs a human/on-device): a `Scripts/dev.sh` visual pass over the deduped views (library
+  grid, both settings sheets, both bottle sections) + the next `build-wine` CI dispatch exercises the
+  shared wrapper-check script. Phase log:
   - **Phase 0:** `.dxmt-build/` + `.dxmt-build-fullrun.log` gitignored (670 MB build artifacts).
   - **Phase 1:** `ConfigStore` recovery copy — every save refreshes `config.json.bak`; a
     present-but-corrupt primary restores the last good save (and self-heals the primary) instead of
@@ -76,6 +80,10 @@
     (`env.bottles`, in Provisioning/ next to `BottleRelocator`) owns the move flow;
     relocation-via-relaunch design unchanged; `isBlocked` late-bound to `env.anythingRunning`.
     AppEnvironment is now ≈300 lines of composition + thin orchestration. 301 tests green.
+  - **Phase 11:** `RuntimeVariants` direct tests (the one real coverage gap): GPTK prepares in place
+    (no clone), DXMT clones to `<root>-dxmt` + overlays the CLONE only, an existing clone survives
+    re-prepare (idempotency — a re-clone would wipe in-clone state), `variantWine` is pure path math.
+    305 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**
