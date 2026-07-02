@@ -12,6 +12,26 @@ struct AppEnvironmentUpdateTests {
       {"name":"Silo.app.zip","browser_download_url":"https://example.com/Silo.app.zip","size":1}]}]
     """
 
+    @Test("BackendServices: one bundle per backend, each internally consistent; forwards match")
+    func backendBundles() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let env = AppEnvironment(
+            paths: AppPaths(supportDir: tmp.url.appendingPathComponent("Silo")),
+            runner: FakeProcessRunner())
+        #expect(env.backends.count == GraphicsBackend.allCases.count)
+        for backend in GraphicsBackend.allCases {
+            let services = env.services(for: backend)
+            #expect(services.backend == backend)
+            #expect(services.bottle.backend == backend)   // the bundle can't cross-wire bottles
+            #expect(services.session.backend == backend)
+        }
+        // The pre-bundle convenience names resolve to the SAME objects as the keyed table.
+        #expect(env.steamBottleVM === env.services(for: .gptk).bottleVM)
+        #expect(env.dxmtBottleVM === env.services(for: .dxmt).bottleVM)
+        #expect(env.steamClientSession === env.services(for: .gptk).session)
+        #expect(env.dxmtClientSession === env.services(for: .dxmt).session)
+    }
+
     @Test("a fresh Steam install flips the library's cached steamReady gate (onSteamInstalled wiring)")
     func steamInstallFlipsLibraryGate() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
