@@ -1,5 +1,26 @@
 import Foundation
 
+/// One backend's Steam-bottle service bundle: the bottle, its live client session, and the settings VM
+/// driving setup/launch. Built once per `GraphicsBackend` by `AppEnvironment`, so backend services are
+/// a keyed table instead of gptk/dxmt copy-paste pairs. Every backend's Steam client runs on the BASE
+/// wine (CEF needs no d3d; a co-resident game picks the per-backend variant runtime — shared wineserver);
+/// a secondary backend's bottle stays empty until the user sets it up via onboarding.
+@MainActor
+public final class BackendServices {
+    public let backend: GraphicsBackend
+    public let bottle: SteamBottle
+    public let session: SteamClientSession
+    public let bottleVM: SteamBottleViewModel
+
+    init(backend: GraphicsBackend, runner: ProcessRunning, paths: AppPaths,
+         orchestrator: LaunchOrchestrator) {
+        self.backend = backend
+        self.bottle = SteamBottle(runner: runner, paths: paths, backend: backend)
+        self.session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        self.bottleVM = SteamBottleViewModel(bottle: bottle, session: session)
+    }
+}
+
 /// Composition root: constructs every service + the long-lived view models, and wires them together.
 @MainActor
 @Observable
@@ -18,14 +39,27 @@ public final class AppEnvironment {
     public let backendSettings: BackendSettingsViewModel
     public let runtime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
-    public let steamBottleVM: SteamBottleViewModel
-    /// Setup + launch for the DXMT Steam bottle (the older-games path) — same flow, the DXMT prefix.
-    public let dxmtBottleVM: SteamBottleViewModel
-    /// The owner of the GPTK Steam bottle's live client (shared by the Library + the settings pane).
-    public let steamClientSession: SteamClientSession
-    /// The DXMT Steam bottle's client session (one Steam install/login per backend).
-    public let dxmtClientSession: SteamClientSession
+    /// Per-backend Steam-bottle service bundles (bottle + client session + settings VM) — the ONE place
+    /// backend services are built, keyed so nothing is duplicated per backend.
+    public let backends: [GraphicsBackend: BackendServices]
     public let steamStore = SteamStoreClient()
+
+    /// A backend's service bundle. Total by construction — `init` builds one per `GraphicsBackend`.
+    public func services(for backend: GraphicsBackend) -> BackendServices {
+        guard let services = backends[backend] else {
+            preconditionFailure("BackendServices missing for \(backend) — init builds one per backend")
+        }
+        return services
+    }
+
+    // Convenience forwards (the pre-bundle names the views + tests use).
+    public var steamBottleVM: SteamBottleViewModel { services(for: .gptk).bottleVM }
+    /// Setup + launch for the DXMT Steam bottle (the older-games path) — same flow, the DXMT prefix.
+    public var dxmtBottleVM: SteamBottleViewModel { services(for: .dxmt).bottleVM }
+    /// The owner of the GPTK Steam bottle's live client (shared by the Library + the settings pane).
+    public var steamClientSession: SteamClientSession { services(for: .gptk).session }
+    /// The DXMT Steam bottle's client session (one Steam install/login per backend).
+    public var dxmtClientSession: SteamClientSession { services(for: .dxmt).session }
     private let updater: Updater
     public private(set) var updateCheck: Updater.UpdateCheck?
     public private(set) var updateState: UpdateState = .idle
@@ -67,24 +101,20 @@ public final class AppEnvironment {
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
-        let bottle = SteamBottle(runner: runner, paths: paths, backend: .gptk)
-        let steamClientSession = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
-        self.steamClientSession = steamClientSession
-        // The DXMT Steam bottle + its client session (one Steam install/login per backend). The client runs
-        // on the base wine (CEF needs no d3d; a co-resident DXMT game launches on the DXMT variant runtime,
-        // which shares the prefix's wineserver). Empty until the user sets it up via onboarding.
-        let dxmtBottle = SteamBottle(runner: runner, paths: paths, backend: .dxmt)
-        let dxmtSession = SteamClientSession(bottle: dxmtBottle, orchestrator: orchestrator)
-        self.dxmtClientSession = dxmtSession
+        // One service bundle (bottle + client session + settings VM) per backend — see BackendServices.
+        var backends: [GraphicsBackend: BackendServices] = [:]
+        for backend in GraphicsBackend.allCases {
+            backends[backend] = BackendServices(
+                backend: backend, runner: runner, paths: paths, orchestrator: orchestrator)
+        }
+        self.backends = backends
+
         let gameLibrary = GameLibraryViewModel(
-            bottle: bottle, discovery: discovery, orchestrator: orchestrator,
-            configStore: configStore, paths: paths, backend: initialBackend, session: steamClientSession,
-            dxmtSession: dxmtSession,
+            bottle: backends[.gptk]!.bottle, discovery: discovery, orchestrator: orchestrator,
+            configStore: configStore, paths: paths, backend: initialBackend,
+            session: backends[.gptk]!.session, dxmtSession: backends[.dxmt]?.session,
             provisioner: WinePrefixProvisioner(runner: runner))
         self.gameLibrary = gameLibrary
-        let steamBottleVM = SteamBottleViewModel(bottle: bottle, session: steamClientSession)
-        self.steamBottleVM = steamBottleVM
-        self.dxmtBottleVM = SteamBottleViewModel(bottle: dxmtBottle, session: dxmtSession)
 
         backendSettings.onChange = { [weak self] in self?.applyBackend($0) }
         gptkManager.onDefaultChanged = { [weak self] install in
@@ -95,17 +125,17 @@ public final class AppEnvironment {
         }
         // A fresh Steam install must flip the library's cached `steamReady` gate (it drives onboarding);
         // load() re-probes the cache off-main. Without this, onboarding would stall until a relaunch.
-        steamBottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
-        dxmtBottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
+        for services in backends.values {
+            services.bottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
+        }
     }
 
     /// Fan out a backend-config change to the view models that depend on it.
     private func applyBackend(_ config: BackendConfig) {
         gameLibrary.updateBackend(config)
-        // Both Steam clients run on the base wine (CEF; co-resident games pick the per-backend variant).
-        // updateWine on each bottle VM also updates its session's wine.
-        steamBottleVM.updateWine(config.wineBinaryPath)
-        dxmtBottleVM.updateWine(config.wineBinaryPath)
+        // Every backend's Steam client runs on the base wine (CEF; co-resident games pick the per-backend
+        // variant). updateWine on each bottle VM also updates its session's wine.
+        for services in backends.values { services.bottleVM.updateWine(config.wineBinaryPath) }
     }
 
     /// Load persisted config and populate the UI. Idempotent.
@@ -120,8 +150,7 @@ public final class AppEnvironment {
         runtime.defaultName = state.backend.wineRuntimeName
         await runtime.refresh()
         // Populate the bottle VMs' cached installed-flags (settings buttons gate on them).
-        await steamBottleVM.refreshInstalled()
-        await dxmtBottleVM.refreshInstalled()
+        for services in backends.values { await services.bottleVM.refreshInstalled() }
         // Library = games installed in the Steam bottle.
         await gameLibrary.load()
         await checkForUpdate()   // best-effort; sets updateCheck + the "up to date" message (nil on offline)
@@ -144,10 +173,11 @@ public final class AppEnvironment {
     /// Rejects a destination whose filesystem can't hold a Wine bottle (exFAT/FAT). Injectable for tests.
     var bottlesFilesystemRejects: @Sendable (URL) -> Bool = { Filesystem.isFATFamily($0) }
 
-    /// True while any game OR the bottle Steam client is live — relocation is refused then (we'd be moving
-    /// prefixes out from under running wineservers).
+    /// True while any game OR any bottle's Steam client is live — relocation is refused then (we'd be
+    /// moving prefixes out from under running wineservers). Checks EVERY backend's session: a live DXMT
+    /// client is just as much a running wineserver as the GPTK one.
     public var anythingRunning: Bool {
-        gameLibrary.isAnythingRunning || steamClientSession.isRunning
+        gameLibrary.isAnythingRunning || backends.values.contains { $0.session.isRunning }
     }
 
     /// Move all bottles into a `Silo Bottles` folder inside `chosen` (a directory the user picked — e.g. an
