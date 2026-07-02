@@ -24,9 +24,16 @@ public struct GraphicsLinker: Sendable {
     /// `nvngx-on-metalfx`). Used to select what to overlay, and as a guard so we never clobber an
     /// unrelated wine module should a future GPTK ship more than its d3d tree.
     static func isGPTKModule(_ name: String) -> Bool {
+        isOverlayModule(name, prefixes: ["d3d", "dxgi", "nv"])
+    }
+
+    /// The shared module filter both backends parameterize: a `.dll`/`.so` whose basename starts with one
+    /// of that backend's module prefixes — selects what to overlay AND guards against clobbering an
+    /// unrelated wine module.
+    static func isOverlayModule(_ name: String, prefixes: [String]) -> Bool {
         let n = name.lowercased()
         guard n.hasSuffix(".dll") || n.hasSuffix(".so") else { return false }
-        return n.hasPrefix("d3d") || n.hasPrefix("dxgi") || n.hasPrefix("nv")
+        return prefixes.contains { n.hasPrefix($0) }
     }
 
     /// Overlay Apple GPTK's D3DMetal modules into the **wine runtime** (not a game prefix) so wine loads
@@ -67,19 +74,11 @@ public struct GraphicsLinker: Sendable {
         try linkD3DMetalFramework(unixDir: wineUnixDir, externalDir: wineExternal)
 
         // Idempotent: if a witness module is already byte-identical, the runtime carries THIS GPTK — skip.
-        let witness = modules.first { $0.lastPathComponent == "d3d11.dll" } ?? modules[0]
-        if fileManager.contentsEqual(
-            atPath: witness.path,
-            andPath: wineWinDir.appendingPathComponent(witness.lastPathComponent).path) { return }
+        if witnessMatches(modules, in: wineWinDir) { return }
 
         try fileManager.createDirectory(at: wineExternal, withIntermediateDirectories: true)
-        for dll in modules {
-            try replace(dll, in: wineWinDir)
-            // The matching unix `.so` is GPTK's D3DMetal bridge (a relative symlink we must preserve).
-            let so = gptkUnixDir.appendingPathComponent(
-                (dll.lastPathComponent as NSString).deletingPathExtension + ".so")
-            if isSymlink(so) || fileManager.fileExists(atPath: so.path) { try replace(so, in: wineUnixDir) }
-        }
+        // Each PE dll + its matching unix `.so` — GPTK's D3DMetal bridge (relative symlinks preserved).
+        try copyModules(modules, unixSource: gptkUnixDir, toWin: wineWinDir, toUnix: wineUnixDir)
         // libd3dshared.dylib + D3DMetal.framework (the Metal backend the `.so` symlinks resolve against).
         for item in (try? fileManager.contentsOfDirectory(at: gptkExternal, includingPropertiesForKeys: nil)) ?? [] {
             try replace(item, in: wineExternal)
@@ -96,9 +95,7 @@ public struct GraphicsLinker: Sendable {
     /// D3D10/11 only — it ships no `d3d12` and no `d3d9`. Used to select what to overlay and as a guard so
     /// we never clobber an unrelated wine module.
     static func isDXMTModule(_ name: String) -> Bool {
-        let n = name.lowercased()
-        guard n.hasSuffix(".dll") || n.hasSuffix(".so") else { return false }
-        return n.hasPrefix("d3d") || n.hasPrefix("dxgi") || n.hasPrefix("winemetal")
+        isOverlayModule(name, prefixes: ["d3d", "dxgi", "winemetal"])
     }
 
     /// Overlay 3Shain's DXMT modules into the **wine runtime** (not a game prefix) so wine loads DXMT's
@@ -129,23 +126,39 @@ public struct GraphicsLinker: Sendable {
         guard !modules.isEmpty else { return }
 
         // Idempotent: if a witness module is already byte-identical, the runtime carries THIS DXMT — skip.
-        let witness = modules.first { $0.lastPathComponent == "d3d11.dll" } ?? modules[0]
-        if fileManager.contentsEqual(
-            atPath: witness.path,
-            andPath: wineWinDir.appendingPathComponent(witness.lastPathComponent).path) { return }
+        if witnessMatches(modules, in: wineWinDir) { return }
 
         try fileManager.createDirectory(at: wineWinDir, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: wineUnixDir, withIntermediateDirectories: true)
-        for dll in modules {
-            try replace(dll, in: wineWinDir)
-            // The matching unix `.so` (only `winemetal.so` actually exists) is DXMT's Metal bridge.
-            let so = dxmtUnixDir.appendingPathComponent(
-                (dll.lastPathComponent as NSString).deletingPathExtension + ".so")
-            if isSymlink(so) || fileManager.fileExists(atPath: so.path) { try replace(so, in: wineUnixDir) }
-        }
+        // Each PE dll + the matching unix `.so` (only `winemetal.so` exists — DXMT's Metal bridge).
+        try copyModules(modules, unixSource: dxmtUnixDir, toWin: wineWinDir, toUnix: wineUnixDir)
     }
 
     // MARK: - Helpers
+
+    /// The idempotency check shared by both overlays: if a representative module (preferring `d3d11.dll`)
+    /// is already byte-identical inside the runtime's windows-modules dir, the runtime carries THIS
+    /// backend build and the overlay can be skipped. One witness suffices — a backend's modules ship and
+    /// update as a set.
+    func witnessMatches(_ modules: [URL], in winDir: URL) -> Bool {
+        guard let witness = modules.first(where: { $0.lastPathComponent == "d3d11.dll" }) ?? modules.first
+        else { return false }
+        return fileManager.contentsEqual(
+            atPath: witness.path,
+            andPath: winDir.appendingPathComponent(witness.lastPathComponent).path)
+    }
+
+    /// The per-module copy loop shared by both overlays: each PE `.dll` into the runtime's
+    /// windows-modules dir and — when the backend ships one — the matching unix `.so` (symlinks
+    /// recreated via `replace`, never dereferenced) into the unix-modules dir.
+    private func copyModules(_ modules: [URL], unixSource: URL, toWin winDir: URL, toUnix unixDir: URL) throws {
+        for dll in modules {
+            try replace(dll, in: winDir)
+            let so = unixSource.appendingPathComponent(
+                (dll.lastPathComponent as NSString).deletingPathExtension + ".so")
+            if isSymlink(so) || fileManager.fileExists(atPath: so.path) { try replace(so, in: unixDir) }
+        }
+    }
 
     /// The relative symlink target from `<wine>/lib/wine/x86_64-unix` to the overlaid framework.
     static let d3dMetalUnixLinkTarget = "../../external/D3DMetal.framework"

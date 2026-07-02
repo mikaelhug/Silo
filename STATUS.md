@@ -40,6 +40,12 @@
     `Silo.enforceMsync` / `msyncWineEnvironment` — adopted by all five sites that each rebuilt it
     (`makePlan`, `stopGame`, `runWineTool`, `WineTools.environment`, `SteamBottle.steamEnvironment`).
     Zero behavior change (pinned by the exact env assertions across those suites). 292 tests green.
+  - **Phase 6:** `GraphicsLinker` mechanics dedupe — `isGPTKModule`/`isDXMTModule` parameterize one
+    `isOverlayModule(_:prefixes:)`; the witness idempotency check and the per-dll+`.so` copy loop are
+    shared (`witnessMatches`, `copyModules`). SEMANTICS untouched: GPTK keeps its exact choreography
+    (pre-witness framework-link self-repair → copy → re-link; no `wineWinDir` creation), DXMT keeps its
+    dir creation. Pinned by the idempotency/self-repair/symlink suites + new direct helper tests.
+    294 tests green.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**
