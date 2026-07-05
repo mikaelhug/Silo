@@ -232,13 +232,15 @@ struct AddGameSheet: View {
 }
 
 /// The Settings window (macOS "Settings…" / ⌘, and the Library toolbar gear), a tabbed pane:
-/// **General** (Steam bottle + updates), **GPTK**, **Wine**.
+/// **General** (Steam bottle, bottle tools + location, updates) plus the three runtime tabs —
+/// **Wine**, **GPTK**, **DXMT**.
 struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettingsView().tabItem { Label("General", systemImage: "gearshape") }
-            GPTKManagerView().tabItem { Label("GPTK", systemImage: "cpu") }
             WineDownloadView().tabItem { Label("Wine", systemImage: "wineglass") }
+            GPTKManagerView().tabItem { Label("GPTK", systemImage: "cpu") }
+            DXMTManagerView().tabItem { Label("DXMT", systemImage: "square.stack.3d.up") }
         }
         // Definite compact size; with the scene's `.windowResizability(.contentSize)` the WINDOW becomes
         // exactly this (no grey side-columns), a fixed-size settings pane per macOS convention.

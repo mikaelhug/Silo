@@ -1,10 +1,9 @@
 import SwiftUI
 import AppKit
 
-/// The **General** settings tab: Steam-bottle setup, with the app version + inline updater at the bottom.
+/// The **General** settings tab: Steam-bottle setup + tools, bottle location, and the inline updater.
 struct GeneralSettingsView: View {
     @Environment(AppEnvironment.self) private var env
-    @Environment(\.openWindow) private var openWindow
 
     /// Local "an update check is running" flag — drives the row's spinner/animation for the duration of
     /// the GitHub call.
@@ -18,7 +17,6 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             steamBottleSection
-            dxmtSection
             bottleToolsSection
             bottlesSection
             updatesSection
@@ -31,15 +29,10 @@ struct GeneralSettingsView: View {
     @ViewBuilder private var bottleToolsSection: some View {
         let configured = env.wineBinary != nil
         Section {
-            Toggle(isOn: Binding(
+            Toggle("Retina / HiDPI mode", isOn: Binding(
                 get: { env.backendSettings.config.retinaMode },
-                set: { on in Task { await env.setSteamBottleRetina(on) } })
-            ) {
-                Text("Retina / HiDPI mode")
-                Text("Render games at the Mac's native resolution. Fixes wrong-sized windows; applies on "
-                     + "the next launch.").font(.caption).foregroundStyle(.secondary)
-            }
-            .disabled(!configured || env.bottleToolsBusy)
+                set: { on in Task { await env.setSteamBottleRetina(on) } }))
+                .disabled(!configured || env.bottleToolsBusy)
 
             LabeledContent("Repair") {
                 HStack(spacing: 8) {
@@ -52,11 +45,7 @@ struct GeneralSettingsView: View {
             Button("Reveal Bottle in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([env.paths.steamBottle])
             }
-            Toggle(isOn: $stopGamesOnQuit) {
-                Text("Stop running games when Silo quits")
-                Text("SIGTERMs games Silo launched on quit (never the Steam client). Off keeps a game "
-                     + "running if you quit the launcher.").font(.caption).foregroundStyle(.secondary)
-            }
+            Toggle("Stop running games when Silo quits", isOn: $stopGamesOnQuit)
             if let message = env.bottleToolsMessage {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }
@@ -94,8 +83,7 @@ struct GeneralSettingsView: View {
             } else {
                 HStack {
                     Button("Move…") {
-                        if let dir = chooseDirectory(
-                            message: "Choose where to keep Silo's bottles (e.g. an external drive).") {
+                        if let dir = chooseDirectory(message: "Choose a folder for Silo's bottles.") {
                             Task { await env.bottles.moveBottles(to: dir) }
                         }
                     }
@@ -106,8 +94,7 @@ struct GeneralSettingsView: View {
                     }
                 }
                 if env.anythingRunning {
-                    Text("Stop running games and Steam to move bottles.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Stop games and Steam first.").font(.caption).foregroundStyle(.secondary)
                 } else if let message = env.bottles.message {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
@@ -127,44 +114,6 @@ struct GeneralSettingsView: View {
                 logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog)
         } header: {
             Text("Steam bottle")
-        }
-    }
-
-    /// The optional DXMT backend: import its runtime + stand up its own Steam bottle (older DX10/11 games).
-    @ViewBuilder private var dxmtSection: some View {
-        Section {
-            LabeledContent("Runtime") {
-                HStack(spacing: 8) {
-                    if env.dxmtDownloading { ProgressView().controlSize(.small) }
-                    Text(env.dxmtReady ? (env.backendSettings.config.dxmtRuntimeName ?? "Installed") : "Not installed")
-                        .foregroundStyle(.secondary)
-                    Button("Download Latest") { Task { await env.downloadLatestDXMT() } }
-                        .disabled(env.dxmtDownloading)
-                    Button(env.dxmtReady ? "Replace…" : "Import…") {
-                        if let dir = chooseDirectory(message: "Choose the DXMT x86_64-windows module folder.") {
-                            Task { await env.importDXMTRuntime(from: dir) }
-                        }
-                    }
-                    .disabled(env.dxmtDownloading)
-                }
-            }
-            SteamBottleControls(
-                bottle: env.dxmtBottleVM, noun: "DXMT Steam",
-                logButtonTitle: "Open DXMT bottle log",
-                logWindowTitle: "DXMT Steam Bottle — Log", logURL: env.paths.steamBottleLog(.dxmt))
-            LabeledContent("Repair") {
-                HStack(spacing: 8) {
-                    Button("Wine Config") { Task { await env.openWineTool("winecfg", for: .dxmt) } }
-                    Button("Registry") { Task { await env.openWineTool("regedit", for: .dxmt) } }
-                    Button("Control Panel") { Task { await env.openWineTool("control", for: .dxmt) } }
-                }
-                .disabled(env.wineBinary == nil || !env.dxmtSteamReady)
-            }
-        } header: {
-            Text("DXMT — older games (optional)")
-        } footer: {
-            Text("A second backend + Steam bottle for DirectX 10/11 titles GPTK can't run (e.g. Overcooked 2). "
-                 + "Sign into this bottle separately — Steam machine tokens are per-bottle.")
         }
     }
 
@@ -257,8 +206,7 @@ struct GeneralSettingsView: View {
         }
         var subtitle: String? {
             switch self {
-            case .updateAvailable:      return "Download it and relaunch in place."
-            case .failed(let message):  return message
+            case .failed(let message):  return message   // crucial: why it failed
             default:                    return nil
             }
         }
