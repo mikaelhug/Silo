@@ -84,6 +84,12 @@
     (no clone), DXMT clones to `<root>-dxmt` + overlays the CLONE only, an existing clone survives
     re-prepare (idempotency — a re-clone would wipe in-clone state), `variantWine` is pure path math.
     305 tests green.
+- **🪟 Settings UX pass (2026-07-05):** DXMT is now its own **runtime tab** (`DXMTManagerView`)
+  alongside Wine + GPTK — Settings tabs are General · Wine · GPTK · DXMT. The whole DXMT concern
+  (runtime download/import + its Steam bottle + repair tools) moved out of the General tab into the
+  DXMT tab, so General is just the primary Steam bottle, bottle tools, bottle location, and updates.
+  Trimmed explanatory captions across onboarding + settings (kept labels, status/error messages, and
+  warnings) to cut visual clutter. 305 tests still green; app assembles + smoke ok.
 - **🧩 DXMT as a second graphics backend — dual-bottle feature built end-to-end (2026-06-30, 267 tests green).**
   Reverses the GPTK-only stance (and M87's DXVK removal) per the user's design; `CLAUDE.md` "Graphics
   backends" rewritten to match. Branch `dxmt-dual-bottle-backend`. **Done + green:**

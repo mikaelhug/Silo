@@ -15,29 +15,27 @@ struct OnboardingView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "wineglass").font(.system(size: 46)).foregroundStyle(.tint)
                     Text("Welcome to Silo").font(.largeTitle.bold())
-                    Text("Three quick steps to play your Windows Steam games.")
-                        .foregroundStyle(.secondary)
+                    Text("Three quick steps to get playing.").foregroundStyle(.secondary)
                 }
 
                 VStack(spacing: 12) {
                     StepRow(
                         number: 1, title: "Install Wine",
-                        subtitle: "Downloads a prebuilt Wine build (~250 MB).",
+                        subtitle: "~250 MB download.",
                         done: env.wineReady, busy: runtime.isInstalling,
                         actionLabel: "Install Wine",
                         action: { Task { await env.runtime.installLatest() } })
 
                     StepRow(
                         number: 2, title: "Import Game Porting Toolkit",
-                        subtitle: "Choose Apple's GPTK .dmg (the D3DMetal graphics layer).",
+                        subtitle: "Apple's GPTK .dmg.",
                         done: env.gptkReady, busy: gptk.isImporting,
                         actionLabel: "Choose .dmg…",
                         action: { if let dmg = chooseDiskImage() { Task { await env.gptkManager.importGPTK(from: dmg) } } })
 
                     StepRow(
                         number: 3, title: "Set up the Steam bottle",
-                        subtitle: "Installs a Windows Steam client into a shared prefix; launch it and sign "
-                            + "in once to install + run your games.",
+                        subtitle: "Sign in once.",
                         done: env.steamReady, busy: steam.busy, locked: !env.wineReady,
                         actionLabel: "Set up…",
                         action: { Task { await env.steamBottleVM.setUp() } })
@@ -54,7 +52,7 @@ struct OnboardingView: View {
                         .multilineTextAlignment(.center).frame(maxWidth: 540)
                 }
 
-                Link("Download GPTK from Apple (requires Apple ID)", destination: Silo.appleGPTKURL)
+                Link("Get GPTK from Apple (Apple ID required)", destination: Silo.appleGPTKURL)
                     .font(.caption)
             }
             .padding(40)
@@ -75,14 +73,13 @@ private struct DXMTOnboardingSection: View {
             VStack(spacing: 12) {
                 StepRow(
                     number: 1, title: "Install the DXMT runtime",
-                    subtitle: "Downloads the latest DXMT build from GitHub Releases (or import a folder later "
-                        + "in Settings → DXMT).",
+                    subtitle: "Latest build from GitHub.",
                     done: env.dxmtReady, busy: env.dxmtDownloading, locked: !env.wineReady,
                     actionLabel: "Download…",
                     action: { Task { await env.downloadLatestDXMT() } })
                 StepRow(
                     number: 2, title: "Set up the DXMT Steam bottle",
-                    subtitle: "Installs a second Windows Steam client; sign in to install your older games here.",
+                    subtitle: "Sign in once.",
                     done: env.dxmtSteamReady, busy: env.dxmtBottleVM.busy, locked: !env.wineReady,
                     actionLabel: "Set up…",
                     action: { Task { await env.dxmtBottleVM.setUp() } })
@@ -91,7 +88,7 @@ private struct DXMTOnboardingSection: View {
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Older games (DXMT) — optional").font(.headline)
-                Text("A fallback backend for DirectX 10/11 titles GPTK can't run (e.g. Overcooked 2).")
+                Text("For DirectX 10/11 games GPTK can't run.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
