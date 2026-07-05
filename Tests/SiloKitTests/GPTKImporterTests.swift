@@ -73,7 +73,7 @@ struct GPTKImporterTests {
         let eval = try makeEvalMount(tmp, named: "flatMount")   // flat layout: single attach
         let fake = FakeProcessRunner()
         fake.queueResult(attachPlist(mountPoint: eval.path))    // attach ok
-        fake.queueResult(ProcessResult(exitCode: 1))            // xattr fails (no codesign; reSign: false)
+        fake.queueResult(ProcessResult(exitCode: 1))            // xattr fails (there is no codesign step)
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let warning = LockedBox<String?>(nil)
         let result = try await GPTKImporter(runner: fake, paths: paths).importGPTK(
@@ -117,7 +117,7 @@ struct GPTKImporterTests {
         #expect(fake.invocations.contains {
             $0.executable.lastPathComponent == "xattr" && $0.arguments.contains("com.apple.quarantine")
         })
-        // ...but NOT ad-hoc re-signed: preserve Apple's D3DMetal signature (reSign:false).
+        // ...but NEVER re-signed: preserve Apple's D3DMetal signature (nothing runs codesign).
         #expect(!fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
     }
 
