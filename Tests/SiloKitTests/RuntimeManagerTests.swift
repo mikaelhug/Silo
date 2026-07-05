@@ -120,9 +120,10 @@ struct RuntimeManagerTests {
         #expect(wine.wineBinary?.lastPathComponent == "wine64")
         #expect(wine.isUsable)
         #expect(await manager.installedWines().map(\.name) == ["Wine-Test"])
-        // Downloaded wine is de-quarantined + ad-hoc re-signed so Gatekeeper allows it.
+        // Downloaded wine is de-quarantined (the load-bearing step) but NEVER re-signed — an x86_64
+        // runtime runs unsigned, and codesign can't sign a non-bundle tree anyway.
         #expect(fake.invocations.contains { $0.executable.lastPathComponent == "xattr" && $0.arguments.contains("com.apple.quarantine") })
-        #expect(fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
+        #expect(!fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
     }
 
     @Test("locateDXMTLibDir finds the x86_64-windows module dir by its d3d11+winemetal signature")
@@ -164,9 +165,9 @@ struct RuntimeManagerTests {
         #expect(dxmt.libDir?.lastPathComponent == "x86_64-windows")
         #expect(dxmt.isUsable)
         #expect(await manager.installedDXMT().map(\.name) == ["dxmt-v0.72"])
-        // winemetal.so is de-quarantined + ad-hoc re-signed (same hardening the engine gives Wine).
+        // winemetal.so is de-quarantined (same hardening the engine gives Wine) but never re-signed.
         #expect(fake.invocations.contains { $0.executable.lastPathComponent == "xattr" && $0.arguments.contains("com.apple.quarantine") })
-        #expect(fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
+        #expect(!fake.invocations.contains { $0.executable.lastPathComponent == "codesign" })
     }
 
     @Test("matchedDXMTRelease prefers the DXMT built against the configured wine, else the newest")

@@ -105,9 +105,9 @@ public struct GPTKImporter: Sendable {
             try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
             try fileManager.copyItem(at: redistLib, to: stagingLib)
 
-            // Strip quarantine so the libs load; do NOT re-sign (preserve Apple's D3DMetal signature).
-            // A failure is non-fatal but worth a warning — Gatekeeper may refuse the libs later.
-            let hardening = await deQuarantine(staging, reSign: false, using: runner)
+            // Strip quarantine so the libs load (Apple's D3DMetal signature is preserved — we never
+            // re-sign). A failure is non-fatal but worth a warning — Gatekeeper may refuse the libs later.
+            let hardening = await deQuarantine(staging, using: runner)
             if let issue = hardening.issue(for: installDir) { onWarning?(issue) }
 
             // Atomic publish: replace any prior install only now that the staging tree is complete.
