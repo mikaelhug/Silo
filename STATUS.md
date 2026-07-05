@@ -84,6 +84,20 @@
     (no clone), DXMT clones to `<root>-dxmt` + overlays the CLONE only, an existing clone survives
     re-prepare (idempotency — a re-clone would wipe in-clone state), `variantWine` is pure path math.
     305 tests green.
+- **🩹 Two follow-up fixes (2026-07-05):**
+  - **Runtime install no longer ad-hoc re-signs.** The install hardening ran `codesign --force --sign -
+    --deep <runtime-dir>`, which ALWAYS failed (`bundle format unrecognized` — a runtime root is a plain
+    `bin/lib/share` tree, not a bundle) and surfaced a scary "couldn't re-sign… Gatekeeper may refuse"
+    warning after the cleanup made hardening report its result. Re-signing is also unnecessary: the
+    runtimes are x86_64 (run unsigned under Rosetta) and GPTK's D3DMetal must keep Apple's signature.
+    Removed the whole re-sign path (`reSign` param, the codesign branch, `HardeningOutcome.signed`,
+    `RuntimeManager.harden`); `deQuarantine` now only strips `com.apple.quarantine` (the load-bearing
+    step). Warnings now fire only on a genuine de-quarantine failure.
+  - **`Scripts/test.sh` now fails when tests fail.** `swift test` under the CLT framework-search-path
+    invocation printed Swift Testing failures but exited 0 on a full-suite run (verified Swift 6.3.3) —
+    and `release.yml` gates publishing on this script, so CI could ship a broken build. test.sh now tees
+    output and exits non-zero if any `✘` failure line appears OR swift test itself errors. Verified: clean
+    → exit 0, deliberate failure → exit 1.
 - **🪟 Settings UX pass (2026-07-05):** DXMT is now its own **runtime tab** (`DXMTManagerView`)
   alongside Wine + GPTK — Settings tabs are General · Wine · GPTK · DXMT. The whole DXMT concern
   (runtime download/import + its Steam bottle + repair tools) moved out of the General tab into the
