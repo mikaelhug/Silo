@@ -3,6 +3,56 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔧 Six dual-backend UX/correctness fixes (2026-07-06, branch `dxmt-dualbottle-fixes`, 5 commits,
+  each `swift build` clean + `Scripts/test.sh` green; app assembles + smoke ok).** Reported from on-device
+  use of the dual-bottle build. Note on the test gate: the parallel `Scripts/test.sh` `tee` can drop both
+  `✔`/`✘` lines cosmetically, so each commit was ALSO verified with a full `swift test --no-parallel` run
+  — the ONLY serial failure is the pre-existing, environment-dependent `installUpdateNoBundle`
+  (`runningAppBundle()` resolves differently under `--no-parallel`; fails identically on `main`, unrelated
+  to this work). Commits:
+  - **A — runtime listings exclude DXMT variant clones; `remove()` cascades.** The DXMT variant runtime is
+    an APFS clone `<base>-dxmt` created as a SIBLING in `Runtimes/` by `RuntimeVariants`; it carries both a
+    wine binary AND the overlaid DXMT modules, so it surfaced in BOTH `installedWines()` and
+    `installedDXMT()` (cross-listing the Wine + DXMT panes). `RuntimeVariants` now owns the ONE
+    clone-naming source of truth (`cloneName(ofBase:backend:)` + `isVariantClone`, on `rawValue` not
+    `badge`); both listings skip clones; a real `dxmt-*-cx*` tag is never flagged. `remove(name:)` cascades
+    to the base's derived clone (dead weight once its base is gone — `ensureClone` keeps an existing clone
+    forever). **Decision:** `setDefault` does NOT touch clones (re-derived per launch by `BottleResolver`).
+  - **B — honest, backend-aware graphics-failure message.** The old "running on fallback graphics
+    (wined3d)" implied Silo has a working fallback; it doesn't (the wined3d fallback is inside GPTK's own
+    d3d11.dll and, for Overcooked-class titles, then fails device creation) and Silo deliberately has NO
+    rerouting (deterministic backend⇔bottle rule). New pure, table-tested
+    `graphicsFallbackMessage(name:backend:isSteamGame:dxmtAvailable:)`: a GPTK title is pointed at DXMT,
+    adapting to whether the DXMT bottle/runtime is set up (read at detection time); a DXMT title admits the
+    wined3d fallback likely failed → Settings → DXMT. `GraphicsFallback` doc comments corrected. Detection
+    + the pure GPTK→D3DMetal launch path untouched.
+  - **C — a title installed in BOTH bottles surfaces as two cards.** `load()` deduped by appID (first
+    wins), hiding the second bottle's copy. Identity is now (appID, backend): `SteamApp.id` is a computed
+    composite `ID{appID,backend}` (no persistence change) and `GameID.steam(appID:backend:)` carries the
+    backend, so both cards render (each with its GPTK/DXMT `BackendTag`) and tracking/stop/monitors are
+    per-copy. `play()` gains a cross-bottle guard BEFORE `stopOtherSteamClients` (never kill the running
+    game's co-resident Steam; one account can't be in-game twice → explanatory status). `busyAppIDs` stays
+    appID-keyed so a launch blocks both copies. `uninstall()` routes `steam://uninstall` through the game's
+    OWN backend session (the DXMT copy must reach the DXMT bottle's Steam). Per-game config/settings/log
+    stay appID-keyed (shared; the copies can never run at once). **Known, out of scope (noted for a
+    follow-up):** launching a *different* game in the other bottle still stops the first bottle's Steam
+    client under a running game — pre-existing, orthogonal to this fix.
+  - **D — both Steam bottles in Settings → General** ("Steam bottle (GPTK)" then "Steam bottle (DXMT)"),
+    moved out of the DXMT tab. The DXMT tab is now runtime-only.
+  - **E — ONE runtime-install flow for Wine + DXMT (kills the onboarding/settings duplication).** A
+    `RuntimeKind` strategy (`.wine`/`.dxmt`: noun, download hint, release picker, installed-list, install
+    fn) parameterizes a single `RuntimeViewModel`; a new `RuntimeInstall` value is the common shape of
+    `WineInstall`/`DXMTInstall` for the VM + a shared `RuntimeInstalledSection` list row. `AppEnvironment`
+    gains `dxmtRuntime` (matched to the configured wine at click time), wires its default to
+    `applyDXMTLibDir`, seeds it in `bootstrap`; `downloadLatestDXMT`/`dxmtDownloading` deleted. The DXMT
+    tab now mirrors the Wine tab (install latest / import folder / installed list with Set default +
+    Remove); onboarding's DXMT step + status chain use `dxmtRuntime` with Wine's string templates.
+    **Decision:** DXMT adopts-as-default only when none is set (Wine semantics, was always-adopt); first
+    install still flips `dxmtReady` via `onDefaultChanged`. The convenience `RuntimeViewModel(manager:repo:)`
+    = Wine kind, keeping every existing call site + test valid.
+  - **Pending (needs a human / on-device):** a `Scripts/dev.sh` visual pass (both bottle sections in
+    General; DXMT tab mirrors Wine; two cards for a dual-installed title; the honest Overcooked-2 message);
+    merge `dxmt-dualbottle-fixes` → `main`.
 - **🧹 Full-project cleanup COMPLETE (2026-07-02, 3 tiers — robustness, dedupe, structure; 12 phases,
   each landed green).** Branch `dxmt-dual-bottle-backend` merged to `main` (ff); all phases on `main`.
   **Final verification:** `swift build` zero warnings, **305 tests green**, `Scripts/build-app.sh`
