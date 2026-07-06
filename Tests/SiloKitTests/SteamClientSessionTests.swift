@@ -139,6 +139,10 @@ struct SteamClientSessionTests {
         let launch = fake.invocations.first { $0.detached && $0.arguments.contains { $0.hasSuffix("steam.exe") } }
         #expect(launch != nil)
         #expect(launch?.arguments.contains("-silent") == false)
+        // Must NOT carry the verify/repair-skip flags — on a fresh bootstrapper those skip the download and
+        // pop the "failed to load steamui.dll" fatal dialog.
+        #expect(launch?.arguments.contains("-noverifyfiles") == false)
+        #expect(launch?.arguments.contains("-norepairfiles") == false)
         // Reached the fully-downloaded state and gracefully shut Steam down afterward.
         #expect(SteamBottle(runner: fake, paths: paths).isClientFullyDownloaded)
         #expect(fake.invocations.contains { $0.arguments.contains("-shutdown") })

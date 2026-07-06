@@ -254,15 +254,18 @@ public struct SteamBottle: Sendable {
     }
 
     /// Launch Steam for a one-time first-run self-update, ROOTLESS (no `explorer /desktop`) so no window is
-    /// presented in the user's face during setup. Deliberately WITHOUT `-silent`: that flag starts Steam
-    /// minimized and skips the interactive first-run client bootstrap, so the client (steamui.dll + the
-    /// CEF/steamwebhelper) never downloads (verified on-device — the bootstrapper just idles). The download
-    /// itself doesn't need a window; Steam still registers its `ActiveProcess` pid so the warm-up can detect
-    /// "client up" the same way a launch does.
+    /// presented in the user's face during setup. TWO deliberate flag choices (both verified on-device):
+    /// - **No `-silent`**: it starts Steam minimized and skips the interactive first-run bootstrap, so the
+    ///   client never downloads (the bootstrapper just idles).
+    /// - **No `-noverifyfiles`/`-norepairfiles`**: on a fresh bootstrapper those skip the verification that
+    ///   detects the missing client and triggers the download — Steam then tries to load the not-yet-present
+    ///   UI and pops the "failed to load steamui.dll" FATAL dialog before quitting. Dropping them lets Steam
+    ///   verify → download → repair → install in ONE clean launch, no dialog.
+    /// The download needs no window; Steam still registers its `ActiveProcess` pid regardless.
     @discardableResult
     func launchForUpdate(wine: URL?) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }
-        let args = [exe.path] + Self.cefRenderArgs
+        let args = [exe.path] + Self.cefRenderArgs.filter { $0 != "-noverifyfiles" && $0 != "-norepairfiles" }
         return try await runner.spawnDetached(
             executable: wine, arguments: args,
             environment: steamEnvironment(wine: wine),
