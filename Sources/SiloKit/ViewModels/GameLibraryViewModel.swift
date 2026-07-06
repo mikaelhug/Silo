@@ -16,7 +16,10 @@ public final class GameLibraryViewModel {
     /// prefix under GPTK, without Steamworks).
     public private(set) var manualGames: [ManualGame] = []
     public private(set) var loadState: LoadState = .idle
-    public private(set) var busyAppIDs: Set<Int> = []
+    /// Steam games mid-launch, keyed per-COPY (appID, backend) so only the launching card's button spins —
+    /// a title in both bottles has two independent cards. Cross-bottle launch protection is separate (see
+    /// `activeBackend(ofAppID:)`), so blocking the other copy doesn't require showing it as busy.
+    public private(set) var busyGames: Set<SteamApp.ID> = []
     public private(set) var manualBusyIDs: Set<UUID> = []
 
     /// Live launch tracking, projected from the process coordinator's keyed table. Module-internal, NOT
@@ -129,18 +132,24 @@ public final class GameLibraryViewModel {
     }
 
     public func isRunning(_ game: SteamApp) -> Bool { processes.pid(for: gameID(game)) != nil }
-    public func isBusy(_ game: SteamApp) -> Bool { busyAppIDs.contains(game.appID) }
+    public func isBusy(_ game: SteamApp) -> Bool { busyGames.contains(game.id) }
 
     /// The coordinator key for a Steam game — (appID, backend), so the two bottle copies of one title are
     /// tracked independently.
     private func gameID(_ game: SteamApp) -> GameID { .steam(appID: game.appID, backend: game.backend) }
 
-    /// The backend of the bottle a title is currently running in, if any (scans the live-process table).
-    /// Used to block launching the SAME title in the other bottle — one Steam account can't be in-game
-    /// twice, and bringing up the other bottle's client would kill Steam under the running game.
+    /// The backend of the bottle a title is currently RUNNING in, if any (scans the live-process table).
     private func runningBackend(ofAppID appID: Int) -> GraphicsBackend? {
         for case .steam(appID, let backend) in processes.pids.keys { return backend }
         return nil
+    }
+
+    /// The backend a title is currently ACTIVE in — running OR mid-launch — if any. Used to block launching
+    /// the SAME title in the other bottle: one Steam account can't be in-game twice, and bringing up the
+    /// other bottle's client would kill Steam under the running/launching game. Covers the brief launch
+    /// window (busy) as well as a live game (running), without making the other copy's card *show* busy.
+    private func activeBackend(ofAppID appID: Int) -> GraphicsBackend? {
+        runningBackend(ofAppID: appID) ?? busyGames.first { $0.appID == appID }?.backend
     }
     public func isRunning(_ game: ManualGame) -> Bool { processes.pid(for: .manual(game.id)) != nil }
     public func isBusy(_ game: ManualGame) -> Bool { manualBusyIDs.contains(game.id) }
@@ -237,21 +246,20 @@ public final class GameLibraryViewModel {
     /// client up so Steamworks works. Routes prefix + runtime through `BottleResolver` (its backend = its
     /// bottle), and keeps only that bottle's Steam client online.
     public func play(_ game: SteamApp) async {
-        // `busyAppIDs` is keyed by bare appID, so while EITHER bottle's copy is launching the other copy
-        // is blocked too — closing the cross-bottle launch race with no extra state.
-        guard backend.isWineConfigured, !busyAppIDs.contains(game.appID) else { return }
-        // Already running SOMEWHERE? A same-bottle replay is a silent no-op (as before); the OTHER bottle's
-        // copy gets an explanatory status (its Play button is enabled). This check runs BEFORE
-        // stopOtherSteamClients so we never kill the running game's Steam client. One account can't be
-        // in-game on two clients, so co-launching the same title in both bottles is refused by design.
-        if let runningIn = runningBackend(ofAppID: game.appID) {
-            if runningIn != game.backend {
-                setStatus("\(game.name) is already running in the \(runningIn.displayName) bottle — "
+        // Don't re-launch THIS copy while it's already mid-launch (its own button already spins).
+        guard backend.isWineConfigured, !busyGames.contains(game.id) else { return }
+        // Active (running OR mid-launch) SOMEWHERE? A same-bottle replay is a silent no-op; the OTHER
+        // bottle's copy gets an explanatory status (its Play button is enabled but only THIS copy spins).
+        // This check runs BEFORE stopOtherSteamClients so we never kill the running game's Steam client.
+        // One account can't be in-game on two clients, so co-launching a title in both bottles is refused.
+        if let activeIn = activeBackend(ofAppID: game.appID) {
+            if activeIn != game.backend {
+                setStatus("\(game.name) is already running in the \(activeIn.displayName) bottle — "
                     + "stop it there first (one Steam account can't be in-game twice).")
             }
             return
         }
-        busyAppIDs.insert(game.appID); defer { busyAppIDs.remove(game.appID) }
+        busyGames.insert(game.id); defer { busyGames.remove(game.id) }
         do {
             // Resolve the game's backend → its bottle prefix + prepared runtime (off-main; clones DXMT).
             let cfg = backend

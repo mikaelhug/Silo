@@ -31,12 +31,15 @@
     composite `ID{appID,backend}` (no persistence change) and `GameID.steam(appID:backend:)` carries the
     backend, so both cards render (each with its GPTK/DXMT `BackendTag`) and tracking/stop/monitors are
     per-copy. `play()` gains a cross-bottle guard BEFORE `stopOtherSteamClients` (never kill the running
-    game's co-resident Steam; one account can't be in-game twice → explanatory status). `busyAppIDs` stays
-    appID-keyed so a launch blocks both copies. `uninstall()` routes `steam://uninstall` through the game's
-    OWN backend session (the DXMT copy must reach the DXMT bottle's Steam). Per-game config/settings/log
-    stay appID-keyed (shared; the copies can never run at once). **Known, out of scope (noted for a
-    follow-up):** launching a *different* game in the other bottle still stops the first bottle's Steam
-    client under a running game — pre-existing, orthogonal to this fix.
+    game's co-resident Steam; one account can't be in-game twice → explanatory status). **Busy/spinner is
+    per-COPY** (`busyGames: Set<SteamApp.ID>`) so only the launching card's button spins — an earlier
+    appID-keyed set made BOTH cards spin during a launch (fixed 2026-07-06); cross-bottle launch protection
+    is separate via `activeBackend(ofAppID:)` (running OR mid-launch), so blocking the other copy no longer
+    requires marking it busy. `uninstall()` routes `steam://uninstall` through the game's OWN backend
+    session (the DXMT copy must reach the DXMT bottle's Steam). Per-game config/settings/log stay
+    appID-keyed (shared; the copies can never run at once). **Known, out of scope (noted for a follow-up):**
+    launching a *different* game in the other bottle still stops the first bottle's Steam client under a
+    running game — pre-existing, orthogonal to this fix.
   - **D — both Steam bottles in Settings → General** ("Steam bottle (GPTK)" then "Steam bottle (DXMT)"),
     moved out of the DXMT tab. The DXMT tab is now runtime-only.
   - **E — ONE runtime-install flow for Wine + DXMT (kills the onboarding/settings duplication).** A

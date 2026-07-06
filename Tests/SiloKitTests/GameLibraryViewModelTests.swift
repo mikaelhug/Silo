@@ -303,6 +303,28 @@ struct GameLibraryViewModelTests {
         #expect(fake.invocations.filter(\.detached).count == detachedBefore)   // no new spawn at all
     }
 
+    @Test("only the launching copy's button spins — the other bottle's copy stays idle mid-launch")
+    func busySpinnerIsPerCopy() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        try installSteam(paths)
+        let gptk = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        var dxmt = gptk; dxmt.backend = .dxmt
+
+        // Observe DURING the launch — that's the only window the bug showed (busy was appID-keyed, so both
+        // cards spun). Run play() concurrently and catch it at its first suspension (busyGames set).
+        let launch = Task { await vm.play(gptk) }
+        var sawBusy = false
+        for _ in 0..<100 where !sawBusy {
+            await Task.yield()
+            sawBusy = vm.isBusy(gptk)
+        }
+        #expect(sawBusy)                 // the GPTK copy's button spins…
+        #expect(!vm.isBusy(dxmt))        // …but the DXMT copy's does NOT
+        await launch.value
+        #expect(!vm.isBusy(gptk))        // cleared once the launch completes
+    }
+
     @Test("stop on the non-running bottle copy is a clean no-op")
     func stopNonRunningCopyNoOps() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -646,7 +668,7 @@ struct GameLibraryViewModelTests {
         await vm.play(game)
 
         #expect(!vm.isRunning(game))                  // never reached runningPIDs[id] = pid
-        #expect(!vm.isBusy(game))                     // defer cleared busyAppIDs
+        #expect(!vm.isBusy(game))                     // defer cleared busyGames
         #expect(vm.runningPIDs[220] == nil)
         #expect(vm.statusMessage?.contains("HL2") == true)   // the catch surfaced "<name>: <error>"
         // The game itself was never spawned detached (resolution failed before spawn).
