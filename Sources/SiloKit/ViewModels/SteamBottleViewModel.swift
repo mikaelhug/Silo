@@ -40,19 +40,49 @@ public final class SteamBottleViewModel {
 
     public var canSetUp: Bool { wineBinary != nil && !busy }
 
-    /// Install Windows Steam into the bottle (if needed).
+    /// True while the one-time Steam client self-update runs during setup (drives a progress indicator in
+    /// the UI). The download can take a few minutes, so we show it's working.
+    public private(set) var warmingUp = false
+    /// Download progress of the warm-up, 0…1 when Steam reports it (real % bar), else nil (indeterminate).
+    public private(set) var warmUpFraction: Double?
+
+    /// Install Windows Steam into the bottle (if needed), then WARM IT UP — run Steam's first-run
+    /// self-update to completion during setup so the user's first real launch lands on the login screen
+    /// (instead of the "failed to load steamui.dll" → black-window → login three-launch dance). The
+    /// webhelper wrapper is applied AFTER the warm-up, when the CEF dir it wraps actually exists.
     public func setUp() async {
         guard !busy else { return }
         busy = true; defer { busy = false }
         do {
             status = "Installing Windows Steam into the bottle… (first time downloads SteamSetup)"
             try await bottle.installSteam(wine: wineBinary)
+            // Fold Steam's first-run client download into setup. Best-effort — it never throws.
+            warmingUp = true
+            await session.warmUpUpdate { [weak self] phase in self?.applyWarmUp(phase) }
+            warmingUp = false; warmUpFraction = nil
             if let wine = wineBinary { try? bottle.installWebHelperWrapper(wine: wine) }
-            status = "Steam installed. Launch it, sign in once (it caches the login), then run a game."
+            status = "Steam is ready. Launch it and sign in once — it caches the login."
             steamInstalled = true
             onSteamInstalled?()
         } catch {
+            warmingUp = false; warmUpFraction = nil
             status = "Setup failed: \(message(error))"
+        }
+    }
+
+    /// Map a warm-up phase to the UI status text + progress fraction.
+    private func applyWarmUp(_ phase: SteamClientSession.WarmUpPhase) {
+        switch phase {
+        case .downloading(let fraction):
+            warmUpFraction = fraction
+            if let fraction {
+                status = "Setting up Steam — downloading its client (\(Int(fraction * 100))%)…"
+            } else {
+                status = "Setting up Steam — downloading its client (one-time, this can take a few minutes)…"
+            }
+        case .finishing:
+            warmUpFraction = nil
+            status = "Setting up Steam — finishing up…"
         }
     }
 

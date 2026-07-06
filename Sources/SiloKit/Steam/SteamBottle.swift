@@ -48,6 +48,51 @@ public struct SteamBottle: Sendable {
     /// Steam is installed in the bottle once `steam.exe` exists.
     public var isSteamInstalled: Bool { fileManager.fileExists(atPath: exe.path) }
 
+    /// Whether Steam's REAL client has been downloaded into the bottle — `steamui.dll` is present. A fresh
+    /// `SteamSetup.exe /S` drops only the ~2 MB bootstrapper (`steam.exe`, no `steamui.dll`); the client
+    /// (steamui.dll + the CEF/steamwebhelper it needs) is self-downloaded on the first run. This is the
+    /// signal the warm-up (`SteamClientSession.warmUpUpdate`) waits for so the user's first real launch
+    /// doesn't hit "failed to load steamui.dll".
+    public var isClientDownloaded: Bool {
+        fileManager.fileExists(atPath: clientDir.appendingPathComponent("steamui.dll").path)
+    }
+
+    /// The FULL client is downloaded: `steamui.dll` AND a CEF `steamwebhelper.exe` (the login UI) both
+    /// present. A fresh bootstrapper has neither; the first-run self-update brings both. NB: Steam extracts
+    /// these files WHILE the update is still downloading, so their presence alone is NOT "the update is
+    /// done" — the warm-up ALSO waits for `updateState().committed` before shutting Steam down, or the
+    /// incomplete update rolls back.
+    var isClientFullyDownloaded: Bool {
+        isClientDownloaded && !webHelpers().isEmpty
+    }
+
+    /// Steam's updater state parsed from its log in ONE read: the latest download progress (for a real %)
+    /// and whether the update has COMMITTED. Steam logs `Update complete` only after downloading,
+    /// extracting, and committing the NTFS transaction (verified in a real run) — that's the definitive
+    /// "the client is installed" signal the warm-up waits for before shutting Steam down; interrupting any
+    /// EARLIER rolls the half-applied update all the way back. Reads the WHOLE log (not a tail): Wine spams
+    /// thousands of `msync_init Failed` lines that would push the progress lines out of any fixed window.
+    /// Truncate the bottle's Steam log. The warm-up calls this before its first launch so `updateState()`'s
+    /// `committed` reflects only THIS run — the log lives outside the client dir and persists across setups,
+    /// so a stale `Update complete` from a prior run would otherwise fire the warm-up's completion instantly.
+    func resetLog() {
+        try? Data().write(to: log)
+    }
+
+    func updateState() -> (progress: (done: Int, total: Int)?, committed: Bool) {
+        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return (nil, false) }
+        let committed = text.contains("Update complete")
+        for line in text.split(separator: "\n").reversed() where line.contains("Downloading update (") {
+            guard let open = line.range(of: "("),
+                  let ofR = line.range(of: " of ", range: open.upperBound..<line.endIndex),
+                  let kbR = line.range(of: " KB", range: ofR.upperBound..<line.endIndex) else { continue }
+            let done = Int(line[open.upperBound..<ofR.lowerBound].filter(\.isNumber))
+            let total = Int(line[ofR.upperBound..<kbR.lowerBound].filter(\.isNumber))
+            if let done, let total, total > 0 { return ((done, total), committed) }
+        }
+        return (nil, committed)
+    }
+
     // MARK: - Provision + install
 
     /// Boot the bottle prefix (idempotent). Delegates to the shared `WinePrefixProvisioner`, re-mapping its
@@ -160,6 +205,32 @@ public struct SteamBottle: Sendable {
             executable: wine, arguments: args,
             environment: steamEnvironment(wine: wine),
             currentDirectory: clientDir, logURL: log)
+    }
+
+    /// Launch Steam for a one-time first-run self-update, ROOTLESS (no `explorer /desktop`) so no window is
+    /// presented in the user's face during setup. Deliberately WITHOUT `-silent`: that flag starts Steam
+    /// minimized and skips the interactive first-run client bootstrap, so the client (steamui.dll + the
+    /// CEF/steamwebhelper) never downloads (verified on-device — the bootstrapper just idles). The download
+    /// itself doesn't need a window; Steam still registers its `ActiveProcess` pid so the warm-up can detect
+    /// "client up" the same way a launch does.
+    @discardableResult
+    func launchForUpdate(wine: URL?) async throws -> Int32 {
+        guard let wine else { throw BottleError.wineNotConfigured }
+        let args = [exe.path] + Self.cefRenderArgs
+        return try await runner.spawnDetached(
+            executable: wine, arguments: args,
+            environment: steamEnvironment(wine: wine),
+            currentDirectory: clientDir, logURL: log)
+    }
+
+    /// Ask the running bottle Steam to quit gracefully (`steam.exe -shutdown` — lets it flush its config).
+    /// Runs to completion (the transient forwarder exits quickly); the caller then waits for the client
+    /// process itself to die before proceeding.
+    func shutdownSteam(wine: URL?) async throws {
+        guard let wine else { throw BottleError.wineNotConfigured }
+        _ = try await runner.run(
+            executable: wine, arguments: [exe.path, "-shutdown"],
+            environment: steamEnvironment(wine: wine), currentDirectory: clientDir)
     }
 
     /// Hand a `steam://…` URL to the (already-running) bottle Steam. A plain `steam.exe <url>` — no CEF
