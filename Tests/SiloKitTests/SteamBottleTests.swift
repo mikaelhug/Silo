@@ -261,4 +261,37 @@ struct SteamBottleTests {
         #expect(fake.invocations.count == extractRunsBefore)
     }
 
+    @Test("seedFromCompleteBottle clones a sibling's complete client + fonts instead of downloading")
+    func seedFromSibling() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        // GPTK bottle: a complete client (steamui.dll + a CEF webhelper) + a core font.
+        let gptkSteam = paths.steamBottleClientDir(.gptk)
+        let gptkCef = gptkSteam.appendingPathComponent("bin/cef/cef.win7x64")
+        try FileManager.default.createDirectory(at: gptkCef, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: gptkSteam.appendingPathComponent("steamui.dll").path, contents: Data("UI".utf8))
+        FileManager.default.createFile(atPath: gptkCef.appendingPathComponent("steamwebhelper.exe").path, contents: Data("WH".utf8))
+        let gptkFonts = paths.steamBottle(.gptk).appendingPathComponent("drive_c/windows/Fonts")
+        try FileManager.default.createDirectory(at: gptkFonts, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: gptkFonts.appendingPathComponent("Arial.TTF").path, contents: Data("F".utf8))
+
+        // DXMT bottle: fresh — seeds from the GPTK sibling.
+        let dxmt = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
+        #expect(!dxmt.isClientFullyDownloaded)
+        let seeded = await dxmt.seedFromCompleteBottle(wine: URL(fileURLWithPath: "/w/wine64"))
+
+        #expect(seeded)
+        #expect(dxmt.isClientFullyDownloaded)          // client cloned (steamui + webhelper)
+        #expect(dxmt.hasCoreFonts)                      // fonts cloned too
+        // No SteamSetup download-install ran — provisioned + cloned only.
+        #expect(!fake.invocations.contains { $0.arguments.contains { $0.hasSuffix("SteamSetup.exe") } })
+
+        // Returns false when no sibling has a complete client (nothing to clone → normal install path).
+        let tmp2 = try TempDir(); defer { tmp2.cleanup() }
+        let solo = SteamBottle(runner: FakeProcessRunner(), session: FakeURLProtocol.makeSession(),
+                               paths: AppPaths(supportDir: tmp2.url.appendingPathComponent("Silo")), backend: .dxmt)
+        #expect(await solo.seedFromCompleteBottle(wine: URL(fileURLWithPath: "/w/wine64")) == false)
+    }
+
 }

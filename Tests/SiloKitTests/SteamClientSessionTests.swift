@@ -99,8 +99,10 @@ struct SteamClientSessionTests {
         let session = SteamClientSession(
             bottle: bottle, orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
         session.updateWine(URL(fileURLWithPath: "/w/wine64"))
-        session.warmUpSettleSeconds = 0      // no artificial settle in tests
         session.warmUpPollInterval = 0.01
+        session.warmUpCefSettleSeconds = 0.02
+        session.warmUpBringUpTimeout = 0.1   // the fake bring-up creates a new CEF dir, so this rarely caps
+        session.warmUpForceQuitSettle = 0
         try? FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
         return (session, fake, paths)
@@ -110,19 +112,27 @@ struct SteamClientSessionTests {
     /// the updater's "Update complete" marker in the log) on the update launch, and quitting on `-shutdown`.
     private func simulateDownload(_ fake: FakeProcessRunner, _ paths: AppPaths) {
         fake.onRun = { inv in
-            let isSteam = inv.arguments.contains { $0.hasSuffix("steam.exe") }
-            if isSteam && !inv.arguments.contains("-shutdown") {
-                let client = paths.steamBottleClientDir
-                let cef = client.appendingPathComponent("bin/cef/cef.win7x64")
-                try? FileManager.default.createDirectory(at: cef, withIntermediateDirectories: true)
-                FileManager.default.createFile(atPath: client.appendingPathComponent("steamui.dll").path, contents: Data("x".utf8))
-                FileManager.default.createFile(atPath: cef.appendingPathComponent("steamwebhelper.exe").path, contents: Data("x".utf8))
+            let fm = FileManager.default
+            // A Steam LAUNCH has the steam.exe path as its first arg (a taskkill's `/IM steam.exe` doesn't).
+            guard inv.arguments.first?.hasSuffix("steam.exe") == true else { return }
+            let client = paths.steamBottleClientDir
+            let cef7 = client.appendingPathComponent("bin/cef/cef.win7x64")
+            if !fm.fileExists(atPath: cef7.path) {
+                // First launch = download: steamui.dll + the cef.win7x64 webhelper + the commit marker.
+                try? fm.createDirectory(at: cef7, withIntermediateDirectories: true)
+                fm.createFile(atPath: client.appendingPathComponent("steamui.dll").path, contents: Data("x".utf8))
+                fm.createFile(atPath: cef7.appendingPathComponent("steamwebhelper.exe").path, contents: Data("x".utf8))
                 let log = paths.steamBottleLog(.gptk)
-                try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? fm.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try? "Downloading update (100 of 100 KB)...\nUpdate complete, launching Steam...\n"
                     .write(to: log, atomically: true, encoding: .utf8)
+            } else {
+                // Bring-up launch: the client creates its runtime CEF dir (cef.win64) — the whole point of
+                // the bring-up, so the wrap covers it.
+                let cef64 = client.appendingPathComponent("bin/cef/cef.win64")
+                try? fm.createDirectory(at: cef64, withIntermediateDirectories: true)
+                fm.createFile(atPath: cef64.appendingPathComponent("steamwebhelper.exe").path, contents: Data("x".utf8))
             }
-            if inv.arguments.contains("-shutdown") { fake.setAlive(4242, false) }   // first spawn pid
         }
     }
 
@@ -143,9 +153,12 @@ struct SteamClientSessionTests {
         // pop the "failed to load steamui.dll" fatal dialog.
         #expect(launch?.arguments.contains("-noverifyfiles") == false)
         #expect(launch?.arguments.contains("-norepairfiles") == false)
-        // Reached the fully-downloaded state and gracefully shut Steam down afterward.
+        // Reached the fully-downloaded state; brought the client up (creating the cef.win64 dir Steam runs)
+        // then force-quit it so the caller's wrap can cover that webhelper.
         #expect(SteamBottle(runner: fake, paths: paths).isClientFullyDownloaded)
-        #expect(fake.invocations.contains { $0.arguments.contains("-shutdown") })
+        #expect(FileManager.default.fileExists(atPath:
+            paths.steamBottleClientDir.appendingPathComponent("bin/cef/cef.win64/steamwebhelper.exe").path))
+        #expect(fake.invocations.contains { $0.arguments.contains("taskkill") })
         #expect(phases.contains { if case .downloading = $0 { true } else { false } })
         #expect(phases.contains(.finishing))
     }
