@@ -101,8 +101,7 @@ struct GeneralSettingsView: View {
     @ViewBuilder private var steamBottleSection: some View {
         Section {
             SteamBottleControls(
-                bottle: env.steamBottleVM, backend: .gptk, noun: "Steam",
-                logButtonTitle: "Open bottle log",
+                bottle: env.steamBottleVM, backend: .gptk,
                 logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog)
         } header: {
             Text("Steam bottle (GPTK)")
@@ -114,8 +113,7 @@ struct GeneralSettingsView: View {
     @ViewBuilder private var dxmtBottleSection: some View {
         Section {
             SteamBottleControls(
-                bottle: env.dxmtBottleVM, backend: .dxmt, noun: "DXMT Steam",
-                logButtonTitle: "Open bottle log",
+                bottle: env.dxmtBottleVM, backend: .dxmt,
                 logWindowTitle: "DXMT Steam Bottle — Log", logURL: env.paths.steamBottleLog(.dxmt))
         } header: {
             Text("Steam bottle (DXMT)")
@@ -265,22 +263,21 @@ struct SteamBottleControls: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(AppEnvironment.self) private var env
     let bottle: SteamBottleViewModel
-    /// Which bottle these controls act on (routes Repair + Reveal to the right prefix).
+    /// Which bottle these controls act on (routes Repair + Reveal to the right prefix). The button labels
+    /// are identical for both bottles — the section header ("Steam bottle (GPTK)" / "(DXMT)") disambiguates.
     let backend: GraphicsBackend
-    /// How the buttons name this bottle's Steam ("Steam" / "DXMT Steam").
-    let noun: String
-    let logButtonTitle: String
+    /// Title of the log window this bottle opens — kept distinct so two open log windows are identifiable.
     let logWindowTitle: String
     let logURL: URL
 
     var body: some View {
-        Button("Set up \(noun) bottle") { Task { await bottle.setUp() } }
+        Button("Set up Steam bottle") { Task { await bottle.setUp() } }
             .disabled(!bottle.canSetUp)
-        Button("Launch \(noun)") { Task { await bottle.launchSteam() } }
+        Button("Launch Steam") { Task { await bottle.launchSteam() } }
             .disabled(bottle.busy || !bottle.steamInstalled)
-        Button("Reset \(noun) login") { Task { await bottle.resetLogin() } }
+        Button("Reset Steam login") { Task { await bottle.resetLogin() } }
             .disabled(bottle.busy || !bottle.steamInstalled)
-        Button(logButtonTitle) {
+        Button("Open bottle log") {
             openWindow(id: LogTarget.windowID, value: LogTarget(title: logWindowTitle, url: logURL))
         }
         LabeledContent("Repair") {
