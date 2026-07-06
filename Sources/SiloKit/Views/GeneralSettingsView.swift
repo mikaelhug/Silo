@@ -25,8 +25,10 @@ struct GeneralSettingsView: View {
         .formStyle(.grouped)
     }
 
-    /// Per-bottle Wine knobs + escape-hatch tools for the shared Steam bottle. Retina/HiDPI is the common
-    /// fix for wrong-sized game windows on Retina Macs; the tool buttons let users repair the prefix by hand.
+    /// Cross-bottle / launcher preferences that aren't per-bottle. Retina/HiDPI is the common fix for
+    /// wrong-sized game windows on Retina Macs; it's ONE preference written into every installed bottle, so
+    /// it lives here rather than under either bottle. (Per-bottle Repair + Reveal are in each bottle's
+    /// section above.)
     @ViewBuilder private var bottleToolsSection: some View {
         let configured = env.wineBinary != nil
         Section {
@@ -34,24 +36,12 @@ struct GeneralSettingsView: View {
                 get: { env.backendSettings.config.retinaMode },
                 set: { on in Task { await env.setSteamBottleRetina(on) } }))
                 .disabled(!configured || env.bottleToolsBusy)
-
-            LabeledContent("Repair") {
-                HStack(spacing: 8) {
-                    Button("Wine Config") { Task { await env.openWineTool("winecfg") } }
-                    Button("Registry") { Task { await env.openWineTool("regedit") } }
-                    Button("Control Panel") { Task { await env.openWineTool("control") } }
-                }
-                .disabled(!configured)
-            }
-            Button("Reveal Bottle in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([env.paths.steamBottle])
-            }
             Toggle("Stop running games when Silo quits", isOn: $stopGamesOnQuit)
             if let message = env.bottleToolsMessage {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }
         } header: {
-            Text("Bottle tools")
+            Text("Preferences")
         }
     }
 
@@ -106,11 +96,12 @@ struct GeneralSettingsView: View {
     }
 
     /// Stand up a shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
-    /// co-resident with a logged-in Steam client. The GPTK (default) bottle.
+    /// co-resident with a logged-in Steam client. The GPTK (default) bottle — structurally identical to the
+    /// DXMT section below (same `SteamBottleControls`).
     @ViewBuilder private var steamBottleSection: some View {
         Section {
             SteamBottleControls(
-                bottle: env.steamBottleVM, noun: "Steam",
+                bottle: env.steamBottleVM, backend: .gptk, noun: "Steam",
                 logButtonTitle: "Open bottle log",
                 logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog)
         } header: {
@@ -119,21 +110,13 @@ struct GeneralSettingsView: View {
     }
 
     /// The DXMT Steam bottle — its own Steam install/login (machine tokens are per-prefix), for the older
-    /// DirectX 10/11 titles GPTK can't run. Set up its runtime in the DXMT tab first.
+    /// DirectX 10/11 titles GPTK can't run. Same controls as the GPTK section (one `SteamBottleControls`).
     @ViewBuilder private var dxmtBottleSection: some View {
         Section {
             SteamBottleControls(
-                bottle: env.dxmtBottleVM, noun: "DXMT Steam",
+                bottle: env.dxmtBottleVM, backend: .dxmt, noun: "DXMT Steam",
                 logButtonTitle: "Open bottle log",
                 logWindowTitle: "DXMT Steam Bottle — Log", logURL: env.paths.steamBottleLog(.dxmt))
-            LabeledContent("Repair") {
-                HStack(spacing: 8) {
-                    Button("Wine Config") { Task { await env.openWineTool("winecfg", for: .dxmt) } }
-                    Button("Registry") { Task { await env.openWineTool("regedit", for: .dxmt) } }
-                    Button("Control Panel") { Task { await env.openWineTool("control", for: .dxmt) } }
-                }
-                .disabled(env.wineBinary == nil || !env.dxmtSteamReady)
-            }
         } header: {
             Text("Steam bottle (DXMT)")
         } footer: {
@@ -275,11 +258,15 @@ struct GeneralSettingsView: View {
     }
 }
 
-/// The Setup / Launch / Reset-login / open-log control block a Steam bottle renders in Settings — one
-/// implementation shared by the GPTK and DXMT sections (identical flow, different bottle + labels).
+/// The full per-bottle control block a Steam bottle renders in Settings — Set up / Launch / Reset login /
+/// open log / Repair (winecfg·regedit·control) / Reveal in Finder. ONE implementation shared by the GPTK
+/// and DXMT sections so both are structurally IDENTICAL (only the bottle, backend, and labels differ).
 struct SteamBottleControls: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(AppEnvironment.self) private var env
     let bottle: SteamBottleViewModel
+    /// Which bottle these controls act on (routes Repair + Reveal to the right prefix).
+    let backend: GraphicsBackend
     /// How the buttons name this bottle's Steam ("Steam" / "DXMT Steam").
     let noun: String
     let logButtonTitle: String
@@ -295,6 +282,17 @@ struct SteamBottleControls: View {
             .disabled(bottle.busy || !bottle.steamInstalled)
         Button(logButtonTitle) {
             openWindow(id: LogTarget.windowID, value: LogTarget(title: logWindowTitle, url: logURL))
+        }
+        LabeledContent("Repair") {
+            HStack(spacing: 8) {
+                Button("Wine Config") { Task { await env.openWineTool("winecfg", for: backend) } }
+                Button("Registry") { Task { await env.openWineTool("regedit", for: backend) } }
+                Button("Control Panel") { Task { await env.openWineTool("control", for: backend) } }
+            }
+            .disabled(env.wineBinary == nil || !bottle.steamInstalled)
+        }
+        Button("Reveal Bottle in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([env.paths.steamBottle(backend)])
         }
         if bottle.busy { ProgressView().controlSize(.small) }
         if !bottle.status.isEmpty {
