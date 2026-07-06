@@ -205,20 +205,6 @@ public final class AppEnvironment {
     /// blocking `fileExists` here would run inside SwiftUI body evaluation).
     public var dxmtSteamReady: Bool { gameLibrary.steamInstalled(.dxmt) }
 
-    /// Import a DXMT runtime by pointing at its `x86_64-windows` module dir (the `d3d11`/`winemetal`
-    /// artifacts built from the CrossOver source). Validates the folder, then adopts it as the backend's
-    /// DXMT lib dir (persisted + fanned out), enabling the DXMT bottle to launch games.
-    public func importDXMTRuntime(from dir: URL) async {
-        let required = ["d3d11.dll", "winemetal.dll"]
-        guard required.allSatisfy({ FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path) })
-        else {
-            backendSettings.statusMessage =
-                "That folder isn't a DXMT runtime (expected d3d11.dll + winemetal.dll)."
-            return
-        }
-        await backendSettings.applyDXMTLibDir(dir)
-    }
-
     // MARK: - Steam-bottle Wine tools (Settings → General)
 
     /// Last result of a bottle-tool action (Retina toggle / winecfg / regedit), shown in Settings.
