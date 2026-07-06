@@ -28,6 +28,16 @@ public enum Silo {
     public static let steamInstallerURL =
         URL(string: "https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe")!
 
+    /// Microsoft's redistributable "Core fonts for the Web" (the winetricks `corefonts` set), from
+    /// SourceForge's canonical mirror. Installed into each Steam bottle during setup — Wine ships no
+    /// TrueType MS fonts, so Steam's UI and many games render with wrong/blank glyphs without these. Each
+    /// is a self-extracting installer whose `.ttf` Silo extracts via Wine's own IExpress `/T /C /Q`
+    /// (no cabextract / winetricks dependency). Redistribution complies with the EULA — we download and
+    /// run Microsoft's original installers, never re-host the fonts.
+    public static let coreFontsBaseURL = URL(string: "https://downloads.sourceforge.net/corefonts/")!
+    public static let coreFonts = ["andale32", "arial32", "arialb32", "comic32", "courie32", "georgi32",
+                                   "impact32", "times32", "trebuc32", "verdan32", "webdings32"]
+
     /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
     /// (The winebus/SDL crash is NOT fixed here — `WINEDLLOVERRIDES` can't disable a PnP `.sys` driver;

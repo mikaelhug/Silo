@@ -121,6 +121,52 @@ public struct SteamBottle: Sendable {
         guard result.succeeded else { throw BottleError.steamInstallFailed(result.exitCode) }
     }
 
+    /// Whether the bottle already has Microsoft core fonts (checks a marker font). Wine installs none, so a
+    /// fresh bottle is missing them.
+    var hasCoreFonts: Bool {
+        fileManager.fileExists(atPath:
+            prefixDir.appendingPathComponent("drive_c/windows/Fonts/Arial.TTF").path)
+    }
+
+    /// Install Microsoft's core web fonts into the bottle (idempotent). Wine ships no TrueType MS fonts, so
+    /// Steam's UI + many games render text with wrong/blank glyphs; this closes that gap. Each font ships as
+    /// a self-extracting IExpress installer — Silo extracts its `.ttf` with Wine's built-in `/T /C /Q`
+    /// extract-only (no cabextract/winetricks dependency), verified on-device, then copies it into the
+    /// bottle's `windows/Fonts`. Best-effort per font: a failed download/extract is skipped, never aborting
+    /// setup.
+    func installCoreFonts(wine: URL?) async throws {
+        guard let wine else { throw BottleError.wineNotConfigured }
+        let driveC = prefixDir.appendingPathComponent("drive_c")
+        let fontsDir = driveC.appendingPathComponent("windows/Fonts")
+        if fileManager.fileExists(atPath: fontsDir.appendingPathComponent("Arial.TTF").path) { return }
+        try fileManager.createDirectory(at: fontsDir, withIntermediateDirectories: true)
+        let extractDir = driveC.appendingPathComponent("silo-fonts")
+        defer { try? fileManager.removeItem(at: extractDir) }
+        for font in Silo.coreFonts {
+            let url = Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe")
+            guard (try? DownloadGuard.requireHTTPS(url)) != nil,
+                  let (tempFile, response) = try? await session.download(from: url),
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { continue }
+            let exe = driveC.appendingPathComponent("\(font).exe")
+            try? fileManager.removeItem(at: exe)
+            guard (try? fileManager.moveItem(at: tempFile, to: exe)) != nil else { continue }
+            try? fileManager.removeItem(at: extractDir)
+            try? fileManager.createDirectory(at: extractDir, withIntermediateDirectories: true)
+            // IExpress extract-only (`/T:<dir> /C /Q`): drops the .ttf into the target with no GUI.
+            _ = try? await runner.run(
+                executable: wine, arguments: ["C:\\\(font).exe", "/T:C:\\silo-fonts", "/C", "/Q"],
+                environment: Silo.wineEnvironment(prefix: prefixDir, wine: wine), currentDirectory: prefixDir)
+            let extracted = (try? fileManager.contentsOfDirectory(
+                at: extractDir, includingPropertiesForKeys: nil)) ?? []
+            for file in extracted where file.pathExtension.lowercased() == "ttf" {
+                let dest = fontsDir.appendingPathComponent(file.lastPathComponent)
+                try? fileManager.removeItem(at: dest)
+                try? fileManager.copyItem(at: file, to: dest)
+            }
+            try? fileManager.removeItem(at: exe)
+        }
+    }
+
     // MARK: - steamwebhelper wrapper
 
     /// Forget any cached Steam login in the bottle so the next launch shows a FRESH login. Removes

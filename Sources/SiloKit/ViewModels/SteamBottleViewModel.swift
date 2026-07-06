@@ -60,7 +60,14 @@ public final class SteamBottleViewModel {
             warmingUp = true
             await session.warmUpUpdate { [weak self] phase in self?.applyWarmUp(phase) }
             warmingUp = false; warmUpFraction = nil
-            if let wine = wineBinary { try? bottle.installWebHelperWrapper(wine: wine) }
+            if let wine = wineBinary {
+                try? bottle.installWebHelperWrapper(wine: wine)
+                // Microsoft core fonts (Wine ships none) so the UI + games render text correctly.
+                if !bottle.hasCoreFonts {
+                    status = "Setting up Steam — installing fonts…"
+                    try? await bottle.installCoreFonts(wine: wine)
+                }
+            }
             status = "Steam is ready. Launch it and sign in once — it caches the login."
             steamInstalled = true
             onSteamInstalled?()
