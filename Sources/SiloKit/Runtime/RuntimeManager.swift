@@ -63,12 +63,15 @@ public actor RuntimeManager {
         }
     }
 
-    /// Wine builds installed under the Runtimes dir (dirs containing a locatable wine binary).
+    /// Wine builds installed under the Runtimes dir (dirs containing a locatable wine binary). Excludes
+    /// a backend's variant CLONE (`<base>-dxmt`): the clone carries a wine binary too, so without this
+    /// filter a DXMT clone would masquerade as a separate installed Wine (see `RuntimeVariants`).
     public func installedWines() -> [WineInstall] {
         guard let dirs = try? fileManager.contentsOfDirectory(
             at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
         return dirs.compactMap { dir -> WineInstall? in
-            guard let binary = Self.locateWineBinary(in: dir) else { return nil }
+            guard !RuntimeVariants.isVariantClone(dir.lastPathComponent),
+                  let binary = Self.locateWineBinary(in: dir) else { return nil }
             return WineInstall(name: dir.lastPathComponent, installDir: dir, wineBinary: binary)
         }.sorted { $0.name > $1.name }   // newest tag first
     }
@@ -128,11 +131,14 @@ public actor RuntimeManager {
     }
 
     /// DXMT builds installed under the Runtimes dir (dirs containing a locatable DXMT module dir).
+    /// Excludes a backend's variant CLONE (`<base>-dxmt`): the clone has the DXMT modules overlaid into
+    /// it, so without this filter it would masquerade as a standalone installed DXMT runtime.
     public func installedDXMT() -> [DXMTInstall] {
         guard let dirs = try? fileManager.contentsOfDirectory(
             at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
         return dirs.compactMap { dir -> DXMTInstall? in
-            guard let lib = Self.locateDXMTLibDir(in: dir) else { return nil }
+            guard !RuntimeVariants.isVariantClone(dir.lastPathComponent),
+                  let lib = Self.locateDXMTLibDir(in: dir) else { return nil }
             return DXMTInstall(name: dir.lastPathComponent, installDir: dir, libDir: lib)
         }.sorted { $0.name > $1.name }   // newest tag first
     }
@@ -258,9 +264,18 @@ public actor RuntimeManager {
         return removed
     }
 
+    /// Remove an installed runtime, plus any secondary-backend variant CLONE derived from it
+    /// (`<name>-dxmt`). The clone is derived state: `RuntimeVariants.ensureClone` keeps an EXISTING clone
+    /// untouched, so a clone whose base was removed can never be re-adopted — leaving it behind is
+    /// permanent dead weight. (A launch re-derives a fresh clone from whatever base is current.)
     public func remove(name: String) throws {
         let dir = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
         if fileManager.fileExists(atPath: dir.path) { try fileManager.removeItem(at: dir) }
+        for backend in GraphicsBackend.allCases where backend != .gptk {
+            let clone = paths.runtimesDir.appendingPathComponent(
+                RuntimeVariants.cloneName(ofBase: name, backend: backend), isDirectory: true)
+            if fileManager.fileExists(atPath: clone.path) { try fileManager.removeItem(at: clone) }
+        }
     }
 
     /// Fetch the expected SHA-256 from a sibling `<url>.sha256` (shasum format: "<hex>  filename").

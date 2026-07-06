@@ -93,4 +93,14 @@ struct RuntimeVariantsTests {
         #expect(dxmt.path.hasSuffix("rt/wine-dxmt/bin/wine64"))
         #expect(!FileManager.default.fileExists(atPath: dxmt.path))   // nothing was created
     }
+
+    @Test("cloneName + isVariantClone are the ONE naming source — and never flag a real DXMT release tag")
+    func cloneNaming() {
+        #expect(RuntimeVariants.cloneName(ofBase: "wine-cx-26.2.0", backend: .dxmt) == "wine-cx-26.2.0-dxmt")
+        // A clone name round-trips as a clone…
+        #expect(RuntimeVariants.isVariantClone(RuntimeVariants.cloneName(ofBase: "wine-cx-26.2.0", backend: .dxmt)))
+        // …a base wine build and a REAL DXMT release tag do not (the latter must stay listable in the DXMT pane).
+        #expect(!RuntimeVariants.isVariantClone("wine-cx-26.2.0"))
+        #expect(!RuntimeVariants.isVariantClone("dxmt-v0.72-cx26.2.0"))
+    }
 }
