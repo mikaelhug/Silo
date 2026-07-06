@@ -19,8 +19,6 @@ struct DXMTManagerView: View {
                 if vm.isInstalling { ProgressView().controlSize(.small) }
             } header: {
                 Text("DXMT runtime")
-            } footer: {
-                Text("For DirectX 10/11 titles GPTK can't run.")
             }
 
             RuntimeInstalledSection(title: "Installed DXMT", vm: vm)

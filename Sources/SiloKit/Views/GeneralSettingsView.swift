@@ -117,8 +117,6 @@ struct GeneralSettingsView: View {
                 logWindowTitle: "DXMT Steam Bottle — Log", logURL: env.paths.steamBottleLog(.dxmt))
         } header: {
             Text("Steam bottle (DXMT)")
-        } footer: {
-            Text("For DirectX 10/11 titles GPTK can't run. Install the DXMT runtime in the DXMT tab first.")
         }
     }
 
