@@ -10,14 +10,19 @@ struct LibraryGridView: View {
     @State private var manualSettingsTarget: ManualGame?
     @State private var detailTarget: SteamApp?
     @State private var showAddGame = false
+    /// The user has dismissed the first-run onboarding. Kept SEPARATE from `setupComplete` so finishing the
+    /// required steps doesn't yank the user straight into the library — they stay on onboarding (with a
+    /// "Done" button) to optionally set up the DXMT bottle first. Persisted so it doesn't reappear.
+    @AppStorage("onboardingDone") private var onboardingDone = false
 
     var body: some View {
         @Bindable var lib = env.gameLibrary
         // Compute the filter+sort ONCE; reused by the subtitle count + the grid.
         let steamShown = lib.filtered
         let manualShown = lib.filteredManual
+        let showLibrary = env.setupComplete && onboardingDone
         Group {
-            if env.setupComplete {
+            if showLibrary {
                 grid(lib, steam: steamShown, manual: manualShown)
             } else {
                 OnboardingView()
@@ -25,12 +30,17 @@ struct LibraryGridView: View {
         }
         .navigationTitle("Library")
         .toolbar {
-            if env.setupComplete {
+            if showLibrary {
                 Button { Task { await lib.openSteam() } } label: { Label("Open Steam", systemImage: "cart") }
                     .help("Open the bottle's Steam to browse + install games")
                 Button { showAddGame = true } label: { Label("Add Game", systemImage: "plus") }
                     .help("Add a non-Steam .exe game")
                 Button { Task { await lib.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+            } else if env.setupComplete {
+                // Required steps done — let the user finish on their terms (after optional DXMT setup).
+                Button { onboardingDone = true } label: { Label("Done", systemImage: "checkmark.circle.fill") }
+                    .buttonStyle(.borderedProminent).tint(.green)
+                    .help("Finish setup and go to your library")
             }
             Button { openSettings() } label: { Label("Settings", systemImage: "gearshape") }
         }
@@ -40,7 +50,7 @@ struct LibraryGridView: View {
         .sheet(item: $detailTarget) { game in
             GameDetailView(game: game, onSettings: { detailTarget = nil; settingsTarget = game })
         }
-        .navigationSubtitle(env.setupComplete ? subtitle(steamShown.count + manualShown.count) : "")
+        .navigationSubtitle(showLibrary ? subtitle(steamShown.count + manualShown.count) : "")
         .searchable(text: $lib.searchText, placement: .toolbar, prompt: "Search games")
     }
 

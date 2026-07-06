@@ -99,10 +99,12 @@ public final class SteamClientSession {
     /// the caller can wrap the steamwebhelper against a settled CEF dir. Idempotent — a no-op once the client
     /// is present. Best-effort: never throws (a slow download just means setup took longer; re-running setup
     /// resumes). `onProgress` reports phases (with a real % during download).
-    var warmUpSettleSeconds: Double = 4          // pause after the commit before shutting down
     var warmUpPollInterval: Double = 2
     var warmUpTimeout: Double = 1200             // 20 min overall failsafe (best-effort)
     var warmUpMaxRelaunches = 3                  // resume attempts if Steam dies BEFORE committing
+    var warmUpCefSettleSeconds: Double = 6       // CEF dir set unchanged this long ⇒ client finished creating them
+    var warmUpBringUpTimeout: Double = 90        // cap on the post-download client bring-up
+    var warmUpForceQuitSettle: Double = 2        // pause after force-quit for the wineserver to reap the procs
 
     func warmUpUpdate(onProgress: @escaping @MainActor (WarmUpPhase) -> Void) async {
         guard let wine = wineBinary, !bottle.isClientFullyDownloaded else { return }
@@ -126,8 +128,13 @@ public final class SteamClientSession {
             // whole download→install→commit; the files appear mid-download, so their presence alone lies).
             if state.committed && bottle.isClientFullyDownloaded {
                 onProgress(.finishing)
-                try? await Task.sleep(for: .seconds(warmUpSettleSeconds))
-                if let live = pid { await shutDown(pid: live, wine: wine) }
+                // The download is committed, but the client creates its runtime CEF dir (e.g. cef.win64 —
+                // the one Steam's login UI actually uses) only on its FIRST full run, a beat AFTER the
+                // update. Shutting down + wrapping now would miss it, so the webhelper Steam runs stays
+                // UNWRAPPED → black login window on the user's first real launch (until a restart re-wraps).
+                // Bring the client up once and wait for its CEF dirs to settle, so the caller's wrap covers
+                // cef.win64.
+                await bringUpClientCef(wine: wine)
                 return
             }
 
@@ -145,15 +152,45 @@ public final class SteamClientSession {
         if let live = pid { await shutDown(pid: live, wine: wine) }
     }
 
-    /// Gracefully shut the warm-up Steam down and wait (bounded) for the process to actually exit, so the
-    /// caller can safely rewrite the steamwebhelper afterward. Force-terminates if it overstays.
+    /// Gracefully shut the warm-up Steam down and wait (bounded) for it to actually exit, so the caller can
+    /// safely rewrite the steamwebhelper afterward. Waits for BOTH the tracked pid AND Steam's live
+    /// `ActiveProcess` pid to clear — the updater re-execs a client we didn't spawn, and a lingering client
+    /// holds `cef.win64/steamwebhelper.exe` open, making the wrap's file-move fail (→ unwrapped webhelper →
+    /// black login window). Force-terminates the tracked pid if it overstays.
     private func shutDown(pid: Int32, wine: URL) async {
         try? await bottle.shutdownSteam(wine: wine)
         var waited = 0.0
-        while orchestrator.isRunning(pid: pid), waited < 25 {
+        while orchestrator.isRunning(pid: pid) || SteamReadiness.isReady(prefix: bottle.prefix), waited < 25 {
             try? await Task.sleep(for: .milliseconds(500)); waited += 0.5
         }
         if orchestrator.isRunning(pid: pid) { orchestrator.terminate(pid: pid) }
+    }
+
+    /// Bring the (already-downloaded) client fully up ONCE so it creates its runtime CEF dir (cef.win64,
+    /// the webhelper Steam's login UI uses), then shut down — so the caller's wrap covers that webhelper
+    /// rather than leaving it unwrapped (→ black login window on the first real launch). Waits for the CEF
+    /// dir set to stop growing (all dirs created + steady), or the client to exit, or a timeout.
+    private func bringUpClientCef(wine: URL) async {
+        let baseline = bottle.webHelpers().count
+        // Ensure a client is up creating cef.win64 (if the updater already re-exec'd one, single-instance
+        // forwarding just makes this exit — the running client is what matters, so we don't track the pid).
+        _ = try? await bottle.launchForUpdate(wine: wine)
+        var lastCount = baseline, stableFor = 0.0, elapsed = 0.0
+        while elapsed < warmUpBringUpTimeout {
+            try? await Task.sleep(for: .seconds(warmUpPollInterval)); elapsed += warmUpPollInterval
+            let count = bottle.webHelpers().count
+            if count > baseline, count == lastCount {
+                stableFor += warmUpPollInterval
+                if stableFor >= warmUpCefSettleSeconds { break }   // a new CEF dir appeared and held steady
+            } else if count != lastCount {
+                stableFor = 0
+            }
+            lastCount = count
+        }
+        // Force-kill the client + its webhelpers (they hold cef.win64 open) so the caller's wrap can move
+        // the files — a graceful -shutdown leaves them alive under Wine.
+        await bottle.forceQuit(wine: wine)
+        try? await Task.sleep(for: .seconds(warmUpForceQuitSettle))   // let the wineserver reap the killed procs
     }
 
     private func startSteam() async {

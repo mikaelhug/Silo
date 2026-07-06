@@ -140,16 +140,36 @@ public struct SteamBottle: Sendable {
         let fontsDir = driveC.appendingPathComponent("windows/Fonts")
         if fileManager.fileExists(atPath: fontsDir.appendingPathComponent("Arial.TTF").path) { return }
         try fileManager.createDirectory(at: fontsDir, withIntermediateDirectories: true)
+
+        // Download all installers CONCURRENTLY (independent ~500 KB files) — doing 11 sequential
+        // round-trips was needless latency even on fast internet.
+        let session = self.session
+        let downloaded: [(font: String, exe: URL)] = await withTaskGroup(
+            of: (font: String, exe: URL)?.self
+        ) { group in
+            for font in Silo.coreFonts {
+                let exe = driveC.appendingPathComponent("\(font).exe")
+                group.addTask {
+                    let url = Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe")
+                    let fm = FileManager.default
+                    guard (try? DownloadGuard.requireHTTPS(url)) != nil,
+                          let (tempFile, response) = try? await session.download(from: url),
+                          let http = response as? HTTPURLResponse,
+                          (200..<300).contains(http.statusCode) else { return nil }
+                    try? fm.removeItem(at: exe)
+                    guard (try? fm.moveItem(at: tempFile, to: exe)) != nil else { return nil }
+                    return (font: font, exe: exe)
+                }
+            }
+            var result: [(font: String, exe: URL)] = []
+            for await item in group { if let item { result.append(item) } }
+            return result
+        }
+
+        // Extract sequentially — concurrent wine invocations in one prefix would fight over the wineserver.
         let extractDir = driveC.appendingPathComponent("silo-fonts")
         defer { try? fileManager.removeItem(at: extractDir) }
-        for font in Silo.coreFonts {
-            let url = Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe")
-            guard (try? DownloadGuard.requireHTTPS(url)) != nil,
-                  let (tempFile, response) = try? await session.download(from: url),
-                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { continue }
-            let exe = driveC.appendingPathComponent("\(font).exe")
-            try? fileManager.removeItem(at: exe)
-            guard (try? fileManager.moveItem(at: tempFile, to: exe)) != nil else { continue }
+        for (font, exe) in downloaded {
             try? fileManager.removeItem(at: extractDir)
             try? fileManager.createDirectory(at: extractDir, withIntermediateDirectories: true)
             // IExpress extract-only (`/T:<dir> /C /Q`): drops the .ttf into the target with no GUI.
@@ -164,6 +184,41 @@ public struct SteamBottle: Sendable {
                 try? fileManager.copyItem(at: file, to: dest)
             }
             try? fileManager.removeItem(at: exe)
+        }
+    }
+
+    /// If a SIBLING backend's bottle already has a complete Steam client, seed THIS bottle from it by
+    /// cloning the client (+ its core fonts) instead of re-downloading ~242 MB and re-extracting fonts —
+    /// the client files are identical across bottles; only the per-prefix login differs, so it's reset for
+    /// a fresh sign-in. Near-instant on APFS (copy-on-write). Returns whether it seeded. Best-effort: any
+    /// failure returns false so the caller falls back to a normal download install.
+    func seedFromCompleteBottle(wine: URL?) async -> Bool {
+        guard let wine, !isClientFullyDownloaded else { return false }
+        guard let source = GraphicsBackend.allCases.first(where: {
+            $0 != backend && SteamBottle(runner: runner, paths: paths, backend: $0).isClientFullyDownloaded
+        }) else { return false }
+        do {
+            try await provision(wine: wine)   // this bottle still needs its own valid Wine prefix
+            // Clone the Steam client dir (create its parent; clear any partial dst first — clonefile needs
+            // the destination to not exist).
+            let srcClient = paths.steamBottleClientDir(source)
+            try fileManager.createDirectory(
+                at: clientDir.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fileManager.fileExists(atPath: clientDir.path) { try fileManager.removeItem(at: clientDir) }
+            try Filesystem.clone(from: srcClient, to: clientDir, using: fileManager)
+            // Clone the core fonts too (skips the per-bottle font extraction).
+            let srcFonts = paths.steamBottle(source).appendingPathComponent("drive_c/windows/Fonts")
+            let dstFonts = prefixDir.appendingPathComponent("drive_c/windows/Fonts")
+            if fileManager.fileExists(atPath: srcFonts.appendingPathComponent("Arial.TTF").path) {
+                try? fileManager.createDirectory(
+                    at: dstFonts.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if fileManager.fileExists(atPath: dstFonts.path) { try? fileManager.removeItem(at: dstFonts) }
+                try? Filesystem.clone(from: srcFonts, to: dstFonts, using: fileManager)
+            }
+            try? resetLogin()   // the login is per-prefix — sign in fresh in this bottle
+            return true
+        } catch {
+            return false
         }
     }
 
@@ -270,6 +325,20 @@ public struct SteamBottle: Sendable {
             executable: wine, arguments: args,
             environment: steamEnvironment(wine: wine),
             currentDirectory: clientDir, logURL: log)
+    }
+
+    /// Force-kill every Steam process in this bottle (`wine taskkill /F` on steamwebhelper.exe + steam.exe).
+    /// Used to stop the warm-up's brought-up client: it re-execs a client Silo didn't spawn and its
+    /// webhelpers hold `cef.win64/steamwebhelper.exe` open, so a graceful `-shutdown` can't reliably free
+    /// the files for the wrap (verified — `-shutdown` left 7 processes alive). taskkill by image name kills
+    /// them all. Runs with the bottle's msync env so it attaches to the same wineserver.
+    func forceQuit(wine: URL?) async {
+        guard let wine else { return }
+        for image in ["steamwebhelper.exe", "steam.exe"] {
+            _ = try? await runner.run(
+                executable: wine, arguments: ["taskkill", "/F", "/IM", image],
+                environment: steamEnvironment(wine: wine), currentDirectory: clientDir)
+        }
     }
 
     /// Ask the running bottle Steam to quit gracefully (`steam.exe -shutdown` — lets it flush its config).

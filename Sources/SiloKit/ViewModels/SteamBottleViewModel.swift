@@ -54,12 +54,18 @@ public final class SteamBottleViewModel {
         guard !busy else { return }
         busy = true; defer { busy = false }
         do {
-            status = "Installing Windows Steam into the bottle… (first time downloads SteamSetup)"
-            try await bottle.installSteam(wine: wineBinary)
-            // Fold Steam's first-run client download into setup. Best-effort — it never throws.
-            warmingUp = true
-            await session.warmUpUpdate { [weak self] phase in self?.applyWarmUp(phase) }
-            warmingUp = false; warmUpFraction = nil
+            // Fast path: if another bottle already has a complete Steam client, clone it (client + fonts)
+            // instead of re-downloading ~242 MB — near-instant on APFS. Falls back to a normal install.
+            if await bottle.seedFromCompleteBottle(wine: wineBinary) {
+                status = "Setting up Steam from your existing install…"
+            } else {
+                status = "Installing Windows Steam into the bottle… (first time downloads SteamSetup)"
+                try await bottle.installSteam(wine: wineBinary)
+                // Fold Steam's first-run client download into setup. Best-effort — it never throws.
+                warmingUp = true
+                await session.warmUpUpdate { [weak self] phase in self?.applyWarmUp(phase) }
+                warmingUp = false; warmUpFraction = nil
+            }
             if let wine = wineBinary {
                 try? bottle.installWebHelperWrapper(wine: wine)
                 // Microsoft core fonts (Wine ships none) so the UI + games render text correctly.
