@@ -622,6 +622,57 @@ struct GameLibraryViewModelTests {
 
         #expect(vm.statusMessage?.contains("GPTK") == true)          // fallback surfaced, not a silent "Launched"
         #expect(vm.statusMessage?.contains("Launched") != true)
+        // The message is honest + actionable: it doesn't claim a working "fallback", and with no DXMT
+        // bottle set up it points the user at Settings → DXMT (not the DXMT Steam bottle).
+        #expect(vm.statusMessage?.contains("fallback graphics") != true)
+        #expect(vm.statusMessage?.contains("DXMT") == true)
+        #expect(vm.statusMessage?.contains("Settings → DXMT") == true)
+    }
+
+    @Test("graphicsFallbackMessage is honest + backend/kind-aware across all branches")
+    func graphicsFallbackMessageBranches() {
+        typealias VM = GameLibraryViewModel
+        // GPTK Steam game, DXMT bottle present → point at the DXMT Steam bottle; absent → Settings.
+        let gptkSteamReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: true, dxmtAvailable: true)
+        #expect(gptkSteamReady.contains("DXMT Steam bottle"))
+        let gptkSteamNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: true, dxmtAvailable: false)
+        #expect(gptkSteamNotReady.contains("Settings → DXMT"))
+        // GPTK manual game → switch this game's backend (configured) / set up DXMT first (not).
+        let gptkManualReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: false, dxmtAvailable: true)
+        #expect(gptkManualReady.contains("Switch this game's graphics backend to DXMT"))
+        let gptkManualNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: false, dxmtAvailable: false)
+        #expect(gptkManualNotReady.contains("Set up DXMT in Settings → DXMT first"))
+        // DXMT backend → names DXMT, admits the wined3d fallback likely failed, points at Settings.
+        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, isSteamGame: true, dxmtAvailable: true)
+        #expect(dxmt.contains("DXMT didn't engage") && dxmt.contains("Settings → DXMT"))
+        // None of them pretends graphics are "running on fallback graphics".
+        for m in [gptkSteamReady, gptkSteamNotReady, gptkManualReady, gptkManualNotReady, dxmt] {
+            #expect(m.hasPrefix("OC2: "))
+            #expect(!m.contains("running on fallback graphics"))
+        }
+    }
+
+    @Test("play's fallback message points at the DXMT Steam bottle once it's set up")
+    func playFallbackWithDXMTBottleReady() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        // Stand up the DXMT Steam bottle too so the message adapts to "install it in the DXMT Steam bottle".
+        try FileManager.default.createDirectory(at: paths.steamBottleClientDir(.dxmt), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamBottleExe(.dxmt).path, contents: Data())
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        let log = paths.log(forAppID: 220)
+        fake.onRun = { inv in
+            guard inv.detached, inv.logURL == log, let handle = try? FileHandle(forWritingTo: log) else { return }
+            handle.seekToEndOfFile()
+            handle.write(Data(#"Assertion failed: (GFXTHandle && "Failed to dlopen D3DMetal")"#.utf8))
+            try? handle.close()
+        }
+
+        await vm.load()   // populate the steamInstalled(.dxmt) cache the message reads at detection time
+        await vm.play(game)
+
+        #expect(vm.statusMessage?.contains("DXMT Steam bottle") == true)
     }
 
     @Test("terminateAllSync SIGTERMs every launched game, leaving the co-resident Steam client alive")
