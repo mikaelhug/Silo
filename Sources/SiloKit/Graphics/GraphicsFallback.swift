@@ -8,12 +8,14 @@ import Foundation
 /// Detection is a pure parse over the game's launch log, so it unit-tests with fixture text and no runtime.
 public enum GraphicsFallback: Sendable {
     public enum Status: Sendable, Equatable {
-        case fallback   // the backend didn't engage — wine fell back to wined3d (and couldn't create the device)
+        case fallback   // the backend didn't engage — wine's own wined3d was left driving d3d1x (and, for
+                        // the titles this happens to, then fails to create the device)
         case unknown    // no decisive signal (a working launch, a d3d9/OpenGL game, or not yet logged)
     }
 
-    /// Signatures that mean wine's own `wined3d` took over rendering — i.e. the requested backend did NOT
-    /// engage. **Backend-agnostic:** both GPTK and DXMT target Metal, so a Vulkan-renderer / feature-level-
+    /// Signatures that mean wine's own `wined3d` was left driving d3d1x — i.e. the requested backend did
+    /// NOT engage (and Silo has no fallback that makes this work; it usually fails device creation).
+    /// **Backend-agnostic:** both GPTK and DXMT target Metal, so a Vulkan-renderer / feature-level-
     /// unsupported line means neither did its job and wined3d is driving d3d1x. A healthy launch — and a
     /// legitimate d3d9/OpenGL game that never touches d3d1x — emits NONE of these, so no false positives.
     static let wined3dFallbackSignatures = [

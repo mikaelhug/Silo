@@ -485,12 +485,48 @@ public final class GameLibraryViewModel {
         }.value
     }
 
-    /// Watch a launched game's log via the coordinator; surface a status if its backend silently fell back
-    /// to wined3d. The message names the game's chosen backend (GPTK or DXMT) — the signal applies to
-    /// whichever translation layer was attempted.
-    private func watchGraphics(_ id: GameID, log: URL, name: String, backend: GraphicsBackend) {
-        processes.watchGraphics(id, log: log, backend: backend) { [weak self] in
-            self?.setStatus("\(name): \(backend.displayName) didn't engage — running on fallback graphics (wined3d).")
+    /// Watch a launched game's log via the coordinator; surface an actionable status if its backend never
+    /// engaged (the log shows wine's own wined3d driving d3d1x — which, for the titles this happens to,
+    /// then fails to create a device). Silo has NO fallback/rerouting mechanism (the deterministic
+    /// backend⇔bottle rule forbids it), so the message tells the user where the game actually belongs
+    /// rather than pretending graphics came up. `dxmtAvailable` is read INSIDE the fired closure so it
+    /// reflects the state at detection time.
+    private func watchGraphics(_ id: GameID, log: URL, name: String, backend graphics: GraphicsBackend) {
+        let isSteamGame: Bool = if case .steam = id { true } else { false }
+        processes.watchGraphics(id, log: log, backend: graphics) { [weak self] in
+            guard let self else { return }
+            let dxmtAvailable = isSteamGame ? self.steamInstalled(.dxmt)
+                                            : self.backend.libDir(for: .dxmt) != nil
+            self.setStatus(Self.graphicsFallbackMessage(
+                name: name, backend: graphics, isSteamGame: isSteamGame, dxmtAvailable: dxmtAvailable))
+        }
+    }
+
+    /// The user-facing message when a backend didn't engage. Pure + table-testable; backend- and
+    /// kind-aware. Never claims a working "fallback" and never suggests Silo rerouted the game — for GPTK
+    /// it points the (older DirectX 10/11) title at DXMT, adapting to whether DXMT is set up yet.
+    static func graphicsFallbackMessage(
+        name: String, backend: GraphicsBackend, isSteamGame: Bool, dxmtAvailable: Bool
+    ) -> String {
+        switch backend {
+        case .gptk:
+            let lead = "\(name): GPTK / D3DMetal couldn't drive this game's graphics — this class of "
+                + "older DirectX 10/11 titles needs DXMT."
+            let next: String
+            switch (isSteamGame, dxmtAvailable) {
+            case (true, true):
+                next = "Install it in the DXMT Steam bottle and play it from there."
+            case (true, false):
+                next = "Set up DXMT in Settings → DXMT, then install the game in its Steam bottle."
+            case (false, true):
+                next = "Switch this game's graphics backend to DXMT in its settings."
+            case (false, false):
+                next = "Set up DXMT in Settings → DXMT first."
+            }
+            return "\(lead) \(next)"
+        case .dxmt:
+            return "\(name): DXMT didn't engage — the game fell back to wined3d and likely failed. "
+                + "Check the DXMT runtime in Settings → DXMT."
         }
     }
 }
