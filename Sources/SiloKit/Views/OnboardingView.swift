@@ -87,11 +87,7 @@ private struct DXMTOnboardingSection: View {
             }
             .padding(.top, 10)
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Older games (DXMT) — optional").font(.headline)
-                Text("For DirectX 10/11 games GPTK can't run.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            Text("Older games (DXMT) — optional").font(.headline)
         }
         .padding()
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
