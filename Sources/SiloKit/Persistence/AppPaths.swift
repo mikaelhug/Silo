@@ -103,9 +103,14 @@ public struct AppPaths: Sendable, Hashable {
         manualBottlesDir.appendingPathComponent(id.uuidString, isDirectory: true)
     }
 
-    /// Per-game launch log file.
-    public func log(forAppID appID: Int) -> URL {
-        logsDir.appendingPathComponent("\(appID).log")
+    /// Per-game launch log file, scoped to the graphics backend the copy runs under. The SAME title can be
+    /// installed in BOTH the GPTK and DXMT bottles and launched independently, so an appID-only log would
+    /// let the two copies clobber each other's log (and confuse the graphics-fallback watcher that tails
+    /// it). GPTK keeps the plain `<appID>.log` (back-compat); DXMT gets `<appID>-dxmt.log`, mirroring
+    /// `steamBottleLog`.
+    public func log(forAppID appID: Int, backend: GraphicsBackend = .gptk) -> URL {
+        let suffix = backend == .gptk ? "" : "-\(backend.rawValue)"
+        return logsDir.appendingPathComponent("\(appID)\(suffix).log")
     }
 
     /// Launch log for a manual (non-Steam) game, keyed by its stable id.

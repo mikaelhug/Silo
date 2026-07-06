@@ -43,7 +43,8 @@ struct SteamGameTileView: View {
         Button("Settings…", action: onSettings)
         Button("View Log") {
             openWindow(id: LogTarget.windowID,
-                       value: LogTarget(title: "\(game.name) — Log", url: env.logURL(forAppID: game.appID)))
+                       value: LogTarget(title: "\(game.name) — Log",
+                                        url: env.logURL(forAppID: game.appID, backend: game.backend)))
         }
         Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg(game.backend) } }
             .disabled(!env.gameLibrary.canLaunch)

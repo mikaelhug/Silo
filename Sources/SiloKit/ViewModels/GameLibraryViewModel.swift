@@ -281,7 +281,7 @@ public final class GameLibraryViewModel {
             launchBackend.wineBinaryPath = context.wineBinary
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: launchBackend, graphics: game.backend,
-                prefix: context.prefix, logURL: paths.log(forAppID: game.appID))
+                prefix: context.prefix, logURL: paths.log(forAppID: game.appID, backend: game.backend))
             processes.track(gameID(game), pid: pid)
             do {
                 // Per-game config/settings are keyed by appID (shared by both bottle copies — same game,
@@ -295,7 +295,7 @@ public final class GameLibraryViewModel {
             }
             // Last, so a detected fallback (which usually arrives a beat later as the log is written, but
             // may already be present) overrides the "Launched" status rather than being clobbered by it.
-            watchGraphics(gameID(game), log: paths.log(forAppID: game.appID),
+            watchGraphics(gameID(game), log: paths.log(forAppID: game.appID, backend: game.backend),
                           name: game.name, backend: game.backend)
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")

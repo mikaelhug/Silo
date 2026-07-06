@@ -247,8 +247,8 @@ public final class AppEnvironment {
         return GameSettingsViewModel(config: state.config(for: appID), configStore: configStore)
     }
 
-    /// A game's launch log (per appID).
-    public nonisolated func logURL(forAppID appID: Int) -> URL {
-        paths.log(forAppID: appID)
+    /// A game's launch log (per appID + graphics backend — the GPTK and DXMT copies log separately).
+    public nonisolated func logURL(forAppID appID: Int, backend: GraphicsBackend = .gptk) -> URL {
+        paths.log(forAppID: appID, backend: backend)
     }
 }

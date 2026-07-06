@@ -780,6 +780,18 @@ struct GameLibraryViewModelTests {
         #expect(vm.statusMessage?.contains("DXMT Steam bottle") == true)
     }
 
+    @Test("a game's launch log is scoped per graphics backend so the two bottle copies don't clobber it")
+    func launchLogIsBackendScoped() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        // GPTK keeps the plain <appID>.log (back-compat); DXMT gets a distinct file — so launching the same
+        // title in both bottles writes two separate logs instead of overwriting one.
+        #expect(paths.log(forAppID: 1276390) == paths.log(forAppID: 1276390, backend: .gptk))
+        #expect(paths.log(forAppID: 1276390, backend: .gptk).lastPathComponent == "1276390.log")
+        #expect(paths.log(forAppID: 1276390, backend: .dxmt).lastPathComponent == "1276390-dxmt.log")
+        #expect(paths.log(forAppID: 1276390, backend: .gptk) != paths.log(forAppID: 1276390, backend: .dxmt))
+    }
+
     @Test("terminateAllSync SIGTERMs every launched game, leaving the co-resident Steam client alive")
     func terminateAllOnQuit() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
