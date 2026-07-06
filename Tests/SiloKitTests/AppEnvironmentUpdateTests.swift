@@ -253,15 +253,56 @@ struct AppEnvironmentUpdateTests {
 
         // Simulate the Wine tab publishing a new default. AppEnvironment.init wired
         // runtime.onDefaultChanged -> applyDefaultWine -> save() -> onChange -> applyBackend.
-        let install = WineInstall(
+        let install = RuntimeInstall(
             name: "wine-cx-26",
             installDir: tmp.url.appendingPathComponent("wine"),
-            wineBinary: URL(fileURLWithPath: "/w/bin/wine64"))
+            artifact: URL(fileURLWithPath: "/w/bin/wine64"))
         env.runtime.onDefaultChanged?(install)
 
         // The callback dispatches via `Task { await ... }`, so await the async hop before asserting.
         for _ in 0..<50 where !env.steamBottleVM.canSetUp { await Task.yield() }
         #expect(env.steamBottleVM.canSetUp)       // the new default reached the bottle pane
         #expect(env.gameLibrary.canLaunch)        // ...and the library
+    }
+
+    @Test("AppEnvironment wires a DXMT default change through to the backend (dxmtReady flips)")
+    func dxmtDefaultChangeWiring() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        #expect(env.dxmtRuntime.onDefaultChanged != nil)
+        #expect(!env.dxmtReady)
+
+        // The DXMT tab publishing a new default → applyDXMTLibDir → config.dxmtLibDirPath set → dxmtReady.
+        let lib = tmp.url.appendingPathComponent("dxmt/lib/wine/x86_64-windows")
+        env.dxmtRuntime.onDefaultChanged?(RuntimeInstall(
+            name: "dxmt-v0.72-cx26.2.0", installDir: tmp.url.appendingPathComponent("dxmt"), artifact: lib))
+
+        for _ in 0..<50 where !env.dxmtReady { await Task.yield() }
+        #expect(env.dxmtReady)
+        #expect(env.backendSettings.config.dxmtLibDirPath == lib)
+        #expect(env.backendSettings.config.dxmtRuntimeName == "dxmt-v0.72-cx26.2.0")
+    }
+
+    @Test("bootstrap seeds dxmtRuntime.defaultName from persisted config")
+    func bootstrapSeedsDXMTDefault() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        // Persist a DXMT default AND install the matching runtime so refresh() keeps the seeded name.
+        let win = paths.runtimesDir.appendingPathComponent("dxmt-v0.72-cx26.2.0/lib/wine/x86_64-windows")
+        try FileManager.default.createDirectory(at: win, withIntermediateDirectories: true)
+        for f in ["d3d11.dll", "winemetal.dll"] {
+            FileManager.default.createFile(atPath: win.appendingPathComponent(f).path, contents: Data("x".utf8))
+        }
+        var backend = BackendConfig()
+        backend.dxmtLibDirPath = win
+        backend.dxmtRuntimeName = "dxmt-v0.72-cx26.2.0"
+        try await ConfigStore(paths: paths).saveBackend(backend)
+
+        let env = AppEnvironment(
+            paths: paths, runner: FakeProcessRunner(),
+            updater: Updater(repo: "x/y", session: FakeURLProtocol.makeSession()))
+        await env.bootstrap()
+        #expect(env.dxmtRuntime.defaultName == "dxmt-v0.72-cx26.2.0")
     }
 }

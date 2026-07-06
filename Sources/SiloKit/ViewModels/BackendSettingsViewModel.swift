@@ -20,9 +20,9 @@ public final class BackendSettingsViewModel {
     }
 
     /// Adopt the Wine tab's default as the backend's wine binary and persist.
-    public func applyDefaultWine(_ wine: WineInstall) async {
-        config.wineBinaryPath = wine.wineBinary
-        config.wineRuntimeName = wine.name
+    public func applyDefaultWine(_ install: RuntimeInstall) async {
+        config.wineBinaryPath = install.artifact
+        config.wineRuntimeName = install.name
         await save()
     }
 

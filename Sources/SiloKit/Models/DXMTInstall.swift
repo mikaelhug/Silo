@@ -18,4 +18,10 @@ public struct DXMTInstall: Sendable, Equatable, Identifiable {
 
     public var displayName: String { name.replacingOccurrences(of: "-", with: " ") }
     public var isUsable: Bool { libDir != nil }
+
+    /// The backend-agnostic view used by the shared runtime-install VM + settings list (payload = the
+    /// `x86_64-windows` module dir).
+    public var runtimeInstall: RuntimeInstall {
+        RuntimeInstall(name: name, installDir: installDir, artifact: libDir)
+    }
 }

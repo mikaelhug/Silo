@@ -46,7 +46,8 @@ struct OnboardingView: View {
                     .frame(maxWidth: 540)
 
                 let message = steam.status.isEmpty
-                    ? (runtime.statusMessage ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
+                    ? (runtime.statusMessage ?? env.dxmtRuntime.statusMessage
+                        ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
                 if let message {
                     Text(message).font(.callout).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).frame(maxWidth: 540)
@@ -73,10 +74,10 @@ private struct DXMTOnboardingSection: View {
             VStack(spacing: 12) {
                 StepRow(
                     number: 1, title: "Install the DXMT runtime",
-                    subtitle: "Latest build from GitHub.",
-                    done: env.dxmtReady, busy: env.dxmtDownloading, locked: !env.wineReady,
+                    subtitle: "~7 MB download.",
+                    done: env.dxmtReady, busy: env.dxmtRuntime.isInstalling, locked: !env.wineReady,
                     actionLabel: "Download…",
-                    action: { Task { await env.downloadLatestDXMT() } })
+                    action: { Task { await env.dxmtRuntime.installLatest() } })
                 StepRow(
                     number: 2, title: "Set up the DXMT Steam bottle",
                     subtitle: "Sign in once.",
