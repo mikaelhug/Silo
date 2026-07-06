@@ -13,6 +13,14 @@ struct SteamBottleViewModelTests {
         let session = SteamClientSession(
             bottle: bottle, orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
         session.readinessTimeout = 0
+        // Collapse the setup warm-up so `setUp()` doesn't poll for real: the fake never "commits" Steam's
+        // update, so warm-up runs to its failsafe — with these tuned to ~0 it returns near-instantly.
+        session.warmUpPollInterval = 0.001
+        session.warmUpTimeout = 0.005
+        session.warmUpMaxRelaunches = 0
+        session.warmUpBringUpTimeout = 0.005
+        session.warmUpCefSettleSeconds = 0.002
+        session.warmUpForceQuitSettle = 0
         let vm = SteamBottleViewModel(bottle: bottle, session: session)
         return (vm, fake, paths)
     }
@@ -59,7 +67,8 @@ struct SteamBottleViewModelTests {
         #expect(fake.invocations.contains { $0.arguments == ["wineboot", "--init"] })
         let install = try #require(fake.invocations.last { $0.arguments.last == "/S" })
         #expect(install.arguments.last == "/S")
-        #expect(vm.status.contains("Steam installed"))
+        #expect(vm.status.contains("Steam is ready"))
+        #expect(vm.steamInstalled)
         #expect(!vm.busy)
     }
 

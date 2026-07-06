@@ -85,12 +85,23 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
             executable: executable, arguments: arguments, environment: environment,
             currentDirectory: currentDirectory, detached: false, logURL: nil
         )
-        let (hook, result): (((Invocation) -> Void)?, ProcessResult) = lock.withLock {
-            _invocations.append(invocation)
-            let result = _results.isEmpty ? defaultResult : _results.removeFirst()
-            return (onRun, result)
-        }
+        // Simulate Steam teardown: `steam.exe -shutdown` and `taskkill /F` kill the running (spawned) Steam
+        // processes, mirroring the real runner. Without this the warm-up's post-download shutdown/force-quit
+        // would wait out its full failsafe against fake PIDs that never die (a 25s+ per-test hang).
+        let killsSpawned = arguments.contains("-shutdown") || arguments.first == "taskkill"
+        let (hook, result, killed): (((Invocation) -> Void)?, ProcessResult, [@Sendable () -> Void]) =
+            lock.withLock {
+                _invocations.append(invocation)
+                let result = _results.isEmpty ? defaultResult : _results.removeFirst()
+                var fired: [@Sendable () -> Void] = []
+                if killsSpawned {
+                    for pid in _alivePIDs { fired += _exitHandlers[pid]?.map(\.run) ?? [] }
+                    _alivePIDs.removeAll(); _exitHandlers.removeAll()
+                }
+                return (onRun, result, fired)
+            }
         hook?(invocation)
+        killed.forEach { $0() }
         return result
     }
 

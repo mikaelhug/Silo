@@ -116,9 +116,12 @@ public struct SteamBottle: Sendable {
         let installer = try await downloadInstaller()
         let result = try await runner.run(
             executable: wine, arguments: [installer.path, "/S"],
-            environment: Silo.wineEnvironment(prefix: prefixDir, wine: wine),
+            environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
             currentDirectory: prefixDir)
         guard result.succeeded else { throw BottleError.steamInstallFailed(result.exitCode) }
+        // Success: drop the cached installer (~2 MB) — `isSteamInstalled` short-circuits re-runs, so it's
+        // never needed again. On failure it's kept, so a retry resumes without re-downloading.
+        try? fileManager.removeItem(at: installer)
     }
 
     /// Whether the bottle already has Microsoft core fonts (checks a marker font). Wine installs none, so a
@@ -166,7 +169,9 @@ public struct SteamBottle: Sendable {
             return result
         }
 
-        // Extract sequentially — concurrent wine invocations in one prefix would fight over the wineserver.
+        // Extract sequentially — parallel extractions would race each other in the shared extract dir.
+        // The msync env attaches each run to the bottle's ONE wineserver (Silo.enforceMsync), so this can
+        // safely share the prefix with a running Steam (e.g. riding under the setup warm-up).
         let extractDir = driveC.appendingPathComponent("silo-fonts")
         defer { try? fileManager.removeItem(at: extractDir) }
         for (font, exe) in downloaded {
@@ -175,7 +180,8 @@ public struct SteamBottle: Sendable {
             // IExpress extract-only (`/T:<dir> /C /Q`): drops the .ttf into the target with no GUI.
             _ = try? await runner.run(
                 executable: wine, arguments: ["C:\\\(font).exe", "/T:C:\\silo-fonts", "/C", "/Q"],
-                environment: Silo.wineEnvironment(prefix: prefixDir, wine: wine), currentDirectory: prefixDir)
+                environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
+                currentDirectory: prefixDir)
             let extracted = (try? fileManager.contentsOfDirectory(
                 at: extractDir, includingPropertiesForKeys: nil)) ?? []
             for file in extracted where file.pathExtension.lowercased() == "ttf" {
