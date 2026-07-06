@@ -23,24 +23,24 @@ struct GameProcessCoordinatorTests {
     @Test("track remembers the PID; a kqueue exit clears it")
     func trackAndExit() async throws {
         let (coordinator, fake) = make()
-        coordinator.track(.steam(220), pid: 4242)
-        #expect(coordinator.pid(for: .steam(220)) == 4242)
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 4242)
+        #expect(coordinator.pid(for: .steam(appID: 220, backend: .gptk)) == 4242)
         #expect(coordinator.anythingRunning)
 
         fake.setAlive(4242, false)   // fires the observeExit handler
-        try await waitUntil { coordinator.pid(for: .steam(220)) == nil }
-        #expect(coordinator.pid(for: .steam(220)) == nil)
+        try await waitUntil { coordinator.pid(for: .steam(appID: 220, backend: .gptk)) == nil }
+        #expect(coordinator.pid(for: .steam(appID: 220, backend: .gptk)) == nil)
         #expect(!coordinator.anythingRunning)
     }
 
     @Test("a STALE exit never clears a newer launch of the same game (pid-match guard)")
     func staleExitGuard() async throws {
         let (coordinator, fake) = make()
-        coordinator.track(.steam(220), pid: 1000)
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 1000)
         fake.setAlive(1000, false)                    // old exit enqueues its main-actor hop…
-        coordinator.track(.steam(220), pid: 2000)     // …but a relaunch wins the race
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 2000)     // …but a relaunch wins the race
         for _ in 0..<20 { await Task.yield() }        // let the stale hop land
-        #expect(coordinator.pid(for: .steam(220)) == 2000)   // guarded: the new launch stays tracked
+        #expect(coordinator.pid(for: .steam(appID: 220, backend: .gptk)) == 2000)   // guarded: the new launch stays tracked
         #expect(coordinator.anythingRunning)
     }
 
@@ -87,7 +87,7 @@ struct GameProcessCoordinatorTests {
         let log = tmp.url.appendingPathComponent("f.log")
         try Data("err:winediag: Using the Vulkan renderer\n".utf8).write(to: log)
         let count = LockedBox(0)
-        coordinator.watchGraphics(.steam(220), log: log, backend: .gptk) { count.set(count.value + 1) }
+        coordinator.watchGraphics(.steam(appID: 220, backend: .gptk), log: log, backend: .gptk) { count.set(count.value + 1) }
         try await waitUntil { count.value == 1 }
         #expect(count.value == 1)
     }
@@ -95,10 +95,23 @@ struct GameProcessCoordinatorTests {
     @Test("terminateAllSync SIGTERMs exactly the tracked PIDs (Steam + manual)")
     func terminateAll() throws {
         let (coordinator, fake) = make()
-        coordinator.track(.steam(220), pid: 100)
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 100)
         coordinator.track(.manual(UUID()), pid: 200)
         coordinator.terminateAllSync()
         #expect(Set(fake.terminatedPIDs) == [100, 200])
+    }
+
+    @Test("the same appID under GPTK and DXMT are INDEPENDENT keys (both bottle copies tracked at once)")
+    func sameAppIDBothBackendsAreIndependent() throws {
+        let (coordinator, _) = make()
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 100)
+        coordinator.track(.steam(appID: 220, backend: .dxmt), pid: 200)
+        #expect(coordinator.pid(for: .steam(appID: 220, backend: .gptk)) == 100)
+        #expect(coordinator.pid(for: .steam(appID: 220, backend: .dxmt)) == 200)
+        // Clearing one leaves the other tracked.
+        coordinator.clear(.steam(appID: 220, backend: .gptk))
+        #expect(coordinator.pid(for: .steam(appID: 220, backend: .gptk)) == nil)
+        #expect(coordinator.pid(for: .steam(appID: 220, backend: .dxmt)) == 200)
     }
 }
 

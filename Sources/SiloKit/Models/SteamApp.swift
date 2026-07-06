@@ -2,7 +2,14 @@ import Foundation
 
 /// A Steam game discovered from the Steam bottle's `appmanifest_*.acf`.
 public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
-    public var id: Int { appID }
+    /// Library identity is (appID, backend), NOT appID alone: the same title installed in BOTH the GPTK
+    /// and DXMT Steam bottles is two distinct library entries (each runs in its own bottle), so they must
+    /// not collide in SwiftUI `ForEach` / `sheet(item:)`. Computed — no effect on `Codable`/persistence.
+    public struct ID: Hashable, Sendable {
+        public let appID: Int
+        public let backend: GraphicsBackend
+    }
+    public var id: ID { ID(appID: appID, backend: backend) }
 
     public let appID: Int
     public let name: String

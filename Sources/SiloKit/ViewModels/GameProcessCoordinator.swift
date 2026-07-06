@@ -1,8 +1,11 @@
 import Foundation
 
-/// Identity of a launched game across both kinds — the single key for the coordinator's tables.
+/// Identity of a launched game across both kinds — the single key for the coordinator's tables. A Steam
+/// game is identified by BOTH its appID and its backend: the same title can be installed in both the GPTK
+/// and DXMT Steam bottles (two distinct library entries), and each runs on its own bottle/runtime, so its
+/// live-process state must be tracked per (appID, backend), not per appID.
 enum GameID: Hashable, Sendable {
-    case steam(Int)
+    case steam(appID: Int, backend: GraphicsBackend)
     case manual(UUID)
 }
 
