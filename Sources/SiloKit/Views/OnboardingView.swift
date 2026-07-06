@@ -23,21 +23,21 @@ struct OnboardingView: View {
                         number: 1, title: "Install Wine",
                         subtitle: "~250 MB download.",
                         done: env.wineReady, busy: runtime.isInstalling,
-                        actionLabel: "Install Wine",
+                        actionLabel: "Install",
                         action: { Task { await env.runtime.installLatest() } })
 
                     StepRow(
                         number: 2, title: "Import Game Porting Toolkit",
                         subtitle: "Apple's GPTK .dmg.",
                         done: env.gptkReady, busy: gptk.isImporting,
-                        actionLabel: "Choose .dmg…",
+                        actionLabel: "Choose .dmg",
                         action: { if let dmg = chooseDiskImage() { Task { await env.gptkManager.importGPTK(from: dmg) } } })
 
                     StepRow(
                         number: 3, title: "Set up the Steam bottle",
                         subtitle: "Sign in once.",
                         done: env.steamReady, busy: steam.busy, locked: !env.wineReady,
-                        actionLabel: "Set up…",
+                        actionLabel: "Set up",
                         action: { Task { await env.steamBottleVM.setUp() } })
                 }
                 .frame(maxWidth: 540)
@@ -76,13 +76,13 @@ private struct DXMTOnboardingSection: View {
                     number: 1, title: "Install the DXMT runtime",
                     subtitle: "~7 MB download.",
                     done: env.dxmtReady, busy: env.dxmtRuntime.isInstalling, locked: !env.wineReady,
-                    actionLabel: "Download…",
+                    actionLabel: "Install",
                     action: { Task { await env.dxmtRuntime.installLatest() } })
                 StepRow(
                     number: 2, title: "Set up the DXMT Steam bottle",
                     subtitle: "Sign in once.",
                     done: env.dxmtSteamReady, busy: env.dxmtBottleVM.busy, locked: !env.wineReady,
-                    actionLabel: "Set up…",
+                    actionLabel: "Set up",
                     action: { Task { await env.dxmtBottleVM.setUp() } })
             }
             .padding(.top, 10)
