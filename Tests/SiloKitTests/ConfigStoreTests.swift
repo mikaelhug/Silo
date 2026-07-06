@@ -273,6 +273,21 @@ struct ConfigStoreTests {
         #expect(off["D3DM_SUPPORT_DXR"] == nil)
     }
 
+    @Test("MetalFX/DXR env vars are backend-specific (GPTK's D3DMetal vs DXMT)")
+    func perfFlagsPerBackend() {
+        let flags = EnvFlags(metalFX: true, dxr: true)
+        // GPTK/D3DMetal: the D3DM_* vars.
+        let gptk = flags.environment(graphics: .gptk)
+        #expect(gptk["D3DM_ENABLE_METALFX"] == "1")
+        #expect(gptk["D3DM_SUPPORT_DXR"] == "1")
+        #expect(gptk["DXMT_METALFX_SPATIAL_SWAPCHAIN"] == nil)
+        // DXMT: its own MetalFX var, and NO D3DM_* (DXR is DX12-only, which DXMT doesn't do).
+        let dxmt = flags.environment(graphics: .dxmt)
+        #expect(dxmt["DXMT_METALFX_SPATIAL_SWAPCHAIN"] == "1")
+        #expect(dxmt["D3DM_ENABLE_METALFX"] == nil)
+        #expect(dxmt["D3DM_SUPPORT_DXR"] == nil)
+    }
+
     @Test("BackendConfig tolerates a pre-retinaMode document (defaults false, never wipes config)")
     func backendConfigTolerantDecode() throws {
         // An old config.json predating retinaMode — must decode (not throw), keeping its fields.

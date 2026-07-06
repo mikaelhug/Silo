@@ -40,7 +40,7 @@ public struct LaunchOrchestrator: Sendable {
             throw LaunchError.wineNotConfigured
         }
 
-        var environment = config.envFlags.environment()
+        var environment = config.envFlags.environment(graphics: graphics)
         // Layer the base wine env (WINEDEBUG, DYLD bundled deps) under the user's flags, then force the
         // shared Steam-bottle WINEPREFIX (so the game is co-resident with the Steam client), regardless of
         // any user override.

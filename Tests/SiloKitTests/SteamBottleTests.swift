@@ -225,4 +225,40 @@ struct SteamBottleTests {
         #expect(try String(contentsOf: cef2.appendingPathComponent("steamwebhelper_orig.exe"), encoding: .utf8) == "REAL2")
     }
 
+    @Test("installCoreFonts downloads each font, extracts its .ttf via IExpress, and copies it into Fonts")
+    func installCoreFonts() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        // Stub every corefont installer download.
+        for font in Silo.coreFonts {
+            FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString,
+                                 data: Data("EXE".utf8), session: session)
+        }
+        let fontsDir = paths.steamBottle(.gptk).appendingPathComponent("drive_c/windows/Fonts")
+        let extractDir = paths.steamBottle(.gptk).appendingPathComponent("drive_c/silo-fonts")
+        // Simulate the IExpress extract: drop a .ttf named after the font (Arial.TTF for arial32, the marker).
+        fake.onRun = { inv in
+            guard inv.arguments.contains("/C"), let exeArg = inv.arguments.first(where: { $0.hasSuffix(".exe") })
+            else { return }
+            // The exe arg is a Windows path (C:\arial32.exe) — split on backslash, not `/`.
+            let font = (exeArg.split(separator: "\\").last.map(String.init) ?? exeArg)
+                .replacingOccurrences(of: ".exe", with: "")
+            try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+            let ttf = font == "arial32" ? "Arial.TTF" : "\(font).TTF"
+            FileManager.default.createFile(atPath: extractDir.appendingPathComponent(ttf).path, contents: Data("TTF".utf8))
+        }
+
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+
+        let installed = Set((try? FileManager.default.contentsOfDirectory(atPath: fontsDir.path)) ?? [])
+        #expect(installed.contains("Arial.TTF"))                 // marker font landed in Fonts
+        #expect(installed.count == Silo.coreFonts.count)         // one .ttf per installer
+        #expect(bottle.hasCoreFonts)                             // idempotency marker now true
+        // Idempotent: a second run does no downloads (the marker short-circuits it).
+        let extractRunsBefore = fake.invocations.count
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        #expect(fake.invocations.count == extractRunsBefore)
+    }
+
 }

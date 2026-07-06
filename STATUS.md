@@ -3,6 +3,24 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔎 Dependency + per-runtime audit vs AppleGamingWiki (2026-07-06) — two gaps closed, on-device validated.**
+  - **Core fonts (dependency gap).** Wine ships no MS TrueType fonts (the bottle's `windows/Fonts` was
+    empty), which the Wine-Steam community flags as blank/garbled text in the client UI + games. `setUp()`
+    now installs Microsoft's redistributable "core fonts for the web" (the winetricks `corefonts` set,
+    `Silo.coreFonts`) into BOTH bottles — downloaded from SourceForge's canonical mirror and extracted with
+    **Wine's own IExpress `/T /C /Q`** (no cabextract/winetricks dependency; validated on-device →
+    25 fonts: Arial/Times/Courier/Verdana/Georgia/Comic/Impact/Andale/Trebuchet/Webdings). Idempotent
+    (`SteamBottle.hasCoreFonts` marker), best-effort per font, cleans up after itself.
+  - **MetalFX was GPTK-only (per-runtime gap).** The per-game MetalFX toggle always emitted
+    `D3DM_ENABLE_METALFX` — a no-op for a DXMT game. `EnvFlags.environment(graphics:)` is now backend-aware:
+    GPTK → `D3DM_ENABLE_METALFX`, DXMT → `DXMT_METALFX_SPATIAL_SWAPCHAIN`. DXR stays GPTK-only (DXMT has no
+    DX12/raytracing). `makePlan` passes the launch backend through.
+  - **Verified already-correct:** GPTK env set complete (`ROSETTA_ADVERTISE_AVX`, `MTL_HUD_ENABLED`, DXR);
+    `WINEMSYNC` (deliberately msync, not the wiki's esync — required for shared-bottle co-residency);
+    per-runtime DLL overrides + D3DMetal-framework-in-DYLD (GPTK only) + cloned runtimes; Windows 10 both
+    bottles; DXVK/VKD3D/Vulkan correctly N/A (Metal-direct); vcrun covered by Wine builtins + Steam's
+    per-game installers. **Onboarding already lean** — the 3 steps map to 3 genuinely-required user actions
+    (GPTK needs a manual Apple `.dmg`, can't be automated); no meaningful simplification available.
 - **🩹 Steam-bottle warm-up: fold the first-run self-update into setup (2026-07-06, on-device validated).**
   Problem: after setup, the user's first Steam launch hit "failed to load steamui.dll", the second was a
   black login window, and only the THIRD reached login. Root cause: `SteamSetup.exe /S` installs only the
