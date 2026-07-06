@@ -16,4 +16,10 @@ public struct WineInstall: Sendable, Equatable, Identifiable {
 
     public var displayName: String { name.replacingOccurrences(of: "-", with: " ") }
     public var isUsable: Bool { wineBinary != nil }
+
+    /// The backend-agnostic view used by the shared runtime-install VM + settings list (payload = the
+    /// wine binary).
+    public var runtimeInstall: RuntimeInstall {
+        RuntimeInstall(name: name, installDir: installDir, artifact: wineBinary)
+    }
 }

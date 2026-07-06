@@ -53,7 +53,7 @@ struct ViewModelTests {
             manager: RuntimeManager(paths: paths, runner: FakeProcessRunner()), repo: "acme/wine")
         await vm.refresh()
         #expect(vm.installed.map(\.name) == ["Wine-9.0"])
-        #expect(vm.installed.first?.wineBinary?.lastPathComponent == "wine64")
+        #expect(vm.installed.first?.artifact?.lastPathComponent == "wine64")
     }
 
     @Test("installLatest installs the newest wine-* release, ignoring app v* releases in the same repo")
@@ -144,6 +144,95 @@ struct ViewModelTests {
         await vm.installLatest()
         #expect(vm.statusMessage?.contains("no installable archive") == true)
         #expect(!vm.isInstalling)
+    }
+
+    // MARK: - DXMT kind (the SAME RuntimeViewModel, parameterized for DXMT)
+
+    /// A fake tar that writes a DXMT `x86_64-windows` module tree into the extract dir.
+    private func dxmtExtractHook(_ fake: FakeProcessRunner) {
+        fake.onRun = { inv in
+            if inv.executable.lastPathComponent == "tar",
+               let i = inv.arguments.firstIndex(of: "-C"), i + 1 < inv.arguments.count {
+                let win = URL(fileURLWithPath: inv.arguments[i + 1]).appendingPathComponent("lib/wine/x86_64-windows")
+                try? FileManager.default.createDirectory(at: win, withIntermediateDirectories: true)
+                for f in ["d3d11.dll", "winemetal.dll"] {
+                    FileManager.default.createFile(atPath: win.appendingPathComponent(f).path, contents: Data("x".utf8))
+                }
+            }
+        }
+    }
+
+    @Test("DXMT installLatest installs the wine-matched dxmt-*-cx release and adopts it as default")
+    func dxmtInstallLatest() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // Newest-first: two DXMT builds (per-wine) + a wine + an app tag. The kind must pick the one
+        // matched to the configured wine, NOT the newest.
+        let json = """
+        [{"tag_name":"dxmt-v0.72-cx26.3.0","name":"DXMT","assets":[
+            {"name":"n.tar.xz","browser_download_url":"https://e.com/newer.tar.xz","size":1}]},
+         {"tag_name":"wine-cx-26.2.0","name":"Wine","assets":[]},
+         {"tag_name":"dxmt-v0.72-cx26.2.0","name":"DXMT","assets":[
+            {"name":"m.tar.xz","browser_download_url":"https://e.com/matched.tar.xz","size":1}]},
+         {"tag_name":"v0.5.0","name":"Silo","assets":[]}]
+        """
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/dxmt/releases?per_page=30", data: Data(json.utf8))
+        FakeURLProtocol.stub("https://e.com/matched.tar.xz", data: Data("DXMT".utf8))
+        let fake = FakeProcessRunner(); dxmtExtractHook(fake)
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let manager = RuntimeManager(paths: paths, runner: fake, session: FakeURLProtocol.makeSession())
+        let vm = RuntimeViewModel(
+            kind: .dxmt(manager: manager, wineRuntimeName: { "wine-cx-26.2.0" }),
+            manager: manager, repo: "acme/dxmt")
+        var adopted: RuntimeInstall?
+        vm.onDefaultChanged = { adopted = $0 }
+
+        await vm.installLatest()
+
+        #expect(vm.installed.map(\.name) == ["dxmt-v0.72-cx26.2.0"])     // the matched build
+        #expect(vm.defaultName == "dxmt-v0.72-cx26.2.0")                 // adopted (none was set)
+        #expect(adopted?.artifact?.lastPathComponent == "x86_64-windows")
+        #expect(vm.statusMessage?.contains("Installed") == true)
+    }
+
+    @Test("DXMT installLatest reports 'No DXMT build published' when only wine releases exist")
+    func dxmtInstallLatestNoRelease() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let json = #"[{"tag_name":"wine-cx-26.2.0","name":"Wine","assets":[]}]"#
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/dxmtnone/releases?per_page=30", data: Data(json.utf8))
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let manager = RuntimeManager(paths: paths, runner: FakeProcessRunner(), session: FakeURLProtocol.makeSession())
+        let vm = RuntimeViewModel(
+            kind: .dxmt(manager: manager, wineRuntimeName: { nil }),
+            manager: manager, repo: "acme/dxmtnone")
+        await vm.installLatest()
+        #expect(vm.statusMessage?.contains("No DXMT build published") == true)
+        #expect(!vm.isInstalling)
+    }
+
+    @Test("DXMT installLatest does NOT re-download when already installed")
+    func dxmtInstallLatestAlready() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let json = #"[{"tag_name":"dxmt-v0.72-cx26.2.0","name":"DXMT","assets":[{"name":"d.tar.xz","browser_download_url":"https://e.com/already-dxmt.tar.xz","size":1}]}]"#
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/dxmtalready/releases?per_page=30", data: Data(json.utf8))
+        // Deliberately do NOT stub the asset — a download would fail, proving we don't attempt one.
+        let fake = FakeProcessRunner()
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let win = paths.runtimesDir.appendingPathComponent("dxmt-v0.72-cx26.2.0/lib/wine/x86_64-windows")
+        try FileManager.default.createDirectory(at: win, withIntermediateDirectories: true)
+        for f in ["d3d11.dll", "winemetal.dll"] {
+            FileManager.default.createFile(atPath: win.appendingPathComponent(f).path, contents: Data("x".utf8))
+        }
+        let manager = RuntimeManager(paths: paths, runner: fake, session: FakeURLProtocol.makeSession())
+        let vm = RuntimeViewModel(
+            kind: .dxmt(manager: manager, wineRuntimeName: { "wine-cx-26.2.0" }),
+            manager: manager, repo: "acme/dxmtalready")
+        await vm.refresh()
+
+        await vm.installLatest()
+
+        #expect(vm.statusMessage?.contains("already installed") == true)
+        #expect(vm.installed.map(\.name) == ["dxmt-v0.72-cx26.2.0"])
+        #expect(!fake.invocations.contains { $0.executable.lastPathComponent == "tar" })
     }
 
     @Test("AppEnvironment.setupComplete needs Wine + GPTK + the Steam bottle")

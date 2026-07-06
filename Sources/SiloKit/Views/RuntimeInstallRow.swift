@@ -38,3 +38,29 @@ struct RuntimeInstallRow: View {
         }
     }
 }
+
+/// The "Installed X" list shared by the Wine + DXMT settings tabs: one `RuntimeInstallRow` per install
+/// (Set-default / Remove), or an empty-state row. Reads everything from the runtime VM.
+struct RuntimeInstalledSection: View {
+    let title: String
+    @Bindable var vm: RuntimeViewModel
+
+    var body: some View {
+        Section(title) {
+            if vm.installed.isEmpty {
+                Text("None installed.").foregroundStyle(.secondary)
+            } else {
+                ForEach(vm.installed) { install in
+                    RuntimeInstallRow(
+                        title: install.displayName,
+                        warning: install.isUsable ? nil : vm.unusableWarning,
+                        subtitle: nil,
+                        isDefault: vm.isDefault(install),
+                        canSetDefault: install.isUsable,
+                        onSetDefault: { vm.setDefault(install) },
+                        onRemove: { Task { await vm.remove(install) } })
+                }
+            }
+        }
+    }
+}

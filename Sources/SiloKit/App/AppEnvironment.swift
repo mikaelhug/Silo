@@ -38,6 +38,9 @@ public final class AppEnvironment {
     public let gameLibrary: GameLibraryViewModel
     public let backendSettings: BackendSettingsViewModel
     public let runtime: RuntimeViewModel
+    /// The DXMT settings tab / onboarding step — the SAME install flow as `runtime`, parameterized for
+    /// DXMT (its own releases, its own default persisted to `BackendConfig.dxmtLibDirPath`).
+    public let dxmtRuntime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
     /// Per-backend Steam-bottle service bundles (bottle + client session + settings VM) — the ONE place
     /// backend services are built, keyed so nothing is duplicated per backend.
@@ -97,6 +100,11 @@ public final class AppEnvironment {
         self.backendSettings = BackendSettingsViewModel(
             config: initialBackend, configStore: configStore)
         self.runtime = RuntimeViewModel(manager: runtimeManager, repo: Silo.wineRepo)
+        let backendSettings = self.backendSettings
+        self.dxmtRuntime = RuntimeViewModel(
+            kind: .dxmt(manager: runtimeManager,
+                        wineRuntimeName: { backendSettings.config.wineRuntimeName }),
+            manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
         // One service bundle (bottle + client session + settings VM) per backend — see BackendServices.
@@ -118,8 +126,14 @@ public final class AppEnvironment {
         gptkManager.onDefaultChanged = { [weak self] install in
             Task { await self?.backendSettings.applyDefaultGPTK(install) }
         }
-        runtime.onDefaultChanged = { [weak self] wine in
-            Task { await self?.backendSettings.applyDefaultWine(wine) }
+        runtime.onDefaultChanged = { [weak self] install in
+            Task { await self?.backendSettings.applyDefaultWine(install) }
+        }
+        // The DXMT default persists to a different config field (the DXMT lib dir); an unusable install
+        // (no module dir) is ignored so the config never adopts a broken runtime.
+        dxmtRuntime.onDefaultChanged = { [weak self] install in
+            guard let lib = install.artifact else { return }
+            Task { await self?.backendSettings.applyDXMTLibDir(lib, name: install.name) }
         }
         // A fresh Steam install must flip the library's cached `steamReady` gate (it drives onboarding);
         // load() re-probes the cache off-main. Without this, onboarding would stall until a relaunch.
@@ -149,6 +163,8 @@ public final class AppEnvironment {
         gptkManager.refresh()
         runtime.defaultName = state.backend.wineRuntimeName
         await runtime.refresh()
+        dxmtRuntime.defaultName = state.backend.dxmtRuntimeName
+        await dxmtRuntime.refresh()
         // Populate the bottle VMs' cached installed-flags (settings buttons gate on them).
         for services in backends.values { await services.bottleVM.refreshInstalled() }
         // Library = games installed in the Steam bottle.
@@ -201,59 +217,6 @@ public final class AppEnvironment {
             return
         }
         await backendSettings.applyDXMTLibDir(dir)
-    }
-
-    public private(set) var dxmtDownloading = false
-
-    /// Download + install the latest DXMT build published to Silo's Releases (built by `build-dxmt.yml`)
-    /// and adopt it as the backend's DXMT runtime — the auto-download counterpart of `importDXMTRuntime`.
-    /// Reuses the Wine downloader engine end-to-end: `RuntimeManager.availableReleases` → `preferredAsset`
-    /// → `installDXMT` (HTTPS-only, mandatory SHA-256 for our own repo, safe extract, de-quarantine +
-    /// ad-hoc sign), exactly like `RuntimeViewModel.installLatest`.
-    public func downloadLatestDXMT() async {
-        guard !dxmtDownloading else { return }
-        dxmtDownloading = true
-        defer { dxmtDownloading = false }
-        do {
-            // The repo hosts app v* + wine-cx-* + dxmt-* releases. Pick the DXMT built against the
-            // configured wine (tags are dxmt-<ver>-cx<wine>), else the newest dxmt-* — keeps winemetal.so
-            // paired with the wine it runs on.
-            let releases = try await runtimeManager.availableReleases(repo: Silo.wineRepo, limit: 30)
-            guard let release = RuntimeManager.matchedDXMTRelease(
-                releases, forWine: backendSettings.config.wineRuntimeName) else {
-                backendSettings.statusMessage =
-                    "No DXMT build published yet (the build-dxmt CI workflow must run first)."
-                return
-            }
-            // Already installed? Adopt it without re-downloading.
-            if let lib = await runtimeManager.installedDXMT()
-                .first(where: { $0.name == release.tagName })?.libDir {
-                await backendSettings.applyDXMTLibDir(lib, name: release.tagName)
-                backendSettings.statusMessage = "Latest DXMT (\(release.tagName)) is already installed."
-                return
-            }
-            guard let asset = RuntimeManager.preferredAsset(release) else {
-                backendSettings.statusMessage = "Latest DXMT release has no installable archive."
-                return
-            }
-            backendSettings.statusMessage = "Downloading DXMT \(release.tagName)…"
-            // Our own repo → a published SHA-256 is mandatory (fail-closed), like Wine.
-            let install = try await runtimeManager.installDXMT(
-                name: release.tagName, from: asset.browserDownloadUrl, requireDigest: Silo.wineRepo == Versions.githubRepo)
-            guard let lib = install.libDir else {
-                backendSettings.statusMessage =
-                    "Downloaded DXMT, but its x86_64-windows module folder wasn't found in the archive."
-                return
-            }
-            await backendSettings.applyDXMTLibDir(lib, name: release.tagName)
-            // Same warning the Wine installer surfaces: a failed de-quarantine/re-sign means Gatekeeper
-            // may block winemetal.so — say so now rather than at a mysterious launch failure.
-            let warning = await runtimeManager.lastHardeningIssue
-            backendSettings.statusMessage = warning.map { "Installed DXMT \(release.tagName) — ⚠️ \($0)" }
-                ?? "Installed DXMT \(release.tagName)."
-        } catch {
-            backendSettings.statusMessage = "DXMT download failed: \((error as NSError).localizedDescription)"
-        }
     }
 
     // MARK: - Steam-bottle Wine tools (Settings → General)

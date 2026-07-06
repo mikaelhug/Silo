@@ -19,22 +19,7 @@ struct WineDownloadView: View {
                 Text("Wine")
             }
 
-            Section("Installed Wine") {
-                if vm.installed.isEmpty {
-                    Text("None installed.").foregroundStyle(.secondary)
-                } else {
-                    ForEach(vm.installed) { wine in
-                        RuntimeInstallRow(
-                            title: wine.displayName,
-                            warning: wine.isUsable ? nil : "no wine binary found",
-                            subtitle: nil,
-                            isDefault: vm.isDefault(wine),
-                            canSetDefault: wine.isUsable,
-                            onSetDefault: { vm.setDefault(wine) },
-                            onRemove: { Task { await vm.remove(wine) } })
-                    }
-                }
-            }
+            RuntimeInstalledSection(title: "Installed Wine", vm: vm)
 
             if let message = vm.statusMessage {
                 Section { Text(message).font(.callout).foregroundStyle(.secondary) }
