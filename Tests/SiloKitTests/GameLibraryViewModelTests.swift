@@ -264,6 +264,89 @@ struct GameLibraryViewModelTests {
         #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
     }
 
+    @Test("a title installed in BOTH bottles surfaces as two entries with distinct ids")
+    func dualInstallSurfacesTwice() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        // The SAME appID (220) installed in BOTH Steam bottles.
+        for graphics in [GraphicsBackend.gptk, .dxmt] {
+            let client = paths.steamBottleClientDir(graphics)
+            try FileManager.default.createDirectory(
+                at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: paths.steamBottleExe(graphics).path, contents: Data())
+            try #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "LastOwner" "76561197960287930" "SizeOnDisk" "100" }"#
+                .write(to: client.appendingPathComponent("steamapps/appmanifest_220.acf"), atomically: true, encoding: .utf8)
+        }
+        await vm.load()
+        let copies = vm.games.filter { $0.appID == 220 }
+        #expect(copies.count == 2)                          // both surface (no dedup)
+        #expect(Set(copies.map(\.backend)) == [.gptk, .dxmt])
+        #expect(Set(copies.map(\.id)).count == 2)           // distinct SwiftUI identity → both cards render
+    }
+
+    @Test("play refuses a title's other-bottle copy while it runs (never touches the running Steam)")
+    func playBlocksCrossBottleDoubleLaunch() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let gptk = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        await vm.play(gptk)
+        #expect(vm.isRunning(gptk))
+        let detachedBefore = fake.invocations.filter(\.detached).count
+
+        var dxmt = gptk; dxmt.backend = .dxmt               // the same title's DXMT-bottle copy
+        await vm.play(dxmt)
+
+        #expect(vm.statusMessage?.contains("already running in the GPTK") == true)
+        #expect(vm.isRunning(gptk))                         // the GPTK copy is untouched (Steam not killed)
+        #expect(!vm.isRunning(dxmt))                        // the DXMT copy never launched
+        #expect(fake.invocations.filter(\.detached).count == detachedBefore)   // no new spawn at all
+    }
+
+    @Test("stop on the non-running bottle copy is a clean no-op")
+    func stopNonRunningCopyNoOps() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let gptk = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        await vm.play(gptk)
+        #expect(vm.isRunning(gptk))
+        let invocationsBefore = fake.invocations.count
+
+        var dxmt = gptk; dxmt.backend = .dxmt
+        await vm.stop(dxmt)                                 // that copy isn't running → no-op
+
+        #expect(vm.isRunning(gptk))                         // the running GPTK copy is untouched
+        #expect(fake.invocations.count == invocationsBefore)   // no taskkill fired for the idle copy
+    }
+
+    @Test("uninstall a DXMT game routes steam://uninstall to the DXMT bottle's own Steam")
+    func uninstallRoutesToBackendBottle() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let gptkBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .gptk)
+        let dxmtBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        let gptkSession = SteamClientSession(bottle: gptkBottle, orchestrator: orchestrator)
+        let dxmtSession = SteamClientSession(bottle: dxmtBottle, orchestrator: orchestrator)
+        gptkSession.updateWine(backend.wineBinaryPath); dxmtSession.updateWine(backend.wineBinaryPath)
+        gptkSession.readinessTimeout = 0; dxmtSession.readinessTimeout = 0
+        let vm = GameLibraryViewModel(
+            bottle: gptkBottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend,
+            session: gptkSession, dxmtSession: dxmtSession, provisioner: WinePrefixProvisioner(runner: fake))
+
+        var game = try installedGame(paths, appID: 400, name: "Old", dir: "Old")
+        game.backend = .dxmt
+        await vm.uninstall(game)
+
+        // The steam://uninstall spawn ran against the DXMT bottle, not the GPTK one.
+        let spawn = try #require(fake.invocations.last { $0.arguments.contains("steam://uninstall/400") })
+        #expect(spawn.environment["WINEPREFIX"] == paths.steamBottle(.dxmt).path)
+    }
+
     @Test("load → notReady when the bottle has no Steam installed")
     func notReadyWithoutSteam() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

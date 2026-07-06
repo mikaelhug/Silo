@@ -22,7 +22,7 @@ public final class GameLibraryViewModel {
     /// Live launch tracking, projected from the process coordinator's keyed table. Module-internal, NOT
     /// public API — callers query liveness via `isRunning(_:)` / `isAnythingRunning`.
     var runningPIDs: [Int: Int32] {
-        processes.pids.reduce(into: [:]) { if case .steam(let appID) = $1.key { $0[appID] = $1.value } }
+        processes.pids.reduce(into: [:]) { if case .steam(let appID, _) = $1.key { $0[appID] = $1.value } }
     }
     var manualRunningPIDs: [UUID: Int32] {
         processes.pids.reduce(into: [:]) { if case .manual(let id) = $1.key { $0[id] = $1.value } }
@@ -128,8 +128,20 @@ public final class GameLibraryViewModel {
             : manualGames.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
-    public func isRunning(_ game: SteamApp) -> Bool { processes.pid(for: .steam(game.appID)) != nil }
+    public func isRunning(_ game: SteamApp) -> Bool { processes.pid(for: gameID(game)) != nil }
     public func isBusy(_ game: SteamApp) -> Bool { busyAppIDs.contains(game.appID) }
+
+    /// The coordinator key for a Steam game — (appID, backend), so the two bottle copies of one title are
+    /// tracked independently.
+    private func gameID(_ game: SteamApp) -> GameID { .steam(appID: game.appID, backend: game.backend) }
+
+    /// The backend of the bottle a title is currently running in, if any (scans the live-process table).
+    /// Used to block launching the SAME title in the other bottle — one Steam account can't be in-game
+    /// twice, and bringing up the other bottle's client would kill Steam under the running game.
+    private func runningBackend(ofAppID appID: Int) -> GraphicsBackend? {
+        for case .steam(appID, let backend) in processes.pids.keys { return backend }
+        return nil
+    }
     public func isRunning(_ game: ManualGame) -> Bool { processes.pid(for: .manual(game.id)) != nil }
     public func isBusy(_ game: ManualGame) -> Bool { manualBusyIDs.contains(game.id) }
 
@@ -151,10 +163,15 @@ public final class GameLibraryViewModel {
         // Manual games also live in a bottle, so the library still gates on at least one Steam bottle
         // existing (notReady drives the onboarding until Steam is set up).
         guard steamReady else { loadState = .notReady; return }
-        var seen = Set<Int>()   // dedup by appID (first wins) in case a title is installed in both bottles
+        // A title installed in BOTH bottles surfaces TWICE — one card per backend (each runs in its own
+        // bottle on its own runtime; the per-card BackendTag disambiguates them). Identity is
+        // (appID, backend), so no dedup. Sort by name, tie-breaking on backend for a stable order.
         let (discovered, failures) = await discoverAllBottles()
-        games = discovered.filter { seen.insert($0.appID).inserted }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        games = discovered.sorted {
+            let byName = $0.name.localizedCaseInsensitiveCompare($1.name)
+            return byName == .orderedSame ? $0.backend.rawValue < $1.backend.rawValue
+                                          : byName == .orderedAscending
+        }
         if !failures.isEmpty {
             // A bottle's library couldn't be READ (permissions/IO — not the benign no-library-yet case).
             // With nothing else to show that's the load's error state; if the other bottle still produced
@@ -203,11 +220,13 @@ public final class GameLibraryViewModel {
     /// Open the bottle's Steam (Store/Library) so the user can browse + install games.
     public func openSteam() async { await session.ensureRunning() }
 
-    /// Ask the bottle's Steam to uninstall a game, then refresh.
+    /// Ask the game's OWN bottle's Steam to uninstall it, then refresh. Routes through that backend's
+    /// client session (not the GPTK one) — with a title surfaced in both bottles, uninstalling the DXMT
+    /// copy must reach the DXMT bottle's Steam. Refused while the title runs in EITHER bottle.
     public func uninstall(_ game: SteamApp) async {
-        guard !isRunning(game) else { return }
+        guard runningBackend(ofAppID: game.appID) == nil else { return }
         do {
-            try await session.sendURL("steam://uninstall/\(game.appID)")
+            try await clientSession(for: game.backend).sendURL("steam://uninstall/\(game.appID)")
             setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
         } catch { setStatus("Couldn't reach Steam: \((error as NSError).localizedDescription)") }
     }
@@ -218,8 +237,20 @@ public final class GameLibraryViewModel {
     /// client up so Steamworks works. Routes prefix + runtime through `BottleResolver` (its backend = its
     /// bottle), and keeps only that bottle's Steam client online.
     public func play(_ game: SteamApp) async {
-        guard backend.isWineConfigured, !busyAppIDs.contains(game.appID),
-              processes.pid(for: .steam(game.appID)) == nil else { return }
+        // `busyAppIDs` is keyed by bare appID, so while EITHER bottle's copy is launching the other copy
+        // is blocked too — closing the cross-bottle launch race with no extra state.
+        guard backend.isWineConfigured, !busyAppIDs.contains(game.appID) else { return }
+        // Already running SOMEWHERE? A same-bottle replay is a silent no-op (as before); the OTHER bottle's
+        // copy gets an explanatory status (its Play button is enabled). This check runs BEFORE
+        // stopOtherSteamClients so we never kill the running game's Steam client. One account can't be
+        // in-game on two clients, so co-launching the same title in both bottles is refused by design.
+        if let runningIn = runningBackend(ofAppID: game.appID) {
+            if runningIn != game.backend {
+                setStatus("\(game.name) is already running in the \(runningIn.displayName) bottle — "
+                    + "stop it there first (one Steam account can't be in-game twice).")
+            }
+            return
+        }
         busyAppIDs.insert(game.appID); defer { busyAppIDs.remove(game.appID) }
         do {
             // Resolve the game's backend → its bottle prefix + prepared runtime (off-main; clones DXMT).
@@ -243,8 +274,10 @@ public final class GameLibraryViewModel {
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: launchBackend, graphics: game.backend,
                 prefix: context.prefix, logURL: paths.log(forAppID: game.appID))
-            processes.track(.steam(game.appID), pid: pid)
+            processes.track(gameID(game), pid: pid)
             do {
+                // Per-game config/settings are keyed by appID (shared by both bottle copies — same game,
+                // and they can never run simultaneously, so a shared launch date/options is correct).
                 _ = try await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
                 setStatus("Launched \(game.name).")
             } catch {
@@ -254,7 +287,7 @@ public final class GameLibraryViewModel {
             }
             // Last, so a detected fallback (which usually arrives a beat later as the log is written, but
             // may already be present) overrides the "Launched" status rather than being clobbered by it.
-            watchGraphics(.steam(game.appID), log: paths.log(forAppID: game.appID),
+            watchGraphics(gameID(game), log: paths.log(forAppID: game.appID),
                           name: game.name, backend: game.backend)
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
@@ -263,13 +296,14 @@ public final class GameLibraryViewModel {
 
     /// Stop a running game. Terminates just the game (the shared bottle keeps Steam alive — a
     /// `wineserver -k` would kill the co-resident Steam client too). See `LaunchOrchestrator.stopGame`.
+    /// Keyed by (appID, backend), so Stop on the non-running bottle copy is a clean no-op.
     public func stop(_ game: SteamApp) async {
-        guard let pid = processes.pid(for: .steam(game.appID)) else { return }
+        guard let pid = processes.pid(for: gameID(game)) else { return }
         let config = await configStore.load().config(for: game.appID)
         let exeName = orchestrator.resolvedExecutableName(app: game, config: config)
         await orchestrator.stopGame(
             pid: pid, exeName: exeName, prefix: paths.steamBottle(game.backend), backend: backend)
-        processes.clear(.steam(game.appID))
+        processes.clear(gameID(game))
     }
 
     /// SIGTERM every game Silo launched (Steam + manual), synchronously. Used at app quit (where there's no
