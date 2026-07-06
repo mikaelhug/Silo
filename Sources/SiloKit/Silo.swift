@@ -75,7 +75,8 @@ public enum Silo {
     /// the Steam client, the games co-resident with it, `taskkill`, registry edits, maintenance tools —
     /// must attach to the SAME wineserver: a mismatched sync mode silently forks a second server, which
     /// breaks Steamworks IPC (games) or aims a tool at the wrong server. This is the ONE place the rule
-    /// lives; every bottle-sharing launch path applies it.
+    /// lives; EVERY wine invocation inside a bottle applies it — launches, provisioning (`wineboot`),
+    /// installers, and font extraction alike — so a prefix only ever sees one wineserver flavor.
     public static func enforceMsync(_ env: inout [String: String]) {
         env["WINEMSYNC"] = "1"
         env["WINEESYNC"] = nil

@@ -26,7 +26,11 @@ public struct WinePrefixProvisioner: Sendable {
         guard let wine else { throw ProvisionError.wineNotConfigured }
         if isProvisioned(prefix) { return }
         try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
-        var environment = Silo.wineEnvironment(prefix: prefix, wine: wine)
+        // msync env: wine starts a SEPARATE wineserver per (prefix, sync-mode), and everything that later
+        // runs in this prefix is msync (Silo.enforceMsync) — booting with the same mode means the prefix
+        // only ever sees ONE wineserver flavor, so a boot server can't linger alongside a launch server
+        // and race its registry writes.
+        var environment = Silo.msyncWineEnvironment(prefix: prefix, wine: wine)
         environment["WINEDLLOVERRIDES"] = Silo.winePrefixInitOverrides
         let result = try await runner.run(
             executable: wine, arguments: ["wineboot", "--init"],
@@ -42,6 +46,6 @@ public struct WinePrefixProvisioner: Sendable {
         let wineserver = WineRuntimeLayout(wineBinary: wine).wineserver
         _ = try? await runner.run(
             executable: wineserver, arguments: ["-k"],
-            environment: Silo.wineEnvironment(prefix: prefix, wine: wine), currentDirectory: nil)
+            environment: Silo.msyncWineEnvironment(prefix: prefix, wine: wine), currentDirectory: nil)
     }
 }
