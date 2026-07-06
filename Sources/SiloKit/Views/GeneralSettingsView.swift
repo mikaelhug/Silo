@@ -17,6 +17,7 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             steamBottleSection
+            dxmtBottleSection
             bottleToolsSection
             bottlesSection
             updatesSection
@@ -105,7 +106,7 @@ struct GeneralSettingsView: View {
     }
 
     /// Stand up a shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
-    /// co-resident with a logged-in Steam client.
+    /// co-resident with a logged-in Steam client. The GPTK (default) bottle.
     @ViewBuilder private var steamBottleSection: some View {
         Section {
             SteamBottleControls(
@@ -113,7 +114,30 @@ struct GeneralSettingsView: View {
                 logButtonTitle: "Open bottle log",
                 logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog)
         } header: {
-            Text("Steam bottle")
+            Text("Steam bottle (GPTK)")
+        }
+    }
+
+    /// The DXMT Steam bottle — its own Steam install/login (machine tokens are per-prefix), for the older
+    /// DirectX 10/11 titles GPTK can't run. Set up its runtime in the DXMT tab first.
+    @ViewBuilder private var dxmtBottleSection: some View {
+        Section {
+            SteamBottleControls(
+                bottle: env.dxmtBottleVM, noun: "DXMT Steam",
+                logButtonTitle: "Open bottle log",
+                logWindowTitle: "DXMT Steam Bottle — Log", logURL: env.paths.steamBottleLog(.dxmt))
+            LabeledContent("Repair") {
+                HStack(spacing: 8) {
+                    Button("Wine Config") { Task { await env.openWineTool("winecfg", for: .dxmt) } }
+                    Button("Registry") { Task { await env.openWineTool("regedit", for: .dxmt) } }
+                    Button("Control Panel") { Task { await env.openWineTool("control", for: .dxmt) } }
+                }
+                .disabled(env.wineBinary == nil || !env.dxmtSteamReady)
+            }
+        } header: {
+            Text("Steam bottle (DXMT)")
+        } footer: {
+            Text("For DirectX 10/11 titles GPTK can't run. Install the DXMT runtime in the DXMT tab first.")
         }
     }
 

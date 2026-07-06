@@ -34,21 +34,6 @@ struct DXMTManagerView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Steam bottle") {
-                SteamBottleControls(
-                    bottle: env.dxmtBottleVM, noun: "DXMT Steam",
-                    logButtonTitle: "Open bottle log",
-                    logWindowTitle: "DXMT Steam Bottle — Log", logURL: env.paths.steamBottleLog(.dxmt))
-                LabeledContent("Repair") {
-                    HStack(spacing: 8) {
-                        Button("Wine Config") { Task { await env.openWineTool("winecfg", for: .dxmt) } }
-                        Button("Registry") { Task { await env.openWineTool("regedit", for: .dxmt) } }
-                        Button("Control Panel") { Task { await env.openWineTool("control", for: .dxmt) } }
-                    }
-                    .disabled(env.wineBinary == nil || !env.dxmtSteamReady)
-                }
-            }
-
             if let message = env.backendSettings.statusMessage {
                 Section { Text(message).font(.callout).foregroundStyle(.secondary) }
             }
