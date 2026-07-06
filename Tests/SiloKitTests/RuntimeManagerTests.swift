@@ -323,6 +323,38 @@ struct RuntimeManagerTests {
         #expect(await manager.installedWines().map(\.name) == ["Wine-1"])
     }
 
+    @Test("both listings exclude a DXMT variant CLONE (it carries a wine binary AND the DXMT modules)")
+    func listingsExcludeVariantClone() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // A real base wine build.
+        try tmp.write("Silo/Runtimes/wine-cx-26.2.0/bin/wine64", "x")
+        // A real DXMT extract (its own release).
+        try tmp.write("Silo/Runtimes/dxmt-v0.72-cx26.2.0/lib/wine/x86_64-windows/d3d11.dll", "x")
+        try tmp.write("Silo/Runtimes/dxmt-v0.72-cx26.2.0/lib/wine/x86_64-windows/winemetal.dll", "x")
+        // The DXMT variant clone of the base: has BOTH a wine binary and the overlaid DXMT modules.
+        try tmp.write("Silo/Runtimes/wine-cx-26.2.0-dxmt/bin/wine64", "x")
+        try tmp.write("Silo/Runtimes/wine-cx-26.2.0-dxmt/lib/wine/x86_64-windows/d3d11.dll", "x")
+        try tmp.write("Silo/Runtimes/wine-cx-26.2.0-dxmt/lib/wine/x86_64-windows/winemetal.dll", "x")
+        let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
+        // The clone appears in NEITHER list; only the genuine installs do.
+        #expect(await manager.installedWines().map(\.name) == ["wine-cx-26.2.0"])
+        #expect(await manager.installedDXMT().map(\.name) == ["dxmt-v0.72-cx26.2.0"])
+    }
+
+    @Test("remove cascades to the base's DXMT variant clone; a no-clone remove is a no-op there")
+    func removeCascadesToClone() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        try tmp.write("Silo/Runtimes/wine-cx-26.2.0/bin/wine64", "x")
+        try tmp.write("Silo/Runtimes/wine-cx-26.2.0-dxmt/bin/wine64", "x")
+        let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
+        try await manager.remove(name: "wine-cx-26.2.0")
+        let runtimes = tmp.url.appendingPathComponent("Silo/Runtimes")
+        #expect(!FileManager.default.fileExists(atPath: runtimes.appendingPathComponent("wine-cx-26.2.0").path))
+        #expect(!FileManager.default.fileExists(atPath: runtimes.appendingPathComponent("wine-cx-26.2.0-dxmt").path))
+        // Removing a name that never had a clone doesn't throw.
+        try await manager.remove(name: "wine-cx-26.2.0")
+    }
+
     @Test("install throws downloadFailed on a non-2xx download, never invoking tar")
     func downloadFailed() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

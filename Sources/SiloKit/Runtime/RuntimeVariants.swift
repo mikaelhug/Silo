@@ -35,7 +35,7 @@ public struct RuntimeVariants: Sendable {
             try linker.overlayGPTK(wineBinary: baseWine, gptkLibDir: libDir)
             return baseWine
         case .dxmt:
-            let variantWine = try ensureClone(of: baseWine, suffix: backend.rawValue)
+            let variantWine = try ensureClone(of: baseWine, backend: backend)
             try linker.overlayDXMT(wineBinary: variantWine, dxmtLibDir: libDir)
             return variantWine
         }
@@ -46,15 +46,33 @@ public struct RuntimeVariants: Sendable {
     public func variantWine(backend: GraphicsBackend, baseWine: URL) -> URL {
         switch backend {
         case .gptk: baseWine
-        case .dxmt: cloneWine(of: baseWine, suffix: backend.rawValue)
+        case .dxmt: cloneWine(of: baseWine, backend: backend)
         }
+    }
+
+    // MARK: - Clone naming (the ONE source of truth for the `<base>-<backend>` sibling scheme)
+
+    /// The runtime-dir name of `backend`'s variant clone of the base runtime `base` — a sibling of the
+    /// base under the Runtimes dir. The single place the `-<backend.rawValue>` suffix is formed, so the
+    /// exclusion predicate below and the clone location can never drift. Uses `rawValue` ("dxmt"), NOT
+    /// `badge` ("DXMT") — the latter is `AppPaths.steamBottle`'s bottle-dir suffix, a different namespace.
+    public static func cloneName(ofBase base: String, backend: GraphicsBackend) -> String {
+        "\(base)-\(backend.rawValue)"
+    }
+
+    /// Whether a Runtimes-dir entry is a variant clone (`<base>-<backend.rawValue>` for any secondary
+    /// backend) rather than an installed runtime. `RuntimeManager`'s installed-Wine / installed-DXMT
+    /// listings exclude these: a DXMT clone carries both a wine binary AND the overlaid DXMT modules, so
+    /// it would otherwise masquerade as an install in BOTH lists.
+    public static func isVariantClone(_ name: String) -> Bool {
+        GraphicsBackend.allCases.contains { $0 != .gptk && name.hasSuffix("-\($0.rawValue)") }
     }
 
     // MARK: - Cloning
 
-    private func ensureClone(of baseWine: URL, suffix: String) throws -> URL {
+    private func ensureClone(of baseWine: URL, backend: GraphicsBackend) throws -> URL {
         let baseRoot = WineRuntimeLayout(wineBinary: baseWine).root
-        let variantRoot = cloneRoot(of: baseRoot, suffix: suffix)
+        let variantRoot = cloneRoot(of: baseRoot, backend: backend)
         if !fileManager.fileExists(atPath: variantRoot.path) {
             try fileManager.createDirectory(
                 at: variantRoot.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -64,15 +82,16 @@ public struct RuntimeVariants: Sendable {
             .appendingPathComponent(baseWine.lastPathComponent)
     }
 
-    private func cloneWine(of baseWine: URL, suffix: String) -> URL {
-        cloneRoot(of: WineRuntimeLayout(wineBinary: baseWine).root, suffix: suffix)
+    private func cloneWine(of baseWine: URL, backend: GraphicsBackend) -> URL {
+        cloneRoot(of: WineRuntimeLayout(wineBinary: baseWine).root, backend: backend)
             .appendingPathComponent("bin", isDirectory: true)
             .appendingPathComponent(baseWine.lastPathComponent)
     }
 
-    private func cloneRoot(of baseRoot: URL, suffix: String) -> URL {
+    private func cloneRoot(of baseRoot: URL, backend: GraphicsBackend) -> URL {
         baseRoot.deletingLastPathComponent()
-            .appendingPathComponent("\(baseRoot.lastPathComponent)-\(suffix)", isDirectory: true)
+            .appendingPathComponent(
+                Self.cloneName(ofBase: baseRoot.lastPathComponent, backend: backend), isDirectory: true)
     }
 
     /// APFS copy-on-write clone (`clonefile`), falling back to a deep copy when the target volume can't
