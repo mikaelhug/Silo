@@ -3,6 +3,30 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🩹 Steam-bottle warm-up: fold the first-run self-update into setup (2026-07-06, on-device validated).**
+  Problem: after setup, the user's first Steam launch hit "failed to load steamui.dll", the second was a
+  black login window, and only the THIRD reached login. Root cause: `SteamSetup.exe /S` installs only the
+  ~2 MB bootstrapper; the real client (steamui.dll + CEF/steamwebhelper) self-downloads on first run, and
+  the webhelper wrap races that download. Fix: `SteamBottleViewModel.setUp()` now runs a one-time **warm-up**
+  (`SteamClientSession.warmUpUpdate`) that completes the download BEFORE the user's first launch, then wraps
+  the webhelper against the now-existing CEF dir. Works for BOTH GPTK + DXMT bottles (setUp is shared),
+  non-invasive (rootless `steam.exe`, no window pops up), with a real **progress bar** (parsed from Steam's
+  `Downloading update (X of Y KB)` log). Validated on-device against the fresh DXMT bottle: 7.1 MB
+  bootstrapper → **1.0 GB fully-installed client** (steamui.dll + wrapped webhelper), no rollback, no
+  leftover processes. **The debugging took several real runs; each found a concrete bug** (recorded so the
+  hard-won knowledge isn't lost):
+  - `-silent` makes Steam start minimized and SKIP the first-run client download → dropped it (launch bare
+    `steam.exe`, rootless).
+  - "steamui.dll exists" fires MID-download (Steam extracts it early); shutting down then makes Steam roll
+    the half-applied update all the way back. The reliable "done" signal is Steam's own **"Update complete"**
+    log marker (a single launch does the whole download→install→commit).
+  - Wine spams thousands of `msync_init Failed` lines that pushed Steam's progress lines out of any log
+    tail → parse the WHOLE log (`SteamBottle.updateState`).
+  - The bottle log lives OUTSIDE the client dir and persists across setups, so a stale "Update complete"
+    fired completion instantly → `SteamBottle.resetLog()` at warm-up start.
+  - `--setup-steam <gptk|dxmt>` CLI harness added (like `--import-gptk`) to run setup headlessly on-device.
+  - Pending: on-device confirm the DXMT bottle's first real launch now lands on login (the whole point);
+    commit is on `dxmt-dualbottle-fixes`. **Corefonts install (recommended follow-up) not yet done.**
 - **🔧 Six dual-backend UX/correctness fixes (2026-07-06, branch `dxmt-dualbottle-fixes`, 5 commits,
   each `swift build` clean + `Scripts/test.sh` green; app assembles + smoke ok).** Reported from on-device
   use of the dual-bottle build. Note on the test gate: the parallel `Scripts/test.sh` `tee` can drop both
