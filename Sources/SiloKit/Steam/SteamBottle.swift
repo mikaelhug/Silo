@@ -52,15 +52,6 @@ public struct SteamBottle: Sendable {
     /// Guards setup from creating a PHANTOM bottle on the boot disk at the now-missing `/Volumes/...` path.
     public var isRootReachable: Bool { paths.bottlesRootReachable }
 
-    /// Whether Steam's REAL client has been downloaded into the bottle — `steamui.dll` is present. A fresh
-    /// `SteamSetup.exe /S` drops only the ~2 MB bootstrapper (`steam.exe`, no `steamui.dll`); the client
-    /// (steamui.dll + the CEF/steamwebhelper it needs) is self-downloaded on the first run. This is the
-    /// signal the warm-up (`SteamClientSession.warmUpUpdate`) waits for so the user's first real launch
-    /// doesn't hit "failed to load steamui.dll".
-    public var isClientDownloaded: Bool {
-        fileManager.fileExists(atPath: clientDir.appendingPathComponent("steamui.dll").path)
-    }
-
     /// The FULL client is downloaded: `steamui.dll` AND a CEF `steamwebhelper.exe` (the login UI) both
     /// present. A fresh bootstrapper has neither; the first-run self-update brings both. NB: Steam extracts
     /// these files WHILE the update is still downloading, so their presence alone is NOT "the update is

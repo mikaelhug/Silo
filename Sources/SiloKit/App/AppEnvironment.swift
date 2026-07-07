@@ -147,7 +147,16 @@ public final class AppEnvironment {
         // A fresh Steam install must flip the library's cached `steamReady` gate (it drives onboarding);
         // load() re-probes the cache off-main. Without this, onboarding would stall until a relaunch.
         for services in backends.values {
+            let backend = services.backend
             services.bottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
+            // One account = one client: the settings "Launch Steam" / setUp on a bottle refuses while a game
+            // is live in another, and otherwise stops the other bottles' idle clients before bringing up its own.
+            services.bottleVM.otherBottleRunningGame = { [weak self] in
+                self?.gameLibrary.activeSteamBackend(excluding: backend)
+            }
+            services.bottleVM.stopOtherClients = { [weak self] in
+                self?.gameLibrary.stopOtherSteamClients(except: backend)
+            }
         }
         // Relocation must refuse while anything runs in a bottle (see `anythingRunning`).
         bottles.isBlocked = { [weak self] in self?.anythingRunning ?? true }

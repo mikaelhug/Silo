@@ -34,6 +34,12 @@ public final class SteamBottleViewModel {
     /// Fired after `setUp` completes a fresh install — AppEnvironment reloads the library so the
     /// onboarding gate (`steamReady`) flips without an app restart.
     public var onSteamInstalled: (() -> Void)?
+    /// Set by AppEnvironment: the backend running a Steam game OTHER than this bottle's, if any — so bringing
+    /// this bottle's client up (settings "Launch Steam" / setUp's warm-up) can refuse a second client for
+    /// the same Steam account while a game is live elsewhere.
+    var otherBottleRunningGame: () -> GraphicsBackend? = { nil }
+    /// Set by AppEnvironment: stop every OTHER backend's Steam client (the one-account-one-client rule).
+    var stopOtherClients: () -> Void = {}
 
     /// Re-probe whether the bottle's Steam is installed (off the main actor). Called at bootstrap.
     public func refreshInstalled() async {
@@ -63,6 +69,11 @@ public final class SteamBottleViewModel {
         // phantom bottle on the boot disk at the now-missing /Volumes/... path.
         guard bottle.isRootReachable else {
             status = "Your bottles drive isn't connected. Reconnect it, then set up Steam."
+            return
+        }
+        // A game live in the OTHER bottle would collide with setup's warm-up client (same account).
+        if let other = otherBottleRunningGame() {
+            status = "A game is running in the \(other.displayName) bottle — stop it before setting up Steam."
             return
         }
         // Refuse while the OTHER bottle is being set up: seeding from a sibling whose client is still
@@ -138,7 +149,15 @@ public final class SteamBottleViewModel {
     /// Launch the bottle's Steam client.
     public func launchSteam() async {
         guard !busy else { return }
+        // One Steam account can't be in-game on two clients: refuse if a game is live in the OTHER bottle
+        // (bringing this bottle's client up would collide), rather than silently standing up a second client.
+        if let other = otherBottleRunningGame() {
+            status = "A game is running in the \(other.displayName) bottle — stop it first "
+                + "(one Steam account can't be in-game in two bottles at once)."
+            return
+        }
         busy = true; defer { busy = false }
+        stopOtherClients()   // keep only THIS bottle's client online
         // Route through the shared session so the live client has ONE owner + tracked PID (a game
         // launch afterwards reuses it instead of spawning a second client).
         let ok = await session.ensureRunning()

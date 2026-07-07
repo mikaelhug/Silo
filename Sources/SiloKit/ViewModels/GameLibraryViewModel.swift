@@ -75,7 +75,7 @@ public final class GameLibraryViewModel {
 
     /// Keep only ONE Steam client online at a time (same account): stop every other backend's client before
     /// bringing up the one the game needs.
-    private func stopOtherSteamClients(except graphics: GraphicsBackend) {
+    func stopOtherSteamClients(except graphics: GraphicsBackend) {
         for other in [session, dxmtSession].compactMap({ $0 }) where other.backend != graphics {
             other.stop()
         }
@@ -174,7 +174,7 @@ public final class GameLibraryViewModel {
     /// bottle's client up (`stopOtherSteamClients`) tears down the other's — killing its running game. Reads
     /// only main-actor state (running PIDs + `busyGames`), so a check-then-claim before any `await` is atomic
     /// against another launch interleaving.
-    private func activeSteamBackend(excluding backend: GraphicsBackend) -> GraphicsBackend? {
+    func activeSteamBackend(excluding backend: GraphicsBackend) -> GraphicsBackend? {
         for case .steam(_, let b) in processes.pids.keys where b != backend { return b }
         return busyGames.first { $0.backend != backend }?.backend
     }
@@ -398,6 +398,9 @@ public final class GameLibraryViewModel {
     /// Boot a manual game's private bottle (idempotent — fast once booted). Returns whether it's ready.
     @discardableResult
     public func ensureManualBottle(_ id: UUID) async -> Bool {
+        // The choke point for all manual-bottle provisioning (add/install/winecfg/play). Refuse while bottles
+        // are moving or the drive is unplugged — provisioning writes into a prefix under `bottlesRoot`.
+        if launchBlockedByBottles() { return false }
         guard let wine = backend.wineBinaryPath else { setStatus("Set up Wine first."); return false }
         do {
             try await provisioner.provision(prefix: paths.manualBottle(id), wine: wine)
@@ -563,6 +566,7 @@ public final class GameLibraryViewModel {
     /// they don't need the co-resident Steam client.
     @discardableResult
     public func makeShortcut(for game: ManualGame, into directory: URL? = nil) async -> URL? {
+        if launchBlockedByBottles() { return nil }   // prepareGraphics seeds the prefix — not during a move
         guard let dir = directory
             ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first else { return nil }
         let cfg = backend

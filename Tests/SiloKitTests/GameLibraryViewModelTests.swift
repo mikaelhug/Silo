@@ -353,6 +353,20 @@ struct GameLibraryViewModelTests {
         #expect(!fake.invocations.contains { $0.detached })   // nothing spawned into a prefix being moved
     }
 
+    @Test("provisioning a manual bottle is refused during a bottles move (no write into the moving prefix)")
+    func provisionRefusedWhileRelocating() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        await vm.load()
+        vm.isRelocating = { true }                            // a bottles move is underway
+        let exe = try tmp.write("Games/X/x.exe", "MZ")
+        let added = await vm.addManualGame(name: "X", executable: exe)
+        #expect(added == nil)                                                             // refused
+        #expect(!fake.invocations.contains { $0.arguments == ["wineboot", "--init"] })   // never provisioned
+        #expect(vm.statusMessage?.contains("moving your bottles") == true)
+    }
+
     @Test("only the launching copy's button spins — the other bottle's copy stays idle mid-launch")
     func busySpinnerIsPerCopy() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
