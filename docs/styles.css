@@ -177,6 +177,38 @@ h3 {
   background: var(--surface-2);
 }
 
+.nav-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.15s ease;
+}
+
+.nav-stat:hover {
+  color: var(--text);
+}
+
+.nav-stat-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.nav-stat-sep {
+  width: 1px;
+  height: 13px;
+  background: var(--border-strong);
+}
+
+.nav-stat-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+
 /* ---------- hero ---------- */
 
 .hero {
@@ -631,7 +663,7 @@ h3 {
     font-size: 0.86rem;
   }
 
-  .nav-links a:not(.nav-cta) {
+  .nav-links a:not(.nav-cta):not(.nav-stat) {
     display: none;
   }
 

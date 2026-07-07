@@ -59,6 +59,25 @@
           <a href="#features">Features</a>
           <a href="#graphics">Graphics</a>
           <a href="#install">Install</a>
+          <!-- Total downloads + latest-release downloads, filled from stats.json at runtime; hidden until it loads. -->
+          <a class="nav-stat" id="nav-stat" href="https://github.com/mikaelhug/Silo/releases" aria-label="Downloads and latest release" hidden>
+            <span class="nav-stat-item" id="nav-stat-downloads">
+              <svg class="nav-stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3v12"></path>
+                <path d="M7 10l5 5 5-5"></path>
+                <path d="M5 21h14"></path>
+              </svg>
+              <span id="nav-stat-total">—</span>
+            </span>
+            <span class="nav-stat-sep" aria-hidden="true"></span>
+            <span class="nav-stat-item" id="nav-stat-updates">
+              <svg class="nav-stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                <path d="M21 3v6h-6"></path>
+              </svg>
+              <span id="nav-stat-latest">—</span>
+            </span>
+          </a>
           <a class="nav-cta" href="https://github.com/mikaelhug/Silo">GitHub</a>
         </div>
       </div>
@@ -362,5 +381,30 @@
       <a href="https://github.com/mikaelhug/Silo">GitHub</a>
       <a href="https://github.com/mikaelhug/Silo/issues">Issues</a>
     </footer>
+
+    <!--
+      Nav download counter. stats.json is generated at deploy time from GitHub's
+      release download counts (Scripts/gen-stats.sh, run by the pages workflow) —
+      no client-side tracking. The counter stays hidden unless the file loads and
+      has a published release, so the nav degrades cleanly with JS off or data absent.
+    -->
+    <script>
+      (function () {
+        fetch("stats.json", { cache: "no-cache" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (s) {
+            if (!s || !s.latest) return;
+            var fmt = function (n) { return (n || 0).toLocaleString("en-US"); };
+            document.getElementById("nav-stat-total").textContent = fmt(s.total_downloads);
+            document.getElementById("nav-stat-latest").textContent = fmt(s.latest.downloads);
+            document.getElementById("nav-stat-downloads").title =
+              fmt(s.total_downloads) + " total downloads across all releases";
+            document.getElementById("nav-stat-updates").title =
+              fmt(s.latest.downloads) + " on the latest release (v" + s.latest.version + ")";
+            document.getElementById("nav-stat").hidden = false;
+          })
+          .catch(function () { /* leave the counter hidden */ });
+      })();
+    </script>
   </body>
 </html>

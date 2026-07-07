@@ -1,0 +1,56 @@
+# GitHub Pages — publishes the static project site in docs/ to
+# https://mikaelhug.github.io/Silo/.
+#
+# Ported from Velox's working setup: a custom GitHub Actions deploy (NOT the legacy
+# "deploy from a branch" source) that also regenerates docs/stats.json from GitHub
+# release download counts (Scripts/gen-stats.sh) so the nav shows live download +
+# update numbers with NO client telemetry. stats.json is generated into the Pages
+# artifact, never committed (see .gitignore) — hence the daily `schedule`: it
+# refreshes the numbers even when docs/ hasn't changed.
+#
+# Requires repo Settings → Pages → Source = "GitHub Actions" (build_type=workflow);
+# without that flip GitHub keeps running the legacy branch builder instead of this file.
+#
+# Action versions are pinned to GitHub's tested Pages combo: configure-pages@v5 +
+# upload-pages-artifact@v3 + deploy-pages@v5. The node24 majors (configure-pages@v6,
+# upload-pages-artifact@v5) make deploy-pages@v5 fail with "Fetching artifact metadata
+# failed" (reproduced on Velox), so keep this set — their Node-20 notice is harmless
+# (the runner force-runs them on Node 24). Revisit when the node24 majors deploy cleanly.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**']
+  schedule:
+    - cron: '17 6 * * *'         # daily 06:17 UTC — refresh download counts (no docs change needed)
+  workflow_dispatch: {}          # manual redeploy (e.g. first cutover) with no docs change
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false      # let an in-flight deploy finish rather than cancel it
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - name: Generate download stats (docs/stats.json)
+        continue-on-error: true  # a stats hiccup must never block a docs deploy; the nav hides the counter if the file is missing
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # gh api uses this; contents:read is enough to read public releases
+        run: ./Scripts/gen-stats.sh
+      - uses: actions/upload-pages-artifact@v3   # v5 (wraps upload-artifact@v7) breaks deploy-pages@v5 — see note above
+        with:
+          path: docs             # the site root (contains index.html, .nojekyll, stats.json)
+      - id: deployment
+        uses: actions/deploy-pages@v5
