@@ -15,6 +15,9 @@ dist/
 .dxmt-build/
 .dxmt-build-fullrun.log
 
+## Adoption stats (generated into the Pages artifact by Scripts/gen-stats.sh)
+/docs/stats.json
+
 ## macOS
 .DS_Store
 
