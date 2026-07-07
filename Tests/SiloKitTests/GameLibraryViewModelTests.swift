@@ -309,6 +309,30 @@ struct GameLibraryViewModelTests {
         #expect(fake.invocations.filter(\.detached).count == detachedBefore)   // no new spawn at all
     }
 
+    @Test("play refuses a DIFFERENT game while one runs in the other bottle (never kills its Steam client)")
+    func playRefusesDifferentGameCrossBottle() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let gptk = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        await vm.play(gptk)
+        #expect(vm.isRunning(gptk))
+        let detachedBefore = fake.invocations.filter(\.detached).count
+        let stopsBefore = fake.terminatedPIDs.count
+
+        // A DIFFERENT title in the DXMT bottle: one account can't be in-game on two clients, and bringing the
+        // DXMT client up would tear down the GPTK client under the running game. Must be refused up front.
+        var dxmt = try installedGame(paths, appID: 570, name: "Dota", dir: "Dota")
+        dxmt.backend = .dxmt
+        await vm.play(dxmt)
+
+        #expect(vm.statusMessage?.contains("already running in the GPTK") == true)
+        #expect(vm.isRunning(gptk))                                            // GPTK copy untouched
+        #expect(!vm.isRunning(dxmt))                                           // DXMT game never launched
+        #expect(fake.invocations.filter(\.detached).count == detachedBefore)  // nothing spawned
+        #expect(fake.terminatedPIDs.count == stopsBefore)                     // GPTK Steam client NOT stopped
+    }
+
     @Test("only the launching copy's button spins — the other bottle's copy stays idle mid-launch")
     func busySpinnerIsPerCopy() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
