@@ -214,9 +214,9 @@ public final class AppEnvironment {
     /// The wine binary games launch with (nil until Wine is configured).
     public var wineBinary: URL? { backendSettings.config.wineBinaryPath }
 
-    /// Toggle macOS Retina/HiDPI mode for the Steam bottles: persist the ONE preference, then write the
-    /// `RetinaMode` registry key into EVERY installed bottle's prefix (GPTK + DXMT stay consistent).
-    /// Takes effect on the next game launch.
+    /// Toggle macOS Retina/HiDPI ("High Resolution Mode") for the Steam bottles: persist the ONE preference,
+    /// then write the coupled `RetinaMode` + `LogPixels` (DPI companion) registry keys into EVERY installed
+    /// bottle's prefix (GPTK + DXMT stay consistent). Takes effect on the next game launch.
     public func setSteamBottleRetina(_ on: Bool) async {
         guard let wine = wineBinary else { bottleToolsMessage = "Set up Wine first."; return }
         guard !bottleToolsBusy else { return }

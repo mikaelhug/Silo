@@ -25,13 +25,24 @@ public struct WineTools: Sendable {
         guard result.succeeded else { throw ToolsError.registryWriteFailed(result.exitCode) }
     }
 
-    /// macOS Retina/HiDPI mode for `prefix` — `HKCU\Software\Wine\Mac Driver\RetinaMode` = `y`/`n`.
-    /// On = Wine reports the real Retina resolution to games (crisp output, but in-game UI can render
-    /// small); off (Wine's default) = a non-Retina/scaled mode. The standard fix for wrong-sized windows.
+    /// macOS Retina/HiDPI mode for `prefix` — CrossOver's "High Resolution Mode", written as a **pair** so
+    /// the two halves can never drift:
+    /// - `HKCU\Software\Wine\Mac Driver\RetinaMode` = `y`/`n` — on = Wine renders at the real Retina
+    ///   (backing-pixel) resolution, so output is crisp instead of pixel-doubled.
+    /// - `HKCU\Control Panel\Desktop\LogPixels` = `192`/`96` — the DPI companion. RetinaMode alone doubles
+    ///   the pixel count, which makes in-game/UI text render tiny; 192 DPI (200%) tells Windows apps to scale
+    ///   UI up to match, keeping it legible. This is exactly what CrossOver reports (192 DPI) alongside its
+    ///   High Resolution Mode. LogPixels is meaningless without RetinaMode — 192 DPI on a non-Retina bottle
+    ///   would just bloat the UI — so it is ONLY ever written here, coupled to RetinaMode's state, reverting
+    ///   to Wine's default 96 (100%) when off.
+    /// The standard fix for wrong-sized game windows on Retina Macs; takes effect on the next launch.
     public func setRetinaMode(_ on: Bool, prefix: URL, wine: URL) async throws {
         try await setRegistryValue(
             on ? "y" : "n", name: "RetinaMode", type: "REG_SZ",
             at: #"HKCU\Software\Wine\Mac Driver"#, prefix: prefix, wine: wine)
+        try await setRegistryValue(
+            on ? "192" : "96", name: "LogPixels", type: "REG_DWORD",
+            at: #"HKCU\Control Panel\Desktop"#, prefix: prefix, wine: wine)
     }
 
     /// Base wine env + the co-residency msync rule so the command shares the bottle's wineserver.

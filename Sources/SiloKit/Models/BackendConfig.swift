@@ -16,8 +16,10 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var dxmtLibDirPath: URL?
     /// Name of the default DXMT install (managed in the Runtimes settings).
     public var dxmtRuntimeName: String?
-    /// macOS Retina/HiDPI mode for the shared Steam bottle (`HKCU\Software\Wine\Mac Driver\RetinaMode`).
-    /// Mirrors what Silo last wrote to the prefix; off is Wine's default. See `WineTools.setRetinaMode`.
+    /// macOS Retina/HiDPI mode ("High Resolution Mode") for the shared Steam bottle. Mirrors what Silo last
+    /// wrote to the prefix; off is Wine's default. Drives a coupled PAIR of registry keys —
+    /// `HKCU\Software\Wine\Mac Driver\RetinaMode` (crisp native rendering) plus its DPI companion
+    /// `HKCU\Control Panel\Desktop\LogPixels` (192 so the UI isn't tiny) — see `WineTools.setRetinaMode`.
     public var retinaMode: Bool
 
     public init(
