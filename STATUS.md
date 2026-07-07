@@ -14,8 +14,12 @@
   - **Theme B — liveness was in-memory only; gates were start-only.** Per the user's call, quit (and
     self-update relaunch) now TEARS DOWN games + Steam clients (`terminateAllOnQuit`; retired the opt-in
     toggle), so nothing orphans and cross-session gates stay accurate. Update refused while anything runs;
-    launches refused during a bottles move. Residual: a hard crash can still orphan (documented — needs a
-    Wine-verified wineserver probe).
+    launches refused during a bottles move. **Crash-orphan residual now closed (2026-07-08)** by
+    `ProcessLedger`: a crash-durable (pid, start-time) shadow of every process Silo spawns into a bottle
+    (games + Steam clients). The relocation/update gate (`blockedForBottleWork`) also refuses while a PRIOR
+    run's process is still alive; (pid, start-time) identity makes a reused PID never falsely block; fail-open
+    + self-pruning; the durable probe runs only at the action gate, never a SwiftUI body. Remaining residual:
+    a game that re-execs under a PID Silo never recorded (a wineserver-lock probe — needs Wine to verify).
   - **Theme C — "ready" was defined 3 ways; gates picked the weakest.** "Installed" now means the WARMED
     client (`hasWarmedClient`: steamui.dll + webhelper), not the bootstrapper; onboarding's GPTK step +
     `setupComplete` key on `gptkSteamReady` (DXMT-first can't mark GPTK done); removing a runtime reconciles
@@ -25,8 +29,13 @@
   - **Bonus:** `BottlesRelocationCoordinator` uses the injectable app-bundle resolver, so relocation's
     `relaunch`/`exit(0)` no longer kills the SERIAL test run — the whole suite passes serially for the first
     time (the parallel `tee` had been masking failures). +co-residency/relocation/warmed-client tests.
-  - **Still open (low priority):** `taskkill /IM` basename collision, strand-on-failed-delete surfacing,
-    `isSharedSystemApp` LastOwner edge; and the Theme-B crash-orphan residual.
+  - **Sweep leftovers cleared (2026-07-08):** `taskkill /IM` basename collision FIXED (`stop` drops to a
+    SIGTERM-only stop when a co-resident sibling shares the exe basename, else fires /IM); the crash-orphan
+    residual FIXED (`ProcessLedger`, see Theme B); `terminateAllOnQuit` composition now has a dedicated test.
+    Reviewed + consciously left: `strand-on-failed-delete` is already surfaced (removeManual /
+    discardManualBottle show a Finder path); `isSharedSystemApp` is a documented LastOwner heuristic with no
+    better single-manifest signal; `bottlesDisconnected` short-circuits to zero I/O in the default location
+    and must stay live to detect drive ejection.
 - **🐛 Adversarial correctness pass — 10 bugs fixed (2026-07-07, `swift build` clean + `Scripts/test.sh`
   green, +2 tests).** Two independent adversarial reviewers swept the GPTK bottle path for BUGS (not just
   rot). The GPTK core came back clean; the fixes (most-severe first):
