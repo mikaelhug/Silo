@@ -188,33 +188,46 @@ jobs:
           # Cross toolchain (llvm-mingw) is absolute in build-win64.txt and llvm@15 is via
           # -Dnative_llvm_path, so keep them AFTER the system dirs on PATH (system clang/ld/ar win).
           export PATH="$PATH:$DXMT_SRC/toolchains/$MINGW_DIR/bin:$LLVM15/bin"
-          # -Dwine_builtin_dll=true: all dlls (d3d + winemetal) install to x86_64-windows as BUILTIN — the
+          # -Dwine_builtin_dll=true: all dlls (d3d + winemetal) install to <arch>-windows as BUILTIN — the
           # layout Silo overlays (v0.72 defaults false, dropping d3d in system32 as native).
-          $ARCH_PREFIX meson setup \
-            --cross-file build-win64.txt --native-file silo-osx.txt \
-            -Dnative_llvm_path="$LLVM15" \
-            -Dwine_install_path="$WINE_INSTALL" \
-            -Dwine_builtin_dll=true \
-            build --buildtype release --prefix "$DXMT_SRC/install" --strip
-          $ARCH_PREFIX meson compile -C build
-          $ARCH_PREFIX meson install -C build
+          # Build BOTH ABIs into the SAME install prefix so 32-bit games (e.g. Overcooked 2) get DXMT too:
+          # win64 → install/x86_64-windows (+ x86_64-unix/winemetal.so), win32 → install/i386-windows. Wine
+          # auto-selects the tree by the game's PE machine type; the i386 PE winemetal.dll thunks into the
+          # shared host-arch x86_64-unix/winemetal.so (new-WoW64), so 32-bit ships no unix .so of its own.
+          build_abi() {  # $1 = cross-file, $2 = build dir
+            $ARCH_PREFIX meson setup \
+              --cross-file "$1" --native-file silo-osx.txt \
+              -Dnative_llvm_path="$LLVM15" \
+              -Dwine_install_path="$WINE_INSTALL" \
+              -Dwine_builtin_dll=true \
+              "$2" --buildtype release --prefix "$DXMT_SRC/install" --strip
+            $ARCH_PREFIX meson compile -C "$2"
+            $ARCH_PREFIX meson install -C "$2"
+          }
+          build_abi build-win64.txt build
+          build_abi build-win32.txt build32
 
       - name: Verify artifacts
         run: |
           set -eo pipefail
           cd "$DXMT_SRC"
-          win="install/x86_64-windows"; unix="install/x86_64-unix"
-          for f in "$win/d3d11.dll" "$win/dxgi.dll" "$win/d3d10core.dll" "$win/winemetal.dll" "$unix/winemetal.so"; do
-            test -e "$f" || { echo "::error::missing artifact $f"; exit 1; }
+          unix="install/x86_64-unix"
+          for win in install/x86_64-windows install/i386-windows; do
+            for f in "$win/d3d11.dll" "$win/dxgi.dll" "$win/d3d10core.dll" "$win/winemetal.dll"; do
+              test -e "$f" || { echo "::error::missing artifact $f"; exit 1; }
+            done
           done
+          test -e "$unix/winemetal.so" || { echo "::error::missing artifact $unix/winemetal.so"; exit 1; }
           file "$unix/winemetal.so" | grep -q x86_64 || { echo "::error::winemetal.so is not x86_64"; exit 1; }
 
       - name: Package dxmt.tar.xz
         run: |
           set -eo pipefail
-          # Ship x86_64-windows + x86_64-unix as siblings (overlayDXMT reads winemetal.so from the unix
-          # sibling of the imported x86_64-windows folder); drop build-time import libs (*.a).
-          ( cd "$DXMT_SRC/install" && tar -cJf "$GITHUB_WORKSPACE/dxmt.tar.xz" --exclude='*.a' x86_64-windows x86_64-unix )
+          # Ship x86_64-windows + i386-windows + x86_64-unix as siblings (overlayDXMT reads winemetal.so from
+          # the x86_64-unix sibling of the imported x86_64-windows folder, and picks up i386-windows too);
+          # drop build-time import libs (*.a). Include i386-unix only if the build produced one.
+          i386_unix=""; [ -d "$DXMT_SRC/install/i386-unix" ] && i386_unix="i386-unix"
+          ( cd "$DXMT_SRC/install" && tar -cJf "$GITHUB_WORKSPACE/dxmt.tar.xz" --exclude='*.a' x86_64-windows i386-windows x86_64-unix $i386_unix )
           ( cd "$GITHUB_WORKSPACE" && shasum -a 256 dxmt.tar.xz > dxmt.tar.xz.sha256 )
           ls -la "$GITHUB_WORKSPACE/dxmt.tar.xz" "$GITHUB_WORKSPACE/dxmt.tar.xz.sha256"
 
