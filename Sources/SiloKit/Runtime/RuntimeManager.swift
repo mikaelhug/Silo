@@ -101,6 +101,13 @@ public actor RuntimeManager {
     /// Only matches files/symlinks — NOT directories (e.g. a GPTK runtime's `lib/wine` dir, which
     /// would otherwise make GPTK installs masquerade as Wine).
     public static func locateWineBinary(in dir: URL, fileManager: FileManager = .default) -> URL? {
+        // Fast path: the standard runtime layout puts the loader at <root>/bin/wine64 (the walk's own top
+        // preference). Return it directly so the common case doesn't enumerate the whole runtime (thousands
+        // of lib/wine PE files) — a real cost at bootstrap, worse on a slow external volume.
+        let standard = dir.appendingPathComponent("bin/wine64")
+        var isDir: ObjCBool = false
+        if fileManager.fileExists(atPath: standard.path, isDirectory: &isDir), !isDir.boolValue { return standard }
+
         guard let enumerator = fileManager.enumerator(
             at: dir, includingPropertiesForKeys: [.isDirectoryKey]) else { return nil }
         var candidates: [URL] = []
@@ -122,6 +129,11 @@ public actor RuntimeManager {
     /// signature files (`d3d11.dll` + `winemetal.dll`) rather than assuming the exact tree depth. The DXMT
     /// counterpart of `locateWineBinary`.
     public static func locateDXMTLibDir(in dir: URL, fileManager: FileManager = .default) -> URL? {
+        // Fast path: the standard DXMT layout is <root>/lib/wine/x86_64-windows.
+        let standard = dir.appendingPathComponent("lib/wine/x86_64-windows")
+        if fileManager.fileExists(atPath: standard.appendingPathComponent("winemetal.dll").path),
+           fileManager.fileExists(atPath: standard.appendingPathComponent("d3d11.dll").path) { return standard }
+
         guard let enumerator = fileManager.enumerator(at: dir, includingPropertiesForKeys: nil) else { return nil }
         for case let url as URL in enumerator where url.lastPathComponent == "winemetal.dll" {
             let parent = url.deletingLastPathComponent()
@@ -260,17 +272,21 @@ public actor RuntimeManager {
     /// The warning from the most recent install's hardening pass, or nil when it applied cleanly.
     public private(set) var lastHardeningIssue: String?
 
-    /// Remove any bundled `libSDL2*` from a runtime, wherever in its tree it sits (see `install`). Walks the
-    /// whole runtime rather than only Silo's `lib/silo-bundled`, so it also strips a custom-repo runtime that
-    /// bundles libSDL2 elsewhere (the built-in repo builds `--without-sdl`, so this finds nothing there). The
-    /// one-time walk is negligible next to the download+extract it follows. Idempotent; no-op if absent.
+    /// Remove any bundled `libSDL2*` from a runtime (see `install`). Searches the runtime's dylib tree
+    /// (`lib/`) — covering Silo's `lib/silo-bundled` AND a custom-repo runtime that bundles it elsewhere —
+    /// while PRUNING the large `lib/wine` PE-module subtree, where a loadable dylib never lives. That keeps it
+    /// cheap even on a slow external volume (the built-in repo builds `--without-sdl`, so it usually finds
+    /// nothing, and shouldn't pay to walk thousands of PE files to learn that). Idempotent; no-op if absent.
     @discardableResult
     static func stripBundledSDL(in runtimeDir: URL, fileManager: FileManager = .default) -> Int {
-        guard let enumerator = fileManager.enumerator(at: runtimeDir, includingPropertiesForKeys: nil)
+        let libDir = runtimeDir.appendingPathComponent("lib", isDirectory: true)
+        guard let enumerator = fileManager.enumerator(at: libDir, includingPropertiesForKeys: nil)
         else { return 0 }
         var removed = 0
-        for case let url as URL in enumerator where url.lastPathComponent.lowercased().hasPrefix("libsdl2") {
-            if (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
+        for case let url as URL in enumerator {
+            if url.lastPathComponent == "wine" { enumerator.skipDescendants(); continue }   // prune the PE tree
+            if url.lastPathComponent.lowercased().hasPrefix("libsdl2"),
+               (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
         }
         return removed
     }

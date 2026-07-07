@@ -66,19 +66,25 @@ struct RuntimeManagerTests {
         #expect(await manager.lastHardeningIssue == nil)   // clean pass resets the warning
     }
 
-    @Test("stripBundledSDL removes the crashy libSDL2 dylibs from a runtime")
+    @Test("stripBundledSDL removes libSDL2 across lib/ but prunes the lib/wine PE tree")
     func stripsSDL() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let rt = try tmp.makeDir("wine-cx")
         for f in ["libSDL2-2.0.0.dylib", "libSDL2.dylib", "libfreetype.6.dylib"] {
             try tmp.write("wine-cx/lib/silo-bundled/\(f)", "x")
         }
+        try tmp.write("wine-cx/lib/libSDL2.dylib", "x")                    // custom-repo layout (top-level lib)
+        try tmp.write("wine-cx/lib/wine/x86_64-unix/libSDL2.dylib", "x")   // inside the PE tree — pruned, kept
+
         let removed = RuntimeManager.stripBundledSDL(in: rt)
-        #expect(removed == 2)
+        #expect(removed == 3)                                             // 2 in silo-bundled + 1 top-level lib
         let bundled = rt.appendingPathComponent("lib/silo-bundled")
         #expect(!FileManager.default.fileExists(atPath: bundled.appendingPathComponent("libSDL2.dylib").path))
+        #expect(!FileManager.default.fileExists(atPath: rt.appendingPathComponent("lib/libSDL2.dylib").path))
         #expect(FileManager.default.fileExists(atPath: bundled.appendingPathComponent("libfreetype.6.dylib").path))
-        #expect(RuntimeManager.stripBundledSDL(in: rt) == 0)   // idempotent
+        // The lib/wine subtree is pruned (not walked) — a stray dylib there is left alone + cheaply skipped.
+        #expect(FileManager.default.fileExists(atPath: rt.appendingPathComponent("lib/wine/x86_64-unix/libSDL2.dylib").path))
+        #expect(RuntimeManager.stripBundledSDL(in: rt) == 0)              // idempotent
     }
 
     @Test("Lists the latest N releases and picks the archive asset")
