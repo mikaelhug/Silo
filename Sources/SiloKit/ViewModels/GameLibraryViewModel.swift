@@ -147,6 +147,17 @@ public final class GameLibraryViewModel {
     private func activeBackend(ofAppID appID: Int) -> GraphicsBackend? {
         runningBackend(ofAppID: appID) ?? busyGames.first { $0.appID == appID }?.backend
     }
+
+    /// The backend of a bottle currently running OR mid-launching ANY Steam game whose backend isn't
+    /// `backend`, if any. Unlike `activeBackend(ofAppID:)` (same title only), this is the backend-scoped
+    /// co-residency rule: one Steam account can't be in-game on two clients at once, and bringing this
+    /// bottle's client up (`stopOtherSteamClients`) tears down the other's — killing its running game. Reads
+    /// only main-actor state (running PIDs + `busyGames`), so a check-then-claim before any `await` is atomic
+    /// against another launch interleaving.
+    private func activeSteamBackend(excluding backend: GraphicsBackend) -> GraphicsBackend? {
+        for case .steam(_, let b) in processes.pids.keys where b != backend { return b }
+        return busyGames.first { $0.backend != backend }?.backend
+    }
     public func isRunning(_ game: ManualGame) -> Bool { pid(for: game) != nil }
     public func isBusy(_ game: ManualGame) -> Bool { manualBusyIDs.contains(game.id) }
     /// The tracked PID for a launched manual game (nil if not running) — see `pid(for:)` above.
@@ -224,14 +235,31 @@ public final class GameLibraryViewModel {
 
     // MARK: - Install / uninstall (routed through the shared Steam client)
 
-    /// Open the bottle's Steam (Store/Library) so the user can browse + install games.
-    public func openSteam() async { await session.ensureRunning() }
+    /// Open the (GPTK, primary) bottle's Steam so the user can browse + install games. Refuses if a game is
+    /// live in the OTHER bottle (bringing a second client up for the same account would kill it), and stops
+    /// any idle client in the other bottle to keep the one-client rule.
+    public func openSteam() async {
+        if let otherBackend = activeSteamBackend(excluding: .gptk) {
+            setStatus("A game is running in the \(otherBackend.displayName) bottle — "
+                + "stop it first before opening Steam.")
+            return
+        }
+        stopOtherSteamClients(except: .gptk)
+        await session.ensureRunning()
+    }
 
     /// Ask the game's OWN bottle's Steam to uninstall it, then refresh. Routes through that backend's
     /// client session (not the GPTK one) — with a title surfaced in both bottles, uninstalling the DXMT
-    /// copy must reach the DXMT bottle's Steam. Refused while the title runs in EITHER bottle.
+    /// copy must reach the DXMT bottle's Steam. Refused while the title runs in EITHER bottle, or while any
+    /// game runs in the OTHER bottle (bringing this bottle's client up would break it).
     public func uninstall(_ game: SteamApp) async {
         guard runningBackend(ofAppID: game.appID) == nil else { return }
+        if let otherBackend = activeSteamBackend(excluding: game.backend) {
+            setStatus("A game is running in the \(otherBackend.displayName) bottle — "
+                + "stop it first before uninstalling.")
+            return
+        }
+        stopOtherSteamClients(except: game.backend)
         do {
             try await clientSession(for: game.backend).sendURL("steam://uninstall/\(game.appID)")
             setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
@@ -255,6 +283,15 @@ public final class GameLibraryViewModel {
                 setStatus("\(game.name) is already running in the \(activeIn.displayName) bottle — "
                     + "stop it there first (one Steam account can't be in-game twice).")
             }
+            return
+        }
+        // A DIFFERENT game running/launching in the OTHER bottle blocks this launch entirely: one account
+        // can't be in-game on two clients, and bringing this bottle's client up would tear down the other's,
+        // killing its running game. Checked here — and, via `busyGames.insert` below, claimed — before any
+        // `await`, so two concurrent cross-bottle launches can't both conclude the other bottle is idle.
+        if let otherBackend = activeSteamBackend(excluding: game.backend) {
+            setStatus("A game is already running in the \(otherBackend.displayName) bottle — stop it first "
+                + "(one Steam account can't be in-game in two bottles at once).")
             return
         }
         busyGames.insert(game.id); defer { busyGames.remove(game.id) }
@@ -320,7 +357,7 @@ public final class GameLibraryViewModel {
         let exeName = orchestrator.resolvedExecutableName(app: game, config: config)
         await orchestrator.stopGame(
             pid: pid, exeName: exeName, prefix: paths.steamBottle(game.backend), backend: backend)
-        processes.clear(gameID(game))
+        processes.clear(gameID(game), ifPID: pid)
     }
 
     /// SIGTERM every game Silo launched (Steam + manual), synchronously. Used at app quit (where there's no
@@ -491,7 +528,7 @@ public final class GameLibraryViewModel {
         await orchestrator.stopGame(
             pid: pid, exeName: game.executablePath.lastPathComponent,
             prefix: paths.manualBottle(game.id), backend: backend)
-        processes.clear(.manual(game.id))
+        processes.clear(.manual(game.id), ifPID: pid)
     }
 
     /// Generate a Game-Mode-tagged `.app` in `directory` (default: the Desktop) that launches the game

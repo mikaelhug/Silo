@@ -73,6 +73,14 @@ final class GameProcessCoordinator {
         monitors[id]?.stop(); monitors[id] = nil
     }
 
+    /// Stop tracking a game ONLY if it's still the same launch (`pid`). Guards the case where `stop`
+    /// resumes after its `taskkill` await — during which the game may have exited and been replayed — so it
+    /// can't drop the NEW launch's PID (which would leave that game running but untracked).
+    func clear(_ id: GameID, ifPID pid: Int32) {
+        guard pids[id] == pid else { return }
+        clear(id)
+    }
+
     /// SIGTERM every tracked PID, synchronously — the app-quit path, where there's no time for the async
     /// `taskkill` cleanup. Wine turns SIGTERM into terminating the hosted game; only PIDs Silo spawned
     /// are signalled, so a co-resident Steam client is never touched.
