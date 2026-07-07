@@ -48,6 +48,10 @@ public struct SteamBottle: Sendable {
     /// Steam is installed in the bottle once `steam.exe` exists.
     public var isSteamInstalled: Bool { fileManager.fileExists(atPath: exe.path) }
 
+    /// Whether this bottle's root volume is currently mounted — a relocated external drive can be ejected.
+    /// Guards setup from creating a PHANTOM bottle on the boot disk at the now-missing `/Volumes/...` path.
+    public var isRootReachable: Bool { paths.bottlesRootReachable }
+
     /// Whether Steam's REAL client has been downloaded into the bottle — `steamui.dll` is present. A fresh
     /// `SteamSetup.exe /S` drops only the ~2 MB bootstrapper (`steam.exe`, no `steamui.dll`); the client
     /// (steamui.dll + the CEF/steamwebhelper it needs) is self-downloaded on the first run. This is the
@@ -63,7 +67,22 @@ public struct SteamBottle: Sendable {
     /// done" — the warm-up ALSO waits for `updateState().committed` before shutting Steam down, or the
     /// incomplete update rolls back.
     var isClientFullyDownloaded: Bool {
-        isClientDownloaded && !webHelpers().isEmpty
+        Self.hasWarmedClient(backend, paths: paths, fileManager: fileManager)
+    }
+
+    /// Whether `backend`'s bottle has a WARMED Steam client on disk — steamui.dll AND a CEF
+    /// steamwebhelper.exe — not just the ~2 MB bootstrapper (`steam.exe`). Pure path checks (no
+    /// process/instance state), so the library can probe it OFF-MAIN per backend without constructing a
+    /// `SteamBottle`. A failed/interrupted first-run warm-up leaves only the bootstrapper, which must NOT
+    /// read as "installed/ready" (else onboarding shows the step "Done" over a non-functional bottle).
+    static func hasWarmedClient(
+        _ backend: GraphicsBackend, paths: AppPaths, fileManager: FileManager = .default
+    ) -> Bool {
+        let client = paths.steamBottleClientDir(backend)
+        guard fileManager.fileExists(atPath: client.appendingPathComponent("steamui.dll").path) else { return false }
+        let cef = paths.steamBottleCEFDir(backend)
+        let dirs = (try? fileManager.contentsOfDirectory(at: cef, includingPropertiesForKeys: nil)) ?? []
+        return dirs.contains { fileManager.fileExists(atPath: $0.appendingPathComponent("steamwebhelper.exe").path) }
     }
 
     /// Steam's updater state parsed from its log in ONE read: the latest download progress (for a real %)

@@ -88,11 +88,19 @@ public final class GameLibraryViewModel {
     /// launching into the old root would orphan the process onto deleted files and corrupt the copy.
     var isRelocating: () -> Bool = { false }
 
-    /// A launch is refused while bottles are relocating; sets the status and returns true if so.
-    private func refusedWhileRelocating() -> Bool {
-        guard isRelocating() else { return false }
-        setStatus("Silo is moving your bottles — wait for that to finish before launching.")
-        return true
+    /// Refuse a launch when the bottles are unavailable — a move in progress, or a relocated drive unplugged
+    /// (launching into an unmounted prefix would silently fail, or worse write to a phantom path). Sets the
+    /// status and returns true if refused.
+    private func launchBlockedByBottles() -> Bool {
+        if isRelocating() {
+            setStatus("Silo is moving your bottles — wait for that to finish before launching.")
+            return true
+        }
+        if paths.bottlesRelocated, !paths.bottlesRootReachable {
+            setStatus("Your bottles drive isn't connected — reconnect it to launch games.")
+            return true
+        }
+        return false
     }
 
     /// Whether any game (Steam or manual) is currently tracked as running. Lets callers ask without
@@ -113,13 +121,13 @@ public final class GameLibraryViewModel {
         steamInstalledBackends.contains(graphics)
     }
 
-    /// Re-probe which bottles have Steam installed (off the main actor), updating the cached set.
+    /// Re-probe which bottles have a WARMED Steam client (off the main actor), updating the cached set.
+    /// Keys on `hasWarmedClient` (steamui.dll + a CEF webhelper), NOT the ~2 MB bootstrapper — so a failed
+    /// first-run warm-up can't read as "ready" and let onboarding finish over a non-functional bottle.
     public func refreshSteamInstalled() async {
         let paths = self.paths
         steamInstalledBackends = await Task.detached {
-            Set(GraphicsBackend.allCases.filter {
-                FileManager.default.fileExists(atPath: paths.steamBottleExe($0).path)
-            })
+            Set(GraphicsBackend.allCases.filter { SteamBottle.hasWarmedClient($0, paths: paths) })
         }.value
     }
 
@@ -251,7 +259,7 @@ public final class GameLibraryViewModel {
     /// live in the OTHER bottle (bringing a second client up for the same account would kill it), and stops
     /// any idle client in the other bottle to keep the one-client rule.
     public func openSteam() async {
-        if refusedWhileRelocating() { return }
+        if launchBlockedByBottles() { return }
         if let otherBackend = activeSteamBackend(excluding: .gptk) {
             setStatus("A game is running in the \(otherBackend.displayName) bottle — "
                 + "stop it first before opening Steam.")
@@ -287,7 +295,7 @@ public final class GameLibraryViewModel {
     public func play(_ game: SteamApp) async {
         // Don't re-launch THIS copy while it's already mid-launch (its own button already spins).
         guard backend.isWineConfigured, !busyGames.contains(game.id) else { return }
-        if refusedWhileRelocating() { return }
+        if launchBlockedByBottles() { return }
         // Active (running OR mid-launch) SOMEWHERE? A same-bottle replay is a silent no-op; the OTHER
         // bottle's copy gets an explanatory status (its Play button is enabled but only THIS copy spins).
         // This check runs BEFORE stopOtherSteamClients so we never kill the running game's Steam client.
@@ -410,7 +418,7 @@ public final class GameLibraryViewModel {
     /// Run an installer `.exe` in a specific game's bottle (detached) so it installs into THAT bottle's
     /// `drive_c`. The bottle is booted first if needed. The user then picks the installed game `.exe`.
     public func runInstaller(_ installer: URL, forBottle id: UUID) async {
-        if refusedWhileRelocating() { return }
+        if launchBlockedByBottles() { return }
         guard await ensureManualBottle(id) else { return }
         do {
             _ = try await orchestrator.runInstaller(
@@ -469,7 +477,7 @@ public final class GameLibraryViewModel {
     public func playManual(_ game: ManualGame) async {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id),
               processes.pid(for: .manual(game.id)) == nil else { return }
-        if refusedWhileRelocating() { return }
+        if launchBlockedByBottles() { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
         // A 32-bit game on GPTK can't render (GPTK / D3DMetal is 64-bit-only) — refuse before provisioning
         // its bottle and steer to switching this game's backend to DXMT.

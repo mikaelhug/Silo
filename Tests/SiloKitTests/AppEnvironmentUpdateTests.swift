@@ -47,11 +47,9 @@ struct AppEnvironmentUpdateTests {
         #expect(env.gameLibrary.loadState == .notReady)   // no bottle yet
         #expect(!env.steamReady)
 
-        // Put Steam's exe in the bottle out-of-band, then run the VM's setUp: installSteam sees it
-        // already installed (no download) and the success path fires onSteamInstalled → library reload.
-        try FileManager.default.createDirectory(
-            at: paths.steamBottleClientDir, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        // Put a warmed Steam client in the bottle out-of-band, then run the VM's setUp: it sees the client
+        // already present (no download) and the success path fires onSteamInstalled → library reload.
+        paths.createWarmedSteamClient()
         env.steamBottleVM.updateWine(URL(fileURLWithPath: "/w/wine64"))
         await env.steamBottleVM.setUp()
         #expect(env.steamBottleVM.steamInstalled)
@@ -146,7 +144,11 @@ struct AppEnvironmentUpdateTests {
     func moveBottles() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        let runner = FakeProcessRunner()
+        // appBundleResolver: { nil } → deterministic "not in a bundle" so relocation takes the message path,
+        // not `relaunch`'s exit(0) (which under `--no-parallel` resolves an ambient bundle and kills the run).
+        let env = AppEnvironment(
+            paths: paths, runner: runner, updater: Updater(runner: runner, appBundleResolver: { nil }))
         // A provisioned Steam bottle at the default location.
         try FileManager.default.createDirectory(
             at: paths.steamBottle.appendingPathComponent("drive_c"), withIntermediateDirectories: true)
@@ -188,8 +190,10 @@ struct AppEnvironmentUpdateTests {
         let support = tmp.url.appendingPathComponent("Silo")
         let ext = tmp.url.appendingPathComponent("External/Silo Bottles")
         // An env that already lives at a relocated root (i.e. as if relaunched there).
+        let runner = FakeProcessRunner()
         let env = AppEnvironment(
-            paths: AppPaths(supportDir: support, bottlesRoot: ext), runner: FakeProcessRunner())
+            paths: AppPaths(supportDir: support, bottlesRoot: ext), runner: runner,
+            updater: Updater(runner: runner, appBundleResolver: { nil }))   // no relaunch/exit(0) in tests
         try FileManager.default.createDirectory(
             at: ext.appendingPathComponent("ManualBottles/uuid"), withIntermediateDirectories: true)
         FileManager.default.createFile(
@@ -240,8 +244,9 @@ struct AppEnvironmentUpdateTests {
             artifact: URL(fileURLWithPath: "/w/bin/wine64"))
         env.runtime.onDefaultChanged?(install)
 
-        // The callback dispatches via `Task { await ... }`, so await the async hop before asserting.
-        for _ in 0..<50 where !env.steamBottleVM.canSetUp { await Task.yield() }
+        // The callback dispatches via `Task { await save() ... }` with a ConfigStore disk write, so give the
+        // async hop real time (Task.yield alone doesn't advance the actor's I/O under a serial run).
+        for _ in 0..<200 where !env.steamBottleVM.canSetUp { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(env.steamBottleVM.canSetUp)       // the new default reached the bottle pane
         #expect(env.gameLibrary.canLaunch)        // ...and the library
     }
@@ -259,7 +264,7 @@ struct AppEnvironmentUpdateTests {
         env.dxmtRuntime.onDefaultChanged?(RuntimeInstall(
             name: "dxmt-v0.72-cx26.2.0", installDir: tmp.url.appendingPathComponent("dxmt"), artifact: lib))
 
-        for _ in 0..<50 where !env.dxmtReady { await Task.yield() }
+        for _ in 0..<200 where !env.dxmtReady { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(env.dxmtReady)
         #expect(env.backendSettings.config.dxmtLibDirPath == lib)
         #expect(env.backendSettings.config.dxmtRuntimeName == "dxmt-v0.72-cx26.2.0")

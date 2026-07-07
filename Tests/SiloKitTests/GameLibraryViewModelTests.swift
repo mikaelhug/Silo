@@ -26,8 +26,15 @@ struct GameLibraryViewModelTests {
 
     /// Mark the bottle's Steam as installed (so the library is "ready").
     private func installSteam(_ paths: AppPaths) throws {
-        try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        let fm = FileManager.default
+        let client = paths.steamBottleClientDir
+        try fm.createDirectory(at: client, withIntermediateDirectories: true)
+        fm.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        // A WARMED client (steamui.dll + a CEF webhelper) — what steamReady now keys on, not the bootstrapper.
+        fm.createFile(atPath: client.appendingPathComponent("steamui.dll").path, contents: Data())
+        let cef = paths.steamBottleCEFDir.appendingPathComponent("cef.win7x64")
+        try fm.createDirectory(at: cef, withIntermediateDirectories: true)
+        fm.createFile(atPath: cef.appendingPathComponent("steamwebhelper.exe").path, contents: Data())
     }
 
     /// Write a game manifest into the bottle's Steam library.
@@ -67,7 +74,7 @@ struct GameLibraryViewModelTests {
             let client = paths.steamBottleClientDir(graphics)
             try FileManager.default.createDirectory(
                 at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
-            FileManager.default.createFile(atPath: paths.steamBottleExe(graphics).path, contents: Data())
+            paths.createWarmedSteamClient(graphics)   // warmed client so the bottle counts as installed (C1)
             let acf = #""AppState" { "appid" "\#(appID)" "name" "\#(name)" "StateFlags" "4" "installdir" "\#(name)" "LastOwner" "76561197960287930" "SizeOnDisk" "12000000" }"#
             try acf.write(to: client.appendingPathComponent("steamapps/appmanifest_\(appID).acf"),
                           atomically: true, encoding: .utf8)
@@ -111,7 +118,7 @@ struct GameLibraryViewModelTests {
         let client = paths.steamBottleClientDir(.dxmt)
         try FileManager.default.createDirectory(
             at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: paths.steamBottleExe(.dxmt).path, contents: Data())
+        paths.createWarmedSteamClient(.dxmt)   // warmed client so the bottle counts as installed (C1)
         try #""AppState" { "appid" "400" "name" "Old" "StateFlags" "4" "installdir" "Old" "LastOwner" "1" "SizeOnDisk" "1" }"#
             .write(to: client.appendingPathComponent("steamapps/appmanifest_400.acf"),
                    atomically: true, encoding: .utf8)
@@ -254,7 +261,7 @@ struct GameLibraryViewModelTests {
         let common = client.appendingPathComponent("steamapps/common/Old")
         try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: common.appendingPathComponent("Old.exe").path, contents: Data("MZ".utf8))
-        FileManager.default.createFile(atPath: paths.steamBottleExe(.dxmt).path, contents: Data())
+        paths.createWarmedSteamClient(.dxmt)   // warmed client so the bottle counts as installed (C1)
         try #""AppState" { "appid" "400" "name" "Old" "StateFlags" "4" "installdir" "Old" "LastOwner" "76561197960287930" "SizeOnDisk" "100" }"#
             .write(to: client.appendingPathComponent("steamapps/appmanifest_400.acf"), atomically: true, encoding: .utf8)
 
@@ -279,7 +286,7 @@ struct GameLibraryViewModelTests {
             let client = paths.steamBottleClientDir(graphics)
             try FileManager.default.createDirectory(
                 at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
-            FileManager.default.createFile(atPath: paths.steamBottleExe(graphics).path, contents: Data())
+            paths.createWarmedSteamClient(graphics)   // warmed client so the bottle counts as installed (C1)
             try #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "LastOwner" "76561197960287930" "SizeOnDisk" "100" }"#
                 .write(to: client.appendingPathComponent("steamapps/appmanifest_220.acf"), atomically: true, encoding: .utf8)
         }
@@ -807,7 +814,7 @@ struct GameLibraryViewModelTests {
         try installSteam(paths)
         // Stand up the DXMT Steam bottle too so the message adapts to "install it in the DXMT Steam bottle".
         try FileManager.default.createDirectory(at: paths.steamBottleClientDir(.dxmt), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: paths.steamBottleExe(.dxmt).path, contents: Data())
+        paths.createWarmedSteamClient(.dxmt)   // warmed client so the bottle counts as installed (C1)
         let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
         let log = paths.log(forAppID: 220)
         fake.onRun = { inv in

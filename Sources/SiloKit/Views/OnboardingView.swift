@@ -36,7 +36,7 @@ struct OnboardingView: View {
                     StepRow(
                         number: 3, title: "Set up the Steam bottle",
                         subtitle: "Sign in once.",
-                        done: env.steamReady, busy: steam.busy, locked: !env.wineReady,
+                        done: env.gptkSteamReady, busy: steam.busy, locked: !env.wineReady,
                         actionLabel: "Set up",
                         action: { Task { await env.steamBottleVM.setUp() } })
                 }

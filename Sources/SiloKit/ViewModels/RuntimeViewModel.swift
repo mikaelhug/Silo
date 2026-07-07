@@ -76,6 +76,9 @@ public final class RuntimeViewModel {
     /// Called when the default changes so the backend config can adopt its payload (wine binary / DXMT
     /// lib dir).
     public var onDefaultChanged: ((RuntimeInstall) -> Void)?
+    /// Called when the CURRENT default is removed, so the backend config can clear the now-dangling path
+    /// (otherwise the readiness gates stay true against a deleted runtime and every launch fails).
+    public var onDefaultRemoved: (() -> Void)?
 
     /// Trailing clause for an unusable install's row warning — surfaced by the shared list section.
     public var unusableWarning: String { kind.unusableWarning }
@@ -146,8 +149,10 @@ public final class RuntimeViewModel {
     public func remove(_ install: RuntimeInstall) async {
         do {
             try await manager.remove(name: install.name)
-            if defaultName == install.name { defaultName = nil }
+            let wasDefault = defaultName == install.name
+            if wasDefault { defaultName = nil }
             await refresh()
+            if wasDefault { onDefaultRemoved?() }   // clear the dangling path in the persisted config
             statusMessage = "Removed \(install.displayName)."
         } catch {
             statusMessage = "Remove failed: \((error as NSError).localizedDescription)"

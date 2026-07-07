@@ -22,7 +22,9 @@ struct LibraryGridView: View {
         let manualShown = lib.filteredManual
         let showLibrary = env.setupComplete && onboardingDone
         Group {
-            if showLibrary {
+            if env.bottlesDisconnected {
+                BottlesDisconnectedView()          // a relocated drive is unplugged — reconnect, not re-setup
+            } else if showLibrary {
                 grid(lib, steam: steamShown, manual: manualShown)
             } else {
                 OnboardingView()
@@ -255,5 +257,22 @@ struct SettingsView: View {
         // Definite compact size; with the scene's `.windowResizability(.contentSize)` the WINDOW becomes
         // exactly this (no grey side-columns), a fixed-size settings pane per macOS convention.
         .frame(width: 480, height: 540)
+    }
+}
+
+/// Shown when the bottles live on a relocated drive that isn't mounted — a "reconnect" state distinct from
+/// first-run onboarding, so an ejected external drive doesn't read as a factory reset.
+struct BottlesDisconnectedView: View {
+    @Environment(AppEnvironment.self) private var env
+    var body: some View {
+        ContentUnavailableView {
+            Label("Bottles drive not connected", systemImage: "externaldrive.badge.xmark")
+        } description: {
+            Text("Your Silo bottles are on \(env.paths.bottlesRoot.path), which isn't mounted right now. "
+                + "Reconnect the drive to use your games — or move the bottles back in Settings → General.")
+        } actions: {
+            Button("Check Again") { Task { await env.refreshLibraryIfReady() } }
+                .buttonStyle(.borderedProminent)
+        }
     }
 }
