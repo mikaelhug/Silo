@@ -22,6 +22,19 @@ public struct LaunchOrchestrator: Sendable {
     public enum LaunchError: Error, Sendable, Equatable {
         case wineNotConfigured
         case executableNotFound(URL)
+        /// A 32-bit (i386) game was launched under GPTK, which is 64-bit-only (Apple ships no 32-bit
+        /// D3DMetal) — it could only fall back to wined3d and fail. The caller steers the user to DXMT.
+        case unsupported32BitOnGPTK(URL)
+    }
+
+    /// GPTK / D3DMetal is 64-bit-only, so a 32-bit game under it can only fall back to wined3d and fail.
+    /// Refuse it up front (the caller surfaces an honest "use DXMT" message) rather than launching into a
+    /// guaranteed graphics-init failure. Fails **open**: only a CONFIRMED i386 PE is refused — an
+    /// unreadable/unknown executable is allowed through. DXMT (32-bit-capable) is never refused here.
+    private func check32BitSupported(_ exe: URL, graphics: GraphicsBackend) throws {
+        if graphics == .gptk, WindowsExecutable.is32Bit(exe) {
+            throw LaunchError.unsupported32BitOnGPTK(exe)
+        }
     }
 
     // MARK: - Pure plan builder
@@ -95,6 +108,7 @@ public struct LaunchOrchestrator: Sendable {
     ) async throws -> Int32 {
         guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
         let gameExe = try resolveExecutable(app: app, config: config)
+        try check32BitSupported(gameExe, graphics: graphics)
         try linkGraphics(backendConfig: backend, graphics: graphics)
         try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)
         let plan = try Self.makePlan(
@@ -116,6 +130,7 @@ public struct LaunchOrchestrator: Sendable {
         guard FileManager.default.fileExists(atPath: game.executablePath.path) else {
             throw LaunchError.executableNotFound(game.executablePath)
         }
+        try check32BitSupported(game.executablePath, graphics: graphics)
         try linkGraphics(backendConfig: backend, graphics: graphics)
         let config = GameConfig(appID: 0, envFlags: game.envFlags, presence: .none, customArgs: game.customArgs)
         let plan = try Self.makePlan(
@@ -183,6 +198,14 @@ public struct LaunchOrchestrator: Sendable {
     /// The basename of the executable a game would launch (for `taskkill`), or nil if unresolvable.
     public func resolvedExecutableName(app: SteamApp, config: GameConfig) -> String? {
         (try? resolveExecutable(app: app, config: config))?.lastPathComponent
+    }
+
+    /// Whether launching `app` under `graphics` is a dead end because it's a 32-bit game on GPTK (which is
+    /// 64-bit-only). Lets the UI refuse EARLY — before stopping the other bottle's Steam client or bringing
+    /// this one up — for a game that could never render under GPTK. Fails open (unresolvable exe → false).
+    public func isBlocked32BitOnGPTK(app: SteamApp, config: GameConfig, graphics: GraphicsBackend) -> Bool {
+        guard graphics == .gptk, let exe = try? resolveExecutable(app: app, config: config) else { return false }
+        return WindowsExecutable.is32Bit(exe)
     }
 
     /// Observe a launched game's exit **without polling** (kqueue). Retain the token to keep observing.
