@@ -299,6 +299,41 @@ struct GraphicsLinkerTests {
         #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/i386-windows").path))
     }
 
+    @Test("installDXMTPrefixLoaders seeds winemetal.dll into the prefix per ABI (x86_64→system32, i386→syswow64)")
+    func installDXMTPrefixLoaders() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxmtLibDir = try makeDXMT(tmp)   // x86_64-windows/winemetal.dll = "PE:winemetal.dll"
+        try tmp.makeDir("dxmt/lib/wine/i386-windows")
+        try tmp.write("dxmt/lib/wine/i386-windows/winemetal.dll", "PE32:winemetal.dll")
+        let prefix = try tmp.makeDir("bottle")
+        let fm = FileManager.default
+
+        try linker.installDXMTPrefixLoaders(prefix: prefix, dxmtLibDir: dxmtLibDir)
+
+        // Without this, wine can't resolve winemetal.dll (no wineboot fakedll) → c0000135 → wined3d fallback.
+        let sys32 = prefix.appendingPathComponent("drive_c/windows/system32/winemetal.dll")
+        let syswow64 = prefix.appendingPathComponent("drive_c/windows/syswow64/winemetal.dll")
+        #expect(try String(contentsOf: sys32, encoding: .utf8) == "PE:winemetal.dll")        // 64-bit
+        #expect(try String(contentsOf: syswow64, encoding: .utf8) == "PE32:winemetal.dll")   // 32-bit
+        // Idempotent — a second call doesn't throw.
+        try linker.installDXMTPrefixLoaders(prefix: prefix, dxmtLibDir: dxmtLibDir)
+        #expect(fm.fileExists(atPath: sys32.path))
+    }
+
+    @Test("installDXMTPrefixLoaders places ONLY system32 winemetal for a 64-bit-only release")
+    func installDXMTPrefixLoaders64Only() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxmtLibDir = try makeDXMT(tmp)   // no i386-windows sibling
+        let prefix = try tmp.makeDir("bottle")
+
+        try linker.installDXMTPrefixLoaders(prefix: prefix, dxmtLibDir: dxmtLibDir)
+
+        #expect(FileManager.default.fileExists(atPath:
+            prefix.appendingPathComponent("drive_c/windows/system32/winemetal.dll").path))
+        #expect(!FileManager.default.fileExists(atPath:
+            prefix.appendingPathComponent("drive_c/windows/syswow64/winemetal.dll").path))
+    }
+
     @Test("isOverlayModule: only .dll/.so with a backend's module prefixes; the two filters diverge right")
     func overlayModulePredicate() {
         #expect(GraphicsLinker.isOverlayModule("d3d11.dll", prefixes: ["d3d"]))
