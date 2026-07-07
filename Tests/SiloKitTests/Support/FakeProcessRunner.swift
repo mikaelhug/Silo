@@ -73,10 +73,17 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     /// Override a PID's start time (simulate PID reuse for `ProcessLedger` tests).
     func setStartTime(_ pid: Int32, _ date: Date) { lock.withLock { _startTimes[pid] = date } }
 
-    /// Record a SIGTERM and stop reporting the PID as alive (mirrors the real runner; does NOT fire
-    /// `observeExit` handlers, matching SIGTERM-vs-kqueue-exit semantics).
+    /// When true, `terminate` records the SIGTERM but keeps the PID ALIVE — models a process that ignores
+    /// or is slow to act on SIGTERM (the real-world case the crash-orphan ledger must survive).
+    var terminateKeepsPIDAlive = false
+
+    /// Record a SIGTERM and (unless `terminateKeepsPIDAlive`) stop reporting the PID as alive (mirrors the
+    /// real runner; does NOT fire `observeExit` handlers, matching SIGTERM-vs-kqueue-exit semantics).
     func terminate(pid: Int32) {
-        lock.withLock { _terminatedPIDs.append(pid); _alivePIDs.remove(pid) }
+        lock.withLock {
+            _terminatedPIDs.append(pid)
+            if !terminateKeepsPIDAlive { _alivePIDs.remove(pid) }
+        }
     }
 
     func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {

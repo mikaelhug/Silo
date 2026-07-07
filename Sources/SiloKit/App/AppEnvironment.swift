@@ -172,6 +172,9 @@ public final class AppEnvironment {
         updates.isBlocked = { [weak self] in self?.blockedForBottleWork() ?? true }
         // Refuse launches while bottles are being moved (the prefixes are being copied off-volume + deleted).
         gameLibrary.isRelocating = { [weak self] in self?.bottles.busy ?? false }
+        // …and while a self-update is downloading/installing (it relaunches Silo via exit(0), which would
+        // otherwise orphan a game started in that window).
+        gameLibrary.isUpdating = { [weak self] in self?.updates.isInstalling ?? false }
     }
 
     /// Fan out a backend-config change to the view models that depend on it.
@@ -221,17 +224,24 @@ public final class AppEnvironment {
     /// Live, in-memory "is anything running in a bottle right now" — cheap and never stale, so it's safe to
     /// read in a SwiftUI body (it drives the Move/Update button's disabled state). It does NOT probe the
     /// crash-durable ledger; that (a file read + per-PID syscalls) belongs only at the action gate, see
-    /// `blockedForBottleWork`.
+    /// `blockedForBottleWork`. Includes a bottle mid-setup/warm-up — that owns a live wineserver actively
+    /// writing into the prefix, so a move/update over it would corrupt the download.
     public var anythingRunning: Bool {
-        gameLibrary.isAnythingRunning || backends.values.contains { $0.session.isRunning }
+        gameLibrary.isAnythingRunning
+            || backends.values.contains { $0.session.isRunning || $0.bottleVM.busy }
     }
 
     /// The relocation/update gate — evaluated at the moment the user acts (a button press, never a hot
-    /// path), so it can afford the durable check: refuse while anything runs in a bottle now, OR while a
-    /// process orphaned by a PRIOR run's hard crash is still alive (its in-memory tracking died with that
-    /// run; moving/updating a bottle out from under its live wineserver would corrupt it).
+    /// path), so it can afford the durable check. Refuse while: anything runs in a bottle now (incl. an
+    /// in-flight launch or a bottle mid-setup); a process orphaned by a PRIOR run's hard crash is still
+    /// alive (moving/updating a bottle out from under its live wineserver would corrupt it); or the OTHER
+    /// relaunching operation is already in flight (a move and a self-update must not overlap — both end in a
+    /// relaunch/exit).
     func blockedForBottleWork() -> Bool {
-        anythingRunning || processLedger.hasLiveSurvivor()
+        anythingRunning
+            || processLedger.hasLiveSurvivor()
+            || bottles.busy
+            || updates.isInstalling
     }
 
     /// Best-effort synchronous teardown on app quit (and before a self-update relaunch): SIGTERM every game

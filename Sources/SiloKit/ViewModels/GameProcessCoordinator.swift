@@ -54,6 +54,7 @@ final class GameProcessCoordinator {
         observers[id] = orchestrator.observeExit(pid: pid) { [weak self] in
             Task { @MainActor in
                 guard let self, self.pids[id] == pid else { return }
+                self.ledger?.remove(Self.ledgerKey(id))   // CONFIRMED death (kqueue exit) → safe to drop
                 self.clear(id)
             }
         }
@@ -73,9 +74,12 @@ final class GameProcessCoordinator {
     }
 
     /// Stop tracking a game: cancel its exit observer, stop its graphics monitor, drop its PID.
+    /// NB: does NOT drop the ledger entry — that shadows OS-process liveness, not UI tracking. A user-stop
+    /// SIGTERMs but the process may still be dying; dropping here would let a relocation/update proceed over
+    /// a still-live wineserver. The entry is removed only on CONFIRMED death (the exit observer in `track`)
+    /// or lazily self-pruned by `ProcessLedger.hasLiveSurvivor` once the PID is actually gone.
     func clear(_ id: GameID) {
         pids[id] = nil
-        ledger?.remove(Self.ledgerKey(id))
         observers[id]?.cancel(); observers[id] = nil
         monitors[id]?.stop(); monitors[id] = nil
     }
@@ -92,10 +96,11 @@ final class GameProcessCoordinator {
     /// `taskkill` cleanup. Wine turns SIGTERM into terminating the hosted game; only PIDs Silo spawned
     /// are signalled, so a co-resident Steam client is never touched.
     func terminateAllSync() {
-        for (id, pid) in pids {
-            orchestrator.terminate(pid: pid)
-            ledger?.remove(Self.ledgerKey(id))   // intended-dead: clear now so a quick relaunch isn't blocked
-        }
+        // SIGTERM only — do NOT drop the ledger entries. On a clean quit the process usually dies (the next
+        // launch self-prunes it), but SIGTERM isn't a guarantee: if it lingers, its record MUST survive so
+        // the next launch's gate still refuses a move/update over the still-live wineserver. (Dropping here
+        // was the crash-orphan false-negative — an orphan with its own record already deleted.)
+        for pid in pids.values { orchestrator.terminate(pid: pid) }
     }
 
     /// The opaque `ProcessLedger` key for a game — stable across launches so a record upserts/removes in

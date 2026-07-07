@@ -120,27 +120,42 @@ struct GameProcessCoordinatorTests {
         #expect(ledger.hasLiveSurvivor())
     }
 
-    @Test("clear removes the ledger entry even while the PID is still alive (active removal, not prune)")
-    func ledgerClearRemovesLiveEntry() throws {
+    @Test("clear does NOT drop a still-alive ledger entry — only confirmed death / self-prune does")
+    func ledgerKeptWhileAlive() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (coordinator, ledger, fake) = makeWithLedger(tmp)
         fake.setAlive(4242, true)
         coordinator.track(.manual(UUID(1)), pid: 4242)
         #expect(ledger.hasLiveSurvivor())
         coordinator.clear(.manual(UUID(1)))
-        #expect(!ledger.hasLiveSurvivor())         // gone despite 4242 still alive ⇒ clear removed it
+        #expect(ledger.hasLiveSurvivor())          // still alive ⇒ still recorded (a stop is not a death)
+        fake.setAlive(4242, false)                 // the process actually exits
+        #expect(!ledger.hasLiveSurvivor())         // now self-pruned
     }
 
-    @Test("terminateAllSync clears the ledger (processes are intended-dead at quit)")
-    func ledgerClearedAtQuit() throws {
+    @Test("a kqueue exit removes the ledger entry (confirmed death)")
+    func ledgerRemovedOnExit() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (coordinator, ledger, fake) = makeWithLedger(tmp)
-        fake.setAlive(100, true); fake.setAlive(200, true)
-        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 100)
-        coordinator.track(.manual(UUID(2)), pid: 200)
+        fake.terminateKeepsPIDAlive = true          // so only the kqueue exit (not a prune) can clear it
+        fake.setAlive(4242, true)
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 4242)
         #expect(ledger.hasLiveSurvivor())
-        coordinator.terminateAllSync()
+        fake.setAlive(4242, false)                  // fires the exit observer
+        try await waitUntil { coordinator.pid(for: .steam(appID: 220, backend: .gptk)) == nil }
         #expect(!ledger.hasLiveSurvivor())
+    }
+
+    @Test("terminateAllSync does NOT drop a ledger entry whose process survives the SIGTERM (quit-orphan safety)")
+    func ledgerSurvivesStubbornQuit() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (coordinator, ledger, fake) = makeWithLedger(tmp)
+        fake.terminateKeepsPIDAlive = true          // the game ignores/slow-processes SIGTERM
+        fake.setAlive(100, true)
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 100)
+        coordinator.terminateAllSync()
+        #expect(fake.terminatedPIDs.contains(100))  // SIGTERM was sent…
+        #expect(ledger.hasLiveSurvivor())           // …but the still-alive process stays recorded → next launch's gate refuses
     }
 
     @Test("the same appID under GPTK and DXMT are INDEPENDENT keys (both bottle copies tracked at once)")
