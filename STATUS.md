@@ -3,6 +3,30 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🏛️ Architecture-level review before onboarding users — 4 themes, ~15 bugs, all fixed (2026-07-07, branch
+  `gptk-path-review`; SERIAL + PARALLEL both green, 340 tests).** Three lifecycle-scoped adversarial reviewers
+  (launch/co-residency, setup/discovery/onboarding, relocation/update/persistence) found cross-subsystem
+  bugs that file-local review missed. Commits `62dde8f`→`093fbfc`:
+  - **Theme A — co-residency was per-appID, must be per-backend.** `play`/`openSteam`/`uninstall` refused only
+    the SAME title cross-bottle, but `stopOtherSteamClients` tears down the other bottle's client — so
+    launching a DIFFERENT game in the other bottle killed a running game's Steamworks. Now
+    `activeSteamBackend(excluding:)` refuses any cross-bottle Steam launch, checked+claimed before any await.
+  - **Theme B — liveness was in-memory only; gates were start-only.** Per the user's call, quit (and
+    self-update relaunch) now TEARS DOWN games + Steam clients (`terminateAllOnQuit`; retired the opt-in
+    toggle), so nothing orphans and cross-session gates stay accurate. Update refused while anything runs;
+    launches refused during a bottles move. Residual: a hard crash can still orphan (documented — needs a
+    Wine-verified wineserver probe).
+  - **Theme C — "ready" was defined 3 ways; gates picked the weakest.** "Installed" now means the WARMED
+    client (`hasWarmedClient`: steamui.dll + webhelper), not the bootstrapper; onboarding's GPTK step +
+    `setupComplete` key on `gptkSteamReady` (DXMT-first can't mark GPTK done); removing a runtime reconciles
+    `BackendConfig` (no sticky readiness against a deleted runtime); `refreshLibraryIfReady` re-syncs both ways.
+  - **Theme D — ejected relocated drive** now shows a distinct `BottlesDisconnectedView` (not first-run
+    onboarding); launches + `setUp` refuse when the root is unreachable (no phantom bottle on the boot disk).
+  - **Bonus:** `BottlesRelocationCoordinator` uses the injectable app-bundle resolver, so relocation's
+    `relaunch`/`exit(0)` no longer kills the SERIAL test run — the whole suite passes serially for the first
+    time (the parallel `tee` had been masking failures). +co-residency/relocation/warmed-client tests.
+  - **Still open (low priority):** `taskkill /IM` basename collision, strand-on-failed-delete surfacing,
+    `isSharedSystemApp` LastOwner edge; and the Theme-B crash-orphan residual.
 - **🐛 Adversarial correctness pass — 10 bugs fixed (2026-07-07, `swift build` clean + `Scripts/test.sh`
   green, +2 tests).** Two independent adversarial reviewers swept the GPTK bottle path for BUGS (not just
   rot). The GPTK core came back clean; the fixes (most-severe first):
