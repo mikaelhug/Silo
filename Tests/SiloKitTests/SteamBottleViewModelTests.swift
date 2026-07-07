@@ -55,6 +55,30 @@ struct SteamBottleViewModelTests {
         #expect(vm.canSetUp)
     }
 
+    @Test("a bottle setup is blocked while the OTHER bottle is being set up (no concurrent seed)")
+    func setUpBlockedByConcurrentSibling() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let gate = SteamSetupGate()
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
+        let session = SteamClientSession(
+            bottle: bottle, orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
+        session.readinessTimeout = 0
+        let dxmt = SteamBottleViewModel(bottle: bottle, session: session, setupGate: gate)
+        dxmt.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        #expect(dxmt.canSetUp)
+
+        gate.begin(.gptk)                                 // the GPTK bottle starts setting up
+        #expect(!dxmt.canSetUp)                           // DXMT's button disables…
+        await dxmt.setUp()                                // …and a direct call is refused before any work
+        #expect(dxmt.status.contains("Finish setting up"))
+        #expect(!fake.invocations.contains { $0.arguments.contains("wineboot") })   // never provisioned/seeded
+
+        gate.end(.gptk)                                   // GPTK done
+        #expect(dxmt.canSetUp)                            // DXMT unblocked
+    }
+
     @Test("setUp installs Steam into the bottle and reports success")
     func setUpSuccess() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

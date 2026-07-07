@@ -13,11 +13,11 @@ public final class BackendServices {
     public let bottleVM: SteamBottleViewModel
 
     init(backend: GraphicsBackend, runner: ProcessRunning, paths: AppPaths,
-         orchestrator: LaunchOrchestrator) {
+         orchestrator: LaunchOrchestrator, setupGate: SteamSetupGate) {
         self.backend = backend
         self.bottle = SteamBottle(runner: runner, paths: paths, backend: backend)
         self.session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
-        self.bottleVM = SteamBottleViewModel(bottle: bottle, session: session)
+        self.bottleVM = SteamBottleViewModel(bottle: bottle, session: session, setupGate: setupGate)
     }
 }
 
@@ -108,10 +108,13 @@ public final class AppEnvironment {
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
         // One service bundle (bottle + client session + settings VM) per backend — see BackendServices.
+        // A shared setup gate serializes bottle setup across backends, so the seed can't clone a sibling
+        // whose client is still mid-download (→ a broken Steam).
+        let setupGate = SteamSetupGate()
         var backends: [GraphicsBackend: BackendServices] = [:]
         for backend in GraphicsBackend.allCases {
             backends[backend] = BackendServices(
-                backend: backend, runner: runner, paths: paths, orchestrator: orchestrator)
+                backend: backend, runner: runner, paths: paths, orchestrator: orchestrator, setupGate: setupGate)
         }
         self.backends = backends
 
