@@ -219,47 +219,58 @@ public actor RuntimeManager {
         guard dest.standardizedFileURL.path.hasPrefix(runtimesPath) else {
             throw RuntimeError.unsafeRuntimeName(name)
         }
-        try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
 
-        // The check above validates only the destination NAME; protection against `../` entries INSIDE the
-        // archive rests on two layers: (1) the archive's integrity is verified first (mandatory SHA-256 for
-        // the built-in repo, `requireDigest`), and (2) macOS `bsdtar` (libarchive) refuses upward traversal
-        // by default — we never pass `-P`/`--absolute-paths`. A custom repo with best-effort digests still
-        // gets layer (2).
+        // Extract into a private staging dir, then publish to `dest` with an atomic rename — so a reinstall
+        // of an existing name never merges stale files over the old tree, and a mid-extract failure leaves
+        // any existing good install untouched (the old path extracted in place + removed `dest` on failure).
+        let staging = paths.runtimesDir
+            .appendingPathComponent(".\(safeName).extracting-\(UUID().uuidString)", isDirectory: true)
+        try? fileManager.removeItem(at: staging)
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: staging) }   // cleaned on any failure, or after the move
+
+        // The name check above validates only the destination NAME; protection against `../` entries INSIDE
+        // the archive rests on two layers: (1) the archive's integrity is verified first (mandatory SHA-256
+        // for the built-in repo, `requireDigest`), and (2) macOS `bsdtar` (libarchive) refuses upward
+        // traversal by default — we never pass `-P`/`--absolute-paths`. A custom repo with best-effort digests
+        // still gets layer (2).
         let result = try await runner.run(
             executable: URL(fileURLWithPath: "/usr/bin/tar"),
-            arguments: ["-xf", archive.path, "-C", dest.path],
+            arguments: ["-xf", archive.path, "-C", staging.path],
             environment: [:], currentDirectory: nil
         )
-        guard result.succeeded else {
-            try? fileManager.removeItem(at: dest)   // don't leave a half-extracted runtime behind
-            throw RuntimeError.extractionFailed(result.exitCode)
-        }
+        guard result.succeeded else { throw RuntimeError.extractionFailed(result.exitCode) }
 
         // winebus's SDL controller backend dlopens libSDL2, whose macOS initializer pops an NSAlert off the
         // main thread → the WHOLE Wine process aborts the instant winebus loads (before Steam draws). Runtimes
         // built before `--without-sdl` bundle libSDL2; strip it so a downloaded runtime can't crash on launch,
         // with no Wine rebuild required.
-        Self.stripBundledSDL(in: dest, fileManager: fileManager)
+        Self.stripBundledSDL(in: staging, fileManager: fileManager)
 
         // Downloaded Wine is unsigned + quarantined → Gatekeeper blocks it until the quarantine flag is
         // stripped (x86_64 runs unsigned, so no signing is needed — see `deQuarantine`). Best-effort, but
         // remember a failure so the installing UI can warn instead of leaving a later block unexplained.
-        lastHardeningIssue = await deQuarantine(dest, using: runner).issue(for: dest)
+        lastHardeningIssue = await deQuarantine(staging, using: runner).issue(for: dest)
+
+        // Atomic publish: replace any prior install only now that the staged tree is complete + hardened.
+        if fileManager.fileExists(atPath: dest.path) { try fileManager.removeItem(at: dest) }
+        try fileManager.moveItem(at: staging, to: dest)
     }
 
     /// The warning from the most recent install's hardening pass, or nil when it applied cleanly.
     public private(set) var lastHardeningIssue: String?
 
-    /// Remove any bundled `libSDL2*` from a runtime (see `install`). Idempotent; no-op if absent.
+    /// Remove any bundled `libSDL2*` from a runtime, wherever in its tree it sits (see `install`). Walks the
+    /// whole runtime rather than only Silo's `lib/silo-bundled`, so it also strips a custom-repo runtime that
+    /// bundles libSDL2 elsewhere (the built-in repo builds `--without-sdl`, so this finds nothing there). The
+    /// one-time walk is negligible next to the download+extract it follows. Idempotent; no-op if absent.
     @discardableResult
     static func stripBundledSDL(in runtimeDir: URL, fileManager: FileManager = .default) -> Int {
-        let bundled = WineRuntimeLayout(root: runtimeDir).bundledDylibDir
-        guard let entries = try? fileManager.contentsOfDirectory(at: bundled, includingPropertiesForKeys: nil)
+        guard let enumerator = fileManager.enumerator(at: runtimeDir, includingPropertiesForKeys: nil)
         else { return 0 }
         var removed = 0
-        for entry in entries where entry.lastPathComponent.lowercased().hasPrefix("libsdl2") {
-            if (try? fileManager.removeItem(at: entry)) != nil { removed += 1 }
+        for case let url as URL in enumerator where url.lastPathComponent.lowercased().hasPrefix("libsdl2") {
+            if (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
         }
         return removed
     }

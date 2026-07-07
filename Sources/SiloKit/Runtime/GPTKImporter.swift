@@ -136,6 +136,14 @@ public struct GPTKImporter: Sendable {
             environment: [:], currentDirectory: nil)
         guard result.succeeded else { throw ImportError.attachFailed(result.stderrString) }
         guard let mount = Self.mountPoint(fromPlist: result.standardOutput) else {
+            // Attached (hdiutil succeeded) but we couldn't parse a mount point — best-effort detach the raw
+            // dev node so the image isn't leaked (the caller never receives a mount URL it could record and
+            // detach in its cleanup path).
+            if let dev = Self.devEntry(fromPlist: result.standardOutput) {
+                _ = try? await runner.run(
+                    executable: URL(fileURLWithPath: "/usr/bin/hdiutil"),
+                    arguments: ["detach", "-force", dev], environment: [:], currentDirectory: nil)
+            }
             throw ImportError.attachFailed("no mount point in hdiutil output")
         }
         return mount
@@ -170,6 +178,18 @@ public struct GPTKImporter: Sendable {
             if let mountPoint = entity["mount-point"] as? String, !mountPoint.isEmpty {
                 return URL(fileURLWithPath: mountPoint)
             }
+        }
+        return nil
+    }
+
+    /// The first `dev-entry` (e.g. `/dev/disk4`) in `hdiutil attach -plist` output — the detach handle used
+    /// to clean up an attach whose mount point couldn't be parsed. Static for direct testing.
+    static func devEntry(fromPlist data: Data) -> String? {
+        guard let object = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let dict = object as? [String: Any],
+              let entities = dict["system-entities"] as? [[String: Any]] else { return nil }
+        for entity in entities {
+            if let dev = entity["dev-entry"] as? String, !dev.isEmpty { return dev }
         }
         return nil
     }

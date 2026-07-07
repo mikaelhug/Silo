@@ -102,7 +102,7 @@ struct GeneralSettingsView: View {
         Section {
             SteamBottleControls(
                 bottle: env.steamBottleVM, backend: .gptk,
-                logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog)
+                logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog(.gptk))
         } header: {
             Text("Steam bottle (GPTK)")
         }

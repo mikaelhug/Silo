@@ -22,14 +22,6 @@ public final class GameLibraryViewModel {
     public private(set) var busyGames: Set<SteamApp.ID> = []
     public private(set) var manualBusyIDs: Set<UUID> = []
 
-    /// Live launch tracking, projected from the process coordinator's keyed table. Module-internal, NOT
-    /// public API — callers query liveness via `isRunning(_:)` / `isAnythingRunning`.
-    var runningPIDs: [Int: Int32] {
-        processes.pids.reduce(into: [:]) { if case .steam(let appID, _) = $1.key { $0[appID] = $1.value } }
-    }
-    var manualRunningPIDs: [UUID: Int32] {
-        processes.pids.reduce(into: [:]) { if case .manual(let id) = $1.key { $0[id] = $1.value } }
-    }
     public var searchText: String = ""
     /// The most recent action result, shown in the library's status bar. Persists until the next action
     /// replaces it (no timed auto-dismiss — nothing in the app waits).
@@ -131,8 +123,12 @@ public final class GameLibraryViewModel {
             : manualGames.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
-    public func isRunning(_ game: SteamApp) -> Bool { processes.pid(for: gameID(game)) != nil }
+    public func isRunning(_ game: SteamApp) -> Bool { pid(for: game) != nil }
     public func isBusy(_ game: SteamApp) -> Bool { busyGames.contains(game.id) }
+
+    /// The tracked wine-loader PID for a launched game (nil if not running) — the PID-returning sibling of
+    /// `isRunning`. The UI only needs `isRunning`; this exists for tests driving exit/terminate scenarios.
+    func pid(for game: SteamApp) -> Int32? { processes.pid(for: gameID(game)) }
 
     /// The coordinator key for a Steam game — (appID, backend), so the two bottle copies of one title are
     /// tracked independently.
@@ -151,8 +147,10 @@ public final class GameLibraryViewModel {
     private func activeBackend(ofAppID appID: Int) -> GraphicsBackend? {
         runningBackend(ofAppID: appID) ?? busyGames.first { $0.appID == appID }?.backend
     }
-    public func isRunning(_ game: ManualGame) -> Bool { processes.pid(for: .manual(game.id)) != nil }
+    public func isRunning(_ game: ManualGame) -> Bool { pid(for: game) != nil }
     public func isBusy(_ game: ManualGame) -> Bool { manualBusyIDs.contains(game.id) }
+    /// The tracked PID for a launched manual game (nil if not running) — see `pid(for:)` above.
+    func pid(for game: ManualGame) -> Int32? { processes.pid(for: .manual(game.id)) }
 
     public func sizeString(_ game: SteamApp) -> String? {
         guard game.sizeOnDisk > 0 else { return nil }
@@ -285,11 +283,12 @@ public final class GameLibraryViewModel {
                 setStatus("\(game.name) needs the Steam client, but it couldn't start\(why).")
                 return
             }
-            var launchBackend = backend
-            launchBackend.wineBinaryPath = context.wineBinary
+            // The resolved variant runtime is fed to the orchestrator as the launch wine; `backend` stays
+            // as-is (it still gates the graphics overrides via `libDir(for:)`).
             let pid = try await orchestrator.launchInBottle(
-                app: game, config: config, backend: launchBackend, graphics: game.backend,
-                prefix: context.prefix, logURL: paths.log(forAppID: game.appID, backend: game.backend))
+                app: game, config: config, backend: backend, graphics: game.backend,
+                wine: context.wineBinary, prefix: context.prefix,
+                logURL: paths.log(forAppID: game.appID, backend: game.backend))
             processes.track(gameID(game), pid: pid)
             do {
                 // Per-game config/settings are keyed by (appID, backend): the GPTK and DXMT cards of one
@@ -439,11 +438,9 @@ public final class GameLibraryViewModel {
         }
         do {
             // The resolved runtime is the backend's variant; feed it to the orchestrator as the launch wine.
-            var launchBackend = backend
-            launchBackend.wineBinaryPath = context.wineBinary
             let pid = try await orchestrator.launchManualGame(
-                game, backend: launchBackend, graphics: context.graphics,
-                prefix: context.prefix, logURL: paths.manualLog(game.id))
+                game, backend: backend, graphics: context.graphics,
+                wine: context.wineBinary, prefix: context.prefix, logURL: paths.manualLog(game.id))
             processes.track(.manual(game.id), pid: pid)
             do {
                 _ = try await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
@@ -509,15 +506,19 @@ public final class GameLibraryViewModel {
             ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first else { return nil }
         let cfg = backend
         do {
-            let context = try await Task.detached { [paths] in
-                try BottleResolver(paths: paths).manual(game, config: cfg)
+            // Resolve + prepare graphics + build the plan off-main: the clone/overlay is slow, and a DXMT
+            // game also needs its prefix loader (winemetal.dll) seeded — the shortcut execs wine directly
+            // with no launch pipeline, so `linkGraphics` never runs for it otherwise.
+            let plan = try await Task.detached { [paths, orchestrator] in
+                let context = try BottleResolver(paths: paths).manual(game, config: cfg)
+                try orchestrator.prepareGraphics(
+                    backendConfig: cfg, graphics: context.graphics,
+                    wine: context.wineBinary, prefix: context.prefix)
+                return try LaunchOrchestrator.makePlan(
+                    config: game.gameConfig, backend: cfg, graphics: context.graphics,
+                    wine: context.wineBinary, gameExe: game.executablePath,
+                    prefix: context.prefix, logURL: paths.manualLog(game.id))
             }.value
-            var launchBackend = cfg
-            launchBackend.wineBinaryPath = context.wineBinary
-            let plan = try LaunchOrchestrator.makePlan(
-                config: GameConfig(appID: 0, envFlags: game.envFlags, presence: .none, customArgs: game.customArgs),
-                backend: launchBackend, graphics: context.graphics, gameExe: game.executablePath,
-                prefix: context.prefix, logURL: paths.manualLog(game.id))
             let app = try GameAppShortcut(name: game.name, plan: plan).write(into: dir)
             setStatus("Created a shortcut for \(game.name).")
             return app

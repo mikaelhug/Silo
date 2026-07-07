@@ -203,12 +203,23 @@ public struct GraphicsLinker: Sendable {
     /// windows-modules dir and — when the backend ships one — the matching unix `.so` (symlinks
     /// recreated via `replace`, never dereferenced) into the unix-modules dir.
     private func copyModules(_ modules: [URL], unixSource: URL, toWin winDir: URL, toUnix unixDir: URL) throws {
-        for dll in modules {
+        // Copy the idempotency witness (`witnessMatches` prefers `d3d11.dll`) LAST: a mid-copy failure then
+        // leaves the witness stale, so the next pre-launch overlay re-copies the whole set — instead of a
+        // freshly-copied witness wrongly classifying a partially-updated tree as "already installed".
+        for dll in witnessLast(modules) {
             try replace(dll, in: winDir)
             let so = unixSource.appendingPathComponent(
                 (dll.lastPathComponent as NSString).deletingPathExtension + ".so")
             if isSymlink(so) || fileManager.fileExists(atPath: so.path) { try replace(so, in: unixDir) }
         }
+    }
+
+    /// `modules` reordered so the idempotency witness (`d3d11.dll` — both backends ship it) is copied last.
+    private func witnessLast(_ modules: [URL]) -> [URL] {
+        guard let idx = modules.firstIndex(where: { $0.lastPathComponent == "d3d11.dll" }) else { return modules }
+        var ordered = modules
+        ordered.append(ordered.remove(at: idx))
+        return ordered
     }
 
     /// The relative symlink target from `<wine>/lib/wine/x86_64-unix` to the overlaid framework.

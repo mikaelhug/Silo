@@ -28,7 +28,8 @@ public struct WineRuntimeLayout: Sendable {
     public func unixModulesDir(_ arch: WineArch = .x86_64) -> URL {
         root.appendingPathComponent("lib/wine/\(arch.rawValue)-unix", isDirectory: true)
     }
-    // Back-compat aliases for the common (64-bit) case.
+    // The common x86_64 case — `overlayGPTK` uses these because GPTK is 64-bit-only (Apple ships no 32-bit
+    // D3DMetal); `overlayDXMT` passes an explicit `WineArch` to cover both ABIs.
     public var windowsModulesDir: URL { windowsModulesDir(.x86_64) }
     public var unixModulesDir: URL { unixModulesDir(.x86_64) }
     public var wrapperExe: URL { root.appendingPathComponent("share/silo/steamwebhelper-wrapper.exe") }
