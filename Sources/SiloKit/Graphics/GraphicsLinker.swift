@@ -100,38 +100,56 @@ public struct GraphicsLinker: Sendable {
 
     /// Overlay 3Shain's DXMT modules into the **wine runtime** (not a game prefix) so wine loads DXMT's
     /// Metal-backed Direct3D directly, exactly as `overlayGPTK` does for D3DMetal. For each DXMT PE module
-    /// the `.dll` is copied into `<wine>/lib/wine/x86_64-windows`; the only matching unix `.so` is DXMT's
+    /// the `.dll` is copied into `<wine>/lib/wine/<arch>-windows`; the only matching unix `.so` is DXMT's
     /// `winemetal.so` (its Metal bridge), recreated in `<wine>/lib/wine/x86_64-unix` (the `d3d*`/`dxgi`
     /// PEs are pure forwarders to `winemetal` and have no `.so`). Unlike GPTK, DXMT ships nothing in
     /// `lib/external` — `winemetal.so` links the system `Metal.framework` — so there is no framework
     /// symlink to maintain. The translated modules are forced to builtin at launch
     /// (`GraphicsBackend.dxmt.dllOverrides`, incl. `winemetal=b`) so wine loads these overlaid versions.
     ///
+    /// **Both ABIs, auto-selected.** DXMT ships its d3d translation for BOTH `x86_64-windows` and
+    /// `i386-windows` (when the release includes 32-bit libs). We overlay every `<arch>-windows` sibling the
+    /// release carries; wine then loads DXMT's d3d11 from the tree matching the game's PE machine type — a
+    /// 64-bit game from `x86_64-windows`, a 32-bit game from `i386-windows` — with no arch detection on
+    /// Silo's side. The unix `.so` is host-arch only (new-WoW64): the single `x86_64-unix/winemetal.so`
+    /// serves both PE arches, so the i386 tree needs no `.so` of its own. A 64-bit-only release (no i386
+    /// sibling) overlays exactly as before.
+    ///
     /// Idempotent: a no-op once the runtime already carries this DXMT's modules, so it's safe to call
     /// before every launch — it re-applies only after a runtime re-download or a DXMT update.
     ///
     /// - Parameters:
     ///   - wineBinary: the runtime's wine binary (`<wine>/bin/wine64`), used to locate `<wine>/lib`.
-    ///   - dxmtLibDir: DXMT's PE module dir (`<dxmt>/lib/wine/x86_64-windows`).
+    ///   - dxmtLibDir: DXMT's x86_64 PE module dir (`<dxmt>/lib/wine/x86_64-windows`); its `<arch>-windows`
+    ///     / `<arch>-unix` siblings are the source for the other ABIs.
     public func overlayDXMT(wineBinary: URL, dxmtLibDir: URL) throws {
         guard fileManager.fileExists(atPath: dxmtLibDir.path) else { throw LinkError.sourceMissing(dxmtLibDir) }
-        let dxmtUnixDir = dxmtLibDir.deletingLastPathComponent().appendingPathComponent("x86_64-unix")
-
+        let sourceRoot = dxmtLibDir.deletingLastPathComponent()   // holds <arch>-windows + <arch>-unix
         let wineLayout = WineRuntimeLayout(wineBinary: wineBinary)
-        let wineWinDir = wineLayout.windowsModulesDir
-        let wineUnixDir = wineLayout.unixModulesDir
 
-        let modules = try fileManager.contentsOfDirectory(at: dxmtLibDir, includingPropertiesForKeys: nil)
-            .filter { Self.isDXMTModule($0.lastPathComponent) }
-        guard !modules.isEmpty else { return }
+        for arch in WineArch.allCases {
+            let srcWin = sourceRoot.appendingPathComponent("\(arch.rawValue)-windows")
+            guard fileManager.fileExists(atPath: srcWin.path),
+                  let modules = try? fileManager.contentsOfDirectory(at: srcWin, includingPropertiesForKeys: nil)
+                    .filter({ Self.isDXMTModule($0.lastPathComponent) }),
+                  !modules.isEmpty
+            else { continue }   // this ABI isn't in the release — skip it
 
-        // Idempotent: if a witness module is already byte-identical, the runtime carries THIS DXMT — skip.
-        if witnessMatches(modules, in: wineWinDir) { return }
+            let wineWinDir = wineLayout.windowsModulesDir(arch)
+            // Idempotent: if a witness module is already byte-identical, the runtime carries THIS DXMT — skip.
+            if witnessMatches(modules, in: wineWinDir) { continue }
 
-        try fileManager.createDirectory(at: wineWinDir, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: wineUnixDir, withIntermediateDirectories: true)
-        // Each PE dll + the matching unix `.so` (only `winemetal.so` exists — DXMT's Metal bridge).
-        try copyModules(modules, unixSource: dxmtUnixDir, toWin: wineWinDir, toUnix: wineUnixDir)
+            let srcUnix = sourceRoot.appendingPathComponent("\(arch.rawValue)-unix")
+            let wineUnixDir = wineLayout.unixModulesDir(arch)
+            try fileManager.createDirectory(at: wineWinDir, withIntermediateDirectories: true)
+            // Only stand up the unix-modules dir when this ABI actually ships a `.so`. Under new-WoW64 only
+            // x86_64 does — the i386 PE winemetal.dll thunks into the shared x86_64-unix/winemetal.so — so
+            // the 32-bit pass overlays PEs only and never fabricates an empty `i386-unix`.
+            if fileManager.fileExists(atPath: srcUnix.path) {
+                try fileManager.createDirectory(at: wineUnixDir, withIntermediateDirectories: true)
+            }
+            try copyModules(modules, unixSource: srcUnix, toWin: wineWinDir, toUnix: wineUnixDir)
+        }
     }
 
     // MARK: - Helpers

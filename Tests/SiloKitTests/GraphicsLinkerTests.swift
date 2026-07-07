@@ -257,6 +257,48 @@ struct GraphicsLinkerTests {
         }
     }
 
+    @Test("overlayDXMT ALSO overlays the i386 tree when the release ships 32-bit libs (so 32-bit games get DXMT)")
+    func overlayDXMTBothArches() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxmtLibDir = try makeDXMT(tmp)
+        // A both-ABI release: an i386-windows sibling with 32-bit d3d PEs. (No i386-unix — the i386
+        // winemetal.dll thunks into the shared x86_64-unix/winemetal.so, so the 32-bit tree ships no .so.)
+        try tmp.makeDir("dxmt/lib/wine/i386-windows")
+        for module in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
+            try tmp.write("dxmt/lib/wine/i386-windows/\(module)", "PE32:\(module)")
+        }
+        let wine = try makeWine(tmp)
+        let wineLib = wine.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("lib")
+
+        try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: dxmtLibDir)
+
+        // 64-bit tree overlaid as before…
+        #expect(try String(contentsOf:
+            wineLib.appendingPathComponent("wine/x86_64-windows/d3d11.dll"), encoding: .utf8) == "PE:d3d11.dll")
+        // …AND the 32-bit tree, so a 32-bit game loads DXMT's i386 d3d11 (not stock wined3d).
+        for dll in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
+            #expect(try String(contentsOf:
+                wineLib.appendingPathComponent("wine/i386-windows/\(dll)"), encoding: .utf8) == "PE32:\(dll)")
+        }
+        // The shared unix bridge stays in x86_64-unix; no i386-unix is fabricated.
+        #expect(FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/x86_64-unix/winemetal.so").path))
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/i386-unix").path))
+    }
+
+    @Test("overlayDXMT leaves the i386 tree untouched for a 64-bit-only release (backward compatible)")
+    func overlayDXMT64BitOnlyRelease() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxmtLibDir = try makeDXMT(tmp)   // x86_64 only, no i386-windows sibling
+        let wine = try makeWine(tmp)
+        let wineLib = wine.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("lib")
+
+        try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: dxmtLibDir)
+
+        #expect(try String(contentsOf:
+            wineLib.appendingPathComponent("wine/x86_64-windows/d3d11.dll"), encoding: .utf8) == "PE:d3d11.dll")
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/i386-windows").path))
+    }
+
     @Test("isOverlayModule: only .dll/.so with a backend's module prefixes; the two filters diverge right")
     func overlayModulePredicate() {
         #expect(GraphicsLinker.isOverlayModule("d3d11.dll", prefixes: ["d3d"]))
