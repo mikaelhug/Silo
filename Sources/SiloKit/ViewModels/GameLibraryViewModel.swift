@@ -83,6 +83,18 @@ public final class GameLibraryViewModel {
 
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
 
+    /// True while a bottles-location move is in progress (AppEnvironment wires this to `bottles.busy`).
+    /// Launches are refused then — the move copies the prefixes off-volume and deletes the originals, so
+    /// launching into the old root would orphan the process onto deleted files and corrupt the copy.
+    var isRelocating: () -> Bool = { false }
+
+    /// A launch is refused while bottles are relocating; sets the status and returns true if so.
+    private func refusedWhileRelocating() -> Bool {
+        guard isRelocating() else { return false }
+        setStatus("Silo is moving your bottles — wait for that to finish before launching.")
+        return true
+    }
+
     /// Whether any game (Steam or manual) is currently tracked as running. Lets callers ask without
     /// reaching into the internal PID tables.
     public var isAnythingRunning: Bool { processes.anythingRunning }
@@ -239,6 +251,7 @@ public final class GameLibraryViewModel {
     /// live in the OTHER bottle (bringing a second client up for the same account would kill it), and stops
     /// any idle client in the other bottle to keep the one-client rule.
     public func openSteam() async {
+        if refusedWhileRelocating() { return }
         if let otherBackend = activeSteamBackend(excluding: .gptk) {
             setStatus("A game is running in the \(otherBackend.displayName) bottle — "
                 + "stop it first before opening Steam.")
@@ -274,6 +287,7 @@ public final class GameLibraryViewModel {
     public func play(_ game: SteamApp) async {
         // Don't re-launch THIS copy while it's already mid-launch (its own button already spins).
         guard backend.isWineConfigured, !busyGames.contains(game.id) else { return }
+        if refusedWhileRelocating() { return }
         // Active (running OR mid-launch) SOMEWHERE? A same-bottle replay is a silent no-op; the OTHER
         // bottle's copy gets an explanatory status (its Play button is enabled but only THIS copy spins).
         // This check runs BEFORE stopOtherSteamClients so we never kill the running game's Steam client.
@@ -396,6 +410,7 @@ public final class GameLibraryViewModel {
     /// Run an installer `.exe` in a specific game's bottle (detached) so it installs into THAT bottle's
     /// `drive_c`. The bottle is booted first if needed. The user then picks the installed game `.exe`.
     public func runInstaller(_ installer: URL, forBottle id: UUID) async {
+        if refusedWhileRelocating() { return }
         guard await ensureManualBottle(id) else { return }
         do {
             _ = try await orchestrator.runInstaller(
@@ -454,6 +469,7 @@ public final class GameLibraryViewModel {
     public func playManual(_ game: ManualGame) async {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id),
               processes.pid(for: .manual(game.id)) == nil else { return }
+        if refusedWhileRelocating() { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
         // A 32-bit game on GPTK can't render (GPTK / D3DMetal is 64-bit-only) — refuse before provisioning
         // its bottle and steer to switching this game's backend to DXMT.

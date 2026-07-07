@@ -9,11 +9,6 @@ struct GeneralSettingsView: View {
     /// the GitHub call.
     @State private var isChecking = false
 
-    /// When set, Silo SIGTERMs the games it launched as it quits (never the co-resident Steam client).
-    /// Default off so quitting the launcher never surprises a user mid-game. Read by `RootView`'s
-    /// `willTerminate` hook.
-    @AppStorage("stopGamesOnQuit") private var stopGamesOnQuit = false
-
     var body: some View {
         Form {
             steamBottleSection
@@ -36,7 +31,6 @@ struct GeneralSettingsView: View {
                 get: { env.backendSettings.config.retinaMode },
                 set: { on in Task { await env.setSteamBottleRetina(on) } }))
                 .disabled(!configured || env.bottleToolsBusy)
-            Toggle("Stop running games when Silo quits", isOn: $stopGamesOnQuit)
             if let message = env.bottleToolsMessage {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }

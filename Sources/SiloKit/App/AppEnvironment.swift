@@ -145,6 +145,10 @@ public final class AppEnvironment {
         }
         // Relocation must refuse while anything runs in a bottle (see `anythingRunning`).
         bottles.isBlocked = { [weak self] in self?.anythingRunning ?? true }
+        // A self-update relaunches Silo (tearing everything down), so refuse it while a game/client is live.
+        updates.isBlocked = { [weak self] in self?.anythingRunning ?? true }
+        // Refuse launches while bottles are being moved (the prefixes are being copied off-volume + deleted).
+        gameLibrary.isRelocating = { [weak self] in self?.bottles.busy ?? false }
     }
 
     /// Fan out a backend-config change to the view models that depend on it.
@@ -190,6 +194,14 @@ public final class AppEnvironment {
     /// client is just as much a running wineserver as the GPTK one.
     public var anythingRunning: Bool {
         gameLibrary.isAnythingRunning || backends.values.contains { $0.session.isRunning }
+    }
+
+    /// Best-effort synchronous teardown on app quit (and before a self-update relaunch): SIGTERM every game
+    /// Silo launched AND stop every backend's Steam client, so nothing outlives the launcher as an orphan.
+    /// Keeps the in-memory liveness the relocation/update gates rely on accurate across restarts.
+    public func terminateAllOnQuit() {
+        gameLibrary.terminateAllSync()
+        for services in backends.values { services.session.stop() }
     }
 
     // MARK: - Setup readiness (drives the Library onboarding)
