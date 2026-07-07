@@ -10,6 +10,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%2015%2B%20%C2%B7%20Apple%20Silicon-blue)
 ![Swift](https://img.shields.io/badge/Swift%206-strict%20concurrency-orange)
 
+[Website](https://mikaelhug.github.io/Silo/) ·
 [Releases](https://github.com/mikaelhug/Silo/releases) ·
 [Architecture](CLAUDE.md) ·
 [Wine build](WINE-BUILD.md) ·
