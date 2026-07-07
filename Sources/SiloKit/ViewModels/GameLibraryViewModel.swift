@@ -276,7 +276,7 @@ public final class GameLibraryViewModel {
                 setStatus("\(game.name) needs the Steam client, but it couldn't start\(why).")
                 return
             }
-            let config = await configStore.load().config(for: game.appID)
+            let config = await configStore.load().config(for: game.appID, backend: game.backend)
             var launchBackend = backend
             launchBackend.wineBinaryPath = context.wineBinary
             let pid = try await orchestrator.launchInBottle(
@@ -284,9 +284,11 @@ public final class GameLibraryViewModel {
                 prefix: context.prefix, logURL: paths.log(forAppID: game.appID, backend: game.backend))
             processes.track(gameID(game), pid: pid)
             do {
-                // Per-game config/settings are keyed by appID (shared by both bottle copies — same game,
-                // and they can never run simultaneously, so a shared launch date/options is correct).
-                _ = try await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
+                // Per-game config/settings are keyed by (appID, backend): the GPTK and DXMT cards of one
+                // title are independent, so launch options + perf flags don't bleed across bottles.
+                _ = try await configStore.updateGame(appID: game.appID, backend: game.backend) {
+                    $0.lastPlayed = Date()
+                }
                 setStatus("Launched \(game.name).")
             } catch {
                 // The game IS running, but config.json is unwritable — say so (settings won't stick either).
@@ -307,7 +309,7 @@ public final class GameLibraryViewModel {
     /// Keyed by (appID, backend), so Stop on the non-running bottle copy is a clean no-op.
     public func stop(_ game: SteamApp) async {
         guard let pid = processes.pid(for: gameID(game)) else { return }
-        let config = await configStore.load().config(for: game.appID)
+        let config = await configStore.load().config(for: game.appID, backend: game.backend)
         let exeName = orchestrator.resolvedExecutableName(app: game, config: config)
         await orchestrator.stopGame(
             pid: pid, exeName: exeName, prefix: paths.steamBottle(game.backend), backend: backend)
