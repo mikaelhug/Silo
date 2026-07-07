@@ -13,11 +13,14 @@ public final class SteamBottleViewModel {
     /// The live Steam client is owned by the shared session (not spawned here), so the settings "Launch
     /// Steam" can't start a second, untracked client behind the Library's back.
     private let session: SteamClientSession
+    /// Shared across backends: blocks setting up one bottle while another is mid-setup (see `SteamSetupGate`).
+    private let setupGate: SteamSetupGate
     private var wineBinary: URL?
 
-    public init(bottle: SteamBottle, session: SteamClientSession) {
+    public init(bottle: SteamBottle, session: SteamClientSession, setupGate: SteamSetupGate = SteamSetupGate()) {
         self.bottle = bottle
         self.session = session
+        self.setupGate = setupGate
     }
 
     public func updateWine(_ url: URL?) {
@@ -38,7 +41,9 @@ public final class SteamBottleViewModel {
         steamInstalled = await Task.detached { bottle.isSteamInstalled }.value
     }
 
-    public var canSetUp: Bool { wineBinary != nil && !busy }
+    /// Wine configured and nothing blocking. A DIFFERENT bottle mid-setup blocks this one — seeding from a
+    /// sibling whose client is still downloading would clone a broken Steam.
+    public var canSetUp: Bool { wineBinary != nil && !busy && !setupGate.isBlocked(bottle.backend) }
 
     /// True while the one-time Steam client self-update runs during setup (drives a progress indicator in
     /// the UI). The download can take a few minutes, so we show it's working.
@@ -52,7 +57,14 @@ public final class SteamBottleViewModel {
     /// webhelper wrapper is applied AFTER the warm-up, when the CEF dir it wraps actually exists.
     public func setUp() async {
         guard !busy else { return }
-        busy = true; defer { busy = false }
+        // Refuse while the OTHER bottle is being set up: seeding from a sibling whose client is still
+        // downloading would clone a broken Steam. One bottle at a time.
+        guard !setupGate.isBlocked(bottle.backend) else {
+            status = "Finish setting up the \(setupGate.inProgress?.displayName ?? "other") Steam bottle first."
+            return
+        }
+        busy = true; setupGate.begin(bottle.backend)
+        defer { busy = false; setupGate.end(bottle.backend) }
         do {
             // Fast path: if another bottle already has a complete Steam client, clone it (client + fonts)
             // instead of re-downloading ~242 MB — near-instant on APFS. Falls back to a normal install.
@@ -124,4 +136,20 @@ public final class SteamBottleViewModel {
     }
 
     private func message(_ error: Error) -> String { (error as NSError).localizedDescription }
+}
+
+/// Serializes Steam-bottle setup across backends: while one bottle is being set up, another's setup is
+/// blocked (its button disables and a direct call is refused). Prevents `SteamBottle.seedFromCompleteBottle`
+/// from cloning a sibling whose client is still mid-download — which would produce a broken Steam. Shared by
+/// every backend's `SteamBottleViewModel`.
+@MainActor
+@Observable
+public final class SteamSetupGate {
+    public init() {}
+    /// The backend whose bottle is currently being set up, if any.
+    public private(set) var inProgress: GraphicsBackend?
+    func begin(_ backend: GraphicsBackend) { inProgress = backend }
+    func end(_ backend: GraphicsBackend) { if inProgress == backend { inProgress = nil } }
+    /// Whether a DIFFERENT bottle's setup is in progress (so `backend`'s setup must wait).
+    func isBlocked(_ backend: GraphicsBackend) -> Bool { inProgress != nil && inProgress != backend }
 }
