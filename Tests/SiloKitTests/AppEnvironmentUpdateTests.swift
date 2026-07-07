@@ -56,7 +56,10 @@ struct AppEnvironmentUpdateTests {
 
         // The wiring reloads the library in a fire-and-forget Task — bounded wait for the gate to flip.
         // A missed invalidation here would permanently stall onboarding (the regression this test pins).
-        for _ in 0..<200 where !env.steamReady {
+        // Wait for a reload to finish PAST the readiness guard (loadState leaves .notReady only once
+        // steamReady is already true) — more robust than polling steamReady alone, which flips a beat before
+        // loadState settles (a parallel-run race).
+        for _ in 0..<300 where env.gameLibrary.loadState == .notReady {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(env.steamReady)
