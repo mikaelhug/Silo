@@ -34,6 +34,12 @@ public protocol ProcessRunning: Sendable {
     /// Whether a process with this PID is currently alive (for tracking a launched game).
     func isRunning(pid: Int32) -> Bool
 
+    /// The process's start time (the kernel's `p_starttime`), or nil if the PID is dead/unknown. Paired
+    /// with the PID it forms a **reuse-proof identity**: a recycled PID is a *different* process with a
+    /// *different* start time, so a stale record can never masquerade as a live one. Used by
+    /// `ProcessLedger` to survive a hard crash without falsely blocking on a reused PID. Default: nil.
+    func startTime(pid: Int32) -> Date?
+
     /// Terminate a process by PID (SIGTERM). Used to stop a running game. No-op default.
     func terminate(pid: Int32)
 
@@ -50,4 +56,5 @@ public final class NoopObservation: ProcessObservation {
 
 extension ProcessRunning {
     public func terminate(pid: Int32) {}
+    public func startTime(pid: Int32) -> Date? { nil }
 }
