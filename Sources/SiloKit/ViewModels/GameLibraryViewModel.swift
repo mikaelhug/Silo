@@ -88,13 +88,21 @@ public final class GameLibraryViewModel {
     /// Launches are refused then — the move copies the prefixes off-volume and deletes the originals, so
     /// launching into the old root would orphan the process onto deleted files and corrupt the copy.
     var isRelocating: () -> Bool = { false }
+    /// True while an inline self-update is downloading/installing (AppEnvironment wires this to
+    /// `updates.isInstalling`). The update ends in `exit(0)` with no teardown, so a game launched during it
+    /// would be orphaned — refuse launches for the duration.
+    var isUpdating: () -> Bool = { false }
 
-    /// Refuse a launch when the bottles are unavailable — a move in progress, or a relocated drive unplugged
-    /// (launching into an unmounted prefix would silently fail, or worse write to a phantom path). Sets the
-    /// status and returns true if refused.
+    /// Refuse a launch when the bottles are unavailable — a move in progress, a relocated drive unplugged
+    /// (launching into an unmounted prefix would silently fail, or worse write to a phantom path), or an
+    /// app self-update in flight (it relaunches Silo). Sets the status and returns true if refused.
     private func launchBlockedByBottles() -> Bool {
         if isRelocating() {
             setStatus("Silo is moving your bottles — wait for that to finish before launching.")
+            return true
+        }
+        if isUpdating() {
+            setStatus("Silo is installing an update — it'll relaunch in a moment; launch again after.")
             return true
         }
         if paths.bottlesRelocated, !paths.bottlesRootReachable {
@@ -104,9 +112,12 @@ public final class GameLibraryViewModel {
         return false
     }
 
-    /// Whether any game (Steam or manual) is currently tracked as running. Lets callers ask without
-    /// reaching into the internal PID tables.
-    public var isAnythingRunning: Bool { processes.anythingRunning }
+    /// Whether any game (Steam or manual) is running OR mid-launch. Includes the busy sets so a launch that
+    /// has claimed a bottle but not yet spawned its process is still visible to the relocation/update gate —
+    /// otherwise a move started in that window would copy/delete the prefix out from under the arriving game.
+    public var isAnythingRunning: Bool {
+        processes.anythingRunning || !busyGames.isEmpty || !manualBusyIDs.isEmpty
+    }
 
     public var canLaunch: Bool { backend.isWineConfigured }
     /// At least one Steam bottle (GPTK or DXMT) has its Steam client installed.

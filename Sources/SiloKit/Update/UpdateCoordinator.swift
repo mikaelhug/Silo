@@ -16,6 +16,9 @@ public final class UpdateCoordinator {
     public private(set) var updateCheck: Updater.UpdateCheck?
     public private(set) var updateState: UpdateState = .idle
     public private(set) var isCheckingForUpdate = false
+    /// True while an inline update is downloading or self-replacing — it ends in `exit(0)`, so launches must
+    /// be refused (a game started now would be orphaned) and a bottles move must wait.
+    public var isInstalling: Bool { updateState == .downloading || updateState == .installing }
 
     private let updater: Updater
     /// Scratch dir the downloaded `.zip` is staged into (`AppPaths.updatesDir`).

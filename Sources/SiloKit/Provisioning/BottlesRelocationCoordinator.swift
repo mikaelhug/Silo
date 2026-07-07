@@ -52,6 +52,14 @@ public final class BottlesRelocationCoordinator {
             message = "Stop running games and Steam before moving bottles."
             return
         }
+        // The move reads FROM the current bottles root. If that's a relocated drive that's currently
+        // unplugged, every source path is absent — the copy/rename would vacuously "succeed" (nothing to
+        // move), then persist the new location and relaunch into an empty dir while the real bottles sit
+        // orphaned on the drive. Refuse until the current root is reachable.
+        guard paths.bottlesRootReachable else {
+            message = "Your bottles drive isn't connected — reconnect it before moving bottles."
+            return
+        }
         let old = paths.bottlesRoot
         guard newRoot.standardizedFileURL != old.standardizedFileURL else {
             message = "Bottles are already there."

@@ -209,6 +209,25 @@ struct AppEnvironmentUpdateTests {
         #expect(BottlesLocation.read(supportDir: support) == nil)   // override cleared → default
     }
 
+    @Test("relocation refuses when the current bottles root is on an unplugged/unreachable drive")
+    func relocationRefusesUnreachableRoot() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let support = tmp.url.appendingPathComponent("Silo")
+        // Persisted root is on a drive that isn't mounted — neither it nor its parent exists.
+        let gone = tmp.url.appendingPathComponent("EjectedDrive/Silo Bottles")
+        let runner = FakeProcessRunner()
+        let env = AppEnvironment(
+            paths: AppPaths(supportDir: support, bottlesRoot: gone), runner: runner,
+            updater: Updater(runner: runner, appBundleResolver: { nil }))
+        BottlesLocation.write(gone, supportDir: support)   // as if relaunched onto the (now-ejected) drive
+
+        await env.bottles.resetBottlesLocation()
+
+        #expect(env.bottles.message?.lowercased().contains("connect") == true)   // refused, not a vacuous success
+        #expect(BottlesLocation.read(supportDir: support)?.path == gone.path)     // override NOT cleared
+        #expect(!env.bottles.busy)
+    }
+
     // MARK: - applyBackend fan-out
 
     @Test("AppEnvironment fans a backend change out to BOTH the library and the Steam-bottle pane")

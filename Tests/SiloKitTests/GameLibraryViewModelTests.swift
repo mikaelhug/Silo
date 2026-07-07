@@ -509,6 +509,21 @@ struct GameLibraryViewModelTests {
         #expect(fake.invocations.contains { $0.arguments == kill })
     }
 
+    @Test("play is refused while a self-update is installing (it relaunches Silo — a game would be orphaned)")
+    func playRefusedDuringUpdate() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        vm.isUpdating = { true }                       // an inline update is downloading/installing
+
+        await vm.play(game)
+
+        #expect(!vm.isRunning(game))
+        #expect(vm.statusMessage?.lowercased().contains("update") == true)
+        #expect(!fake.invocations.contains { $0.detached })   // nothing spawned (not even Steam)
+    }
+
     @Test("a game exiting on its own clears the running state")
     func gameExitClearsState() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

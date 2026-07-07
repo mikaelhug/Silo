@@ -60,7 +60,9 @@ public final class SteamClientSession {
         guard let pid = steamPID else { return }
         orchestrator.terminate(pid: pid)
         steamPID = nil
-        ledger?.remove(ledgerKey)
+        // Leave the ledger entry: like a game stop, the client may still be dying — dropping it now would let
+        // a relocation/update proceed over a live wineserver. `hasLiveSurvivor` self-prunes it once the PID is
+        // actually gone (the exit observer would too, but we cancel it here).
         steamObserver?.cancel(); steamObserver = nil
     }
 
