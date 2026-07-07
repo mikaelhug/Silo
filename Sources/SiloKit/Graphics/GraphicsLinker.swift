@@ -152,6 +152,39 @@ public struct GraphicsLinker: Sendable {
         }
     }
 
+    /// Place DXMT's `winemetal.dll` into the game **prefix** so wine can actually load it. Load-bearing +
+    /// non-obvious: `winemetal` is a 3rd-party builtin, so wineboot creates NO fakedll placeholder for it in
+    /// the prefix (unlike `d3d11`/`dxgi`, which are standard wine names and DO get one). Wine's import loader
+    /// won't consult the `lib/wine` builtin for a DLL it can't first resolve to a file on the Windows search
+    /// path — so `dxgi`'s import of `winemetal.dll` fails with `c0000135` (STATUS_DLL_NOT_FOUND) and DXMT
+    /// silently falls back to wined3d (→ "no supported feature levels" → the game's graphics-init fails).
+    /// Dropping the winemetal PE into `system32` (x86_64) / `syswow64` (i386) makes the search resolve; the
+    /// `winemetal=b` override then loads the real builtin + its `winemetal.so` unixlib. Placed for every ABI
+    /// the release ships, so wine picks the one matching each game's PE machine type — 32-bit and 64-bit
+    /// games both get DXMT with no per-game selection. Idempotent.
+    ///
+    /// - Parameters:
+    ///   - prefix: the game's Wine prefix (`<bottle>` — its `drive_c/windows/{system32,syswow64}` are seeded).
+    ///   - dxmtLibDir: DXMT's x86_64 PE module dir; its `<arch>-windows` siblings are the source per ABI.
+    public func installDXMTPrefixLoaders(prefix: URL, dxmtLibDir: URL) throws {
+        let sourceRoot = dxmtLibDir.deletingLastPathComponent()
+        let windows = prefix.appendingPathComponent("drive_c/windows")
+        // 64-bit DLLs live in system32, 32-bit in syswow64 (wine's WoW64 layout).
+        let dest: [WineArch: URL] = [
+            .x86_64: windows.appendingPathComponent("system32"),
+            .i386: windows.appendingPathComponent("syswow64"),
+        ]
+        for arch in WineArch.allCases {
+            let src = sourceRoot.appendingPathComponent("\(arch.rawValue)-windows/winemetal.dll")
+            guard let destDir = dest[arch], fileManager.fileExists(atPath: src.path) else { continue }
+            let dst = destDir.appendingPathComponent("winemetal.dll")
+            if fileManager.contentsEqual(atPath: src.path, andPath: dst.path) { continue }   // already placed
+            try fileManager.createDirectory(at: destDir, withIntermediateDirectories: true)
+            if fileManager.fileExists(atPath: dst.path) { try fileManager.removeItem(at: dst) }
+            try fileManager.copyItem(at: src, to: dst)
+        }
+    }
+
     // MARK: - Helpers
 
     /// The idempotency check shared by both overlays: if a representative module (preferring `d3d11.dll`)
