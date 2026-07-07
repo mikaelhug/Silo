@@ -319,6 +319,24 @@ struct AppEnvironmentUpdateTests {
         #expect(!env.bottles.isBlocked())
     }
 
+    @Test("terminateAllOnQuit stops every backend's Steam client and clears its ledger record")
+    func quitTearsDownClientsAndLedger() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let runner = FakeProcessRunner()
+        let env = AppEnvironment(paths: paths, runner: runner)
+        // Bring up the GPTK Steam client — it records a live PID into the durable ledger.
+        env.steamClientSession.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        env.steamClientSession.readinessTimeout = 0        // no readiness wait against the fake
+        await env.steamClientSession.ensureRunning()
+        #expect(env.steamClientSession.isRunning)
+        #expect(env.blockedForBottleWork())                // the live client holds the gate closed
+
+        env.terminateAllOnQuit()
+        #expect(!env.steamClientSession.isRunning)          // client stopped…
+        #expect(!env.blockedForBottleWork())                // …and its ledger record cleared (no orphan left)
+    }
+
     @Test("a cleanly-shut prior run leaves no ledger survivor (gate open on restart)")
     func cleanPriorRunLeavesNoOrphan() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
