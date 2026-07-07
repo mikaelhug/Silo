@@ -77,15 +77,16 @@ struct AppEnvironmentUpdateTests {
         let env = AppEnvironment(
             paths: paths, runner: runner,
             updater: Updater(repo: "test/env-update-newer", currentVersion: "0.0.1",
-                             session: FakeURLProtocol.makeSession(), runner: runner))
+                             session: FakeURLProtocol.makeSession(), runner: runner,
+                             appBundleResolver: { nil }))   // deterministic "not in a bundle"
         await env.bootstrap()
         #expect(env.updates.updateCheck?.isNewer == true)
 
         let before = runner.invocations.count
         await env.updates.installUpdate()
 
-        // Under `swift test`, runningAppBundle() is nil (the xctest bundle has no .app ancestor):
-        // the bundle guard fires BEFORE any download/install.
+        // The injected resolver returns nil (no .app), so the bundle guard fires BEFORE any download/install
+        // — deterministic regardless of how `swift test` resolves the ambient Bundle.main (parallel vs not).
         guard case let .failed(msg) = env.updates.updateState else {
             Issue.record("expected .failed, got \(env.updates.updateState)"); return
         }

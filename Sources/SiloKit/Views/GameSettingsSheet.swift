@@ -31,7 +31,11 @@ struct GameSettingsSheet: View {
         .frame(width: 480, height: 540)
         .task {
             vm = await env.makeGameSettings(appID: game.appID, backend: game.backend)
-            executables = ExecutableResolver.allExecutables(in: game.installURL)
+            // Off the main actor: a large game's install dir can hold tens of thousands of files and may
+            // sit on a slow/external volume, and the exe scan is a full recursive walk — running it inline
+            // would jank the sheet as it opens.
+            let installURL = game.installURL
+            executables = await Task.detached { ExecutableResolver.allExecutables(in: installURL) }.value
         }
     }
 

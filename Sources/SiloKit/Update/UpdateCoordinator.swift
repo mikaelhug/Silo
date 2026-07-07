@@ -41,7 +41,7 @@ public final class UpdateCoordinator {
     /// or on a download/install error. On success it relaunches and never returns.
     public func installUpdate() async {
         guard let check = updateCheck, check.isNewer else { return }
-        guard let appBundle = Updater.runningAppBundle() else {
+        guard let appBundle = updater.appBundleToReplace() else {
             updateState = .failed("Silo isn't running from an installed app bundle.")
             return
         }
