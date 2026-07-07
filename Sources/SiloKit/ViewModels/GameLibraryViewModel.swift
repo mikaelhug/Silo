@@ -260,6 +260,15 @@ public final class GameLibraryViewModel {
             return
         }
         busyGames.insert(game.id); defer { busyGames.remove(game.id) }
+        let config = await configStore.load().config(for: game.appID, backend: game.backend)
+        // A 32-bit game in the GPTK bottle is a dead end — GPTK / D3DMetal is 64-bit-only, so it could only
+        // fall back to wined3d and fail. Refuse up front (BEFORE stopping the other bottle's Steam or
+        // bringing this one up) and steer to DXMT, the 32-bit-capable backend.
+        if orchestrator.isBlocked32BitOnGPTK(app: game, config: config, graphics: game.backend) {
+            setStatus(Self.unsupported32BitMessage(
+                name: game.name, isSteamGame: true, dxmtAvailable: steamInstalled(.dxmt)))
+            return
+        }
         do {
             // Resolve the game's backend → its bottle prefix + prepared runtime (off-main; clones DXMT).
             let cfg = backend
@@ -276,7 +285,6 @@ public final class GameLibraryViewModel {
                 setStatus("\(game.name) needs the Steam client, but it couldn't start\(why).")
                 return
             }
-            let config = await configStore.load().config(for: game.appID, backend: game.backend)
             var launchBackend = backend
             launchBackend.wineBinaryPath = context.wineBinary
             let pid = try await orchestrator.launchInBottle(
@@ -411,6 +419,13 @@ public final class GameLibraryViewModel {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id),
               processes.pid(for: .manual(game.id)) == nil else { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
+        // A 32-bit game on GPTK can't render (GPTK / D3DMetal is 64-bit-only) — refuse before provisioning
+        // its bottle and steer to switching this game's backend to DXMT.
+        if game.backend == .gptk, WindowsExecutable.is32Bit(game.executablePath) {
+            setStatus(Self.unsupported32BitMessage(
+                name: game.name, isSteamGame: false, dxmtAvailable: backend.libDir(for: .dxmt) != nil))
+            return
+        }
         guard await ensureManualBottle(game.id) else { return }
         let cfg = backend
         let context: LaunchContext
@@ -458,6 +473,10 @@ public final class GameLibraryViewModel {
             "No Wine configured."
         case LaunchOrchestrator.LaunchError.executableNotFound(let url):
             "couldn't find the game's .exe (looked in \(url.path)) — pick one in the game's settings."
+        case LaunchOrchestrator.LaunchError.unsupported32BitOnGPTK:
+            // Backstop: the UI refuses 32-bit-on-GPTK earlier with a richer, DXMT-steering message
+            // (unsupported32BitMessage); this covers any launch path that reaches the orchestrator directly.
+            "this is a 32-bit game — GPTK / D3DMetal is 64-bit-only. Use DXMT (Settings → DXMT)."
         case WinePrefixProvisioner.ProvisionError.winebootFailed(let code):
             "the game's bottle failed to initialize (wineboot exited \(code)) — check Wine in Settings."
         case RuntimeVariants.VariantError.cloneFailed(let url, let errno):
@@ -554,23 +573,31 @@ public final class GameLibraryViewModel {
     ) -> String {
         switch backend {
         case .gptk:
-            let lead = "\(name): GPTK / D3DMetal couldn't drive this game's graphics — this class of "
-                + "older DirectX 10/11 titles needs DXMT."
-            let next: String
-            switch (isSteamGame, dxmtAvailable) {
-            case (true, true):
-                next = "Install it in the DXMT Steam bottle and play it from there."
-            case (true, false):
-                next = "Set up DXMT in Settings → DXMT, then install the game in its Steam bottle."
-            case (false, true):
-                next = "Switch this game's graphics backend to DXMT in its settings."
-            case (false, false):
-                next = "Set up DXMT in Settings → DXMT first."
-            }
-            return "\(lead) \(next)"
+            return "\(name): GPTK / D3DMetal couldn't drive this game's graphics — this class of older "
+                + "DirectX 10/11 titles needs DXMT. "
+                + dxmtSteer(isSteamGame: isSteamGame, dxmtAvailable: dxmtAvailable)
         case .dxmt:
             return "\(name): DXMT didn't engage — the game fell back to wined3d and likely failed. "
                 + "Check the DXMT runtime in Settings → DXMT."
+        }
+    }
+
+    /// The message when a 32-bit (i386) game is refused under GPTK. GPTK / D3DMetal is 64-bit-only (Apple
+    /// ships no 32-bit D3DMetal), so 32-bit titles are DXMT-only territory — steer there, adapting to
+    /// whether DXMT is set up. Pure + table-testable.
+    static func unsupported32BitMessage(name: String, isSteamGame: Bool, dxmtAvailable: Bool) -> String {
+        "\(name) is a 32-bit game — GPTK / D3DMetal is 64-bit-only and can't run it. "
+            + dxmtSteer(isSteamGame: isSteamGame, dxmtAvailable: dxmtAvailable)
+    }
+
+    /// Where an (older DirectX 10/11, or 32-bit) title actually belongs — the DXMT-steering suffix shared by
+    /// the graphics-fallback and 32-bit-refusal messages, adapting to Steam-vs-manual and DXMT readiness.
+    private static func dxmtSteer(isSteamGame: Bool, dxmtAvailable: Bool) -> String {
+        switch (isSteamGame, dxmtAvailable) {
+        case (true, true):   "Install it in the DXMT Steam bottle and play it from there."
+        case (true, false):  "Set up DXMT in Settings → DXMT, then install the game in its Steam bottle."
+        case (false, true):  "Switch this game's graphics backend to DXMT in its settings."
+        case (false, false): "Set up DXMT in Settings → DXMT first."
         }
     }
 }

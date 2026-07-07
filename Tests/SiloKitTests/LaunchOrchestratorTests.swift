@@ -269,6 +269,58 @@ struct LaunchPipelineTests {
             .appendingPathComponent("steam_appid.txt").path))
     }
 
+    /// A minimal valid PE with the given COFF machine type (0x014c = i386, 0x8664 = amd64).
+    private func makePE(machine: UInt16, peOffset: Int = 0x40) -> Data {
+        var d = Data(count: peOffset + 6)
+        d[0] = 0x4D; d[1] = 0x5A
+        d[0x3C] = UInt8(peOffset & 0xFF); d[0x3D] = UInt8((peOffset >> 8) & 0xFF)
+        d[peOffset] = 0x50; d[peOffset + 1] = 0x45; d[peOffset + 2] = 0; d[peOffset + 3] = 0
+        d[peOffset + 4] = UInt8(machine & 0xFF); d[peOffset + 5] = UInt8((machine >> 8) & 0xFF)
+        return d
+    }
+
+    @Test("Refuses a 32-bit game on GPTK (64-bit-only), but allows the same exe on DXMT")
+    func refuses32BitOnGPTK() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        try tmp.makeDir("Games/OC2")
+        let exe = tmp.url.appendingPathComponent("Games/OC2/oc2.exe")
+        try makePE(machine: 0x014c).write(to: exe)                       // a real 32-bit (i386) PE
+        let game = ManualGame(name: "OC2", executablePath: exe, backend: .gptk)
+        let log = tmp.url.appendingPathComponent("m.log")
+
+        // GPTK refuses it up front (D3DMetal is 64-bit-only) — no spawn.
+        await #expect {
+            try await orchestrator.launchManualGame(game, backend: backend, graphics: .gptk, prefix: tmp.url, logURL: log)
+        } throws: { error in
+            if case LaunchOrchestrator.LaunchError.unsupported32BitOnGPTK = error { true } else { false }
+        }
+        #expect(fake.invocations.isEmpty)                                // refused before spawning
+
+        // DXMT (32-bit-capable) does NOT refuse it — it spawns.
+        let pid = try await orchestrator.launchManualGame(
+            game, backend: backend, graphics: .dxmt, prefix: tmp.url, logURL: log)
+        #expect(pid == 4242)
+    }
+
+    @Test("Does NOT refuse a 64-bit game on GPTK")
+    func allows64BitOnGPTK() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fake = FakeProcessRunner()
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        try tmp.makeDir("Games/G")
+        let exe = tmp.url.appendingPathComponent("Games/G/g.exe")
+        try makePE(machine: 0x8664).write(to: exe)                       // 64-bit (amd64) PE
+        let game = ManualGame(name: "G", executablePath: exe, backend: .gptk)
+
+        let pid = try await orchestrator.launchManualGame(
+            game, backend: backend, graphics: .gptk, prefix: tmp.url, logURL: tmp.url.appendingPathComponent("m.log"))
+        #expect(pid == 4242)
+    }
+
     @Test("launchManualGame under DXMT overlays DXMT into the runtime and forces its builtin d3d overrides")
     func manualGameDXMT() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
