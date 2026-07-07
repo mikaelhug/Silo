@@ -61,6 +61,20 @@ public struct SystemProcessRunner: ProcessRunning {
         return errno == EPERM
     }
 
+    public func startTime(pid: Int32) -> Date? {
+        guard pid > 0 else { return nil }
+        // KERN_PROC_PID fills a `kinfo_proc` for one PID. A missing PID returns rc 0 but leaves `size` 0
+        // (the record isn't written), so the size check — not just rc — is what distinguishes dead/unknown.
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        let rc = sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
+        guard rc == 0, size > 0 else { return nil }
+        let tv = info.kp_proc.p_starttime
+        guard tv.tv_sec != 0 || tv.tv_usec != 0 else { return nil }
+        return Date(timeIntervalSince1970: Double(tv.tv_sec) + Double(tv.tv_usec) / 1_000_000)
+    }
+
     public func terminate(pid: Int32) {
         guard pid > 0 else { return }
         kill(pid, SIGTERM)

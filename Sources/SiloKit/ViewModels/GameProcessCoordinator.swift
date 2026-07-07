@@ -18,14 +18,19 @@ enum GameID: Hashable, Sendable {
 @Observable
 final class GameProcessCoordinator {
     private let orchestrator: LaunchOrchestrator
+    /// Crash-durable shadow of the live PIDs (see `ProcessLedger`): survives a hard crash so a relaunched
+    /// Silo still refuses to move/update a bottle out from under an orphaned wineserver. nil in tests that
+    /// don't exercise it.
+    private let ledger: ProcessLedger?
     /// Live launch tracking (values are wine loader PIDs). Queried via `pid(for:)` / `anythingRunning`.
     private(set) var pids: [GameID: Int32] = [:]
     private var observers: [GameID: any ProcessObservation] = [:]
     /// Per-launch watchers that surface a silent backend→wined3d graphics fallback (keyed like the PIDs).
     private var monitors: [GameID: GraphicsFallbackMonitor] = [:]
 
-    init(orchestrator: LaunchOrchestrator) {
+    init(orchestrator: LaunchOrchestrator, ledger: ProcessLedger? = nil) {
         self.orchestrator = orchestrator
+        self.ledger = ledger
     }
 
     /// Defensive teardown (a process-lifetime singleton in the app, so it normally never fires): cancel
@@ -45,6 +50,7 @@ final class GameProcessCoordinator {
     func track(_ id: GameID, pid: Int32) {
         observers[id]?.cancel()
         pids[id] = pid
+        ledger?.record(Self.ledgerKey(id), pid: pid)
         observers[id] = orchestrator.observeExit(pid: pid) { [weak self] in
             Task { @MainActor in
                 guard let self, self.pids[id] == pid else { return }
@@ -69,6 +75,7 @@ final class GameProcessCoordinator {
     /// Stop tracking a game: cancel its exit observer, stop its graphics monitor, drop its PID.
     func clear(_ id: GameID) {
         pids[id] = nil
+        ledger?.remove(Self.ledgerKey(id))
         observers[id]?.cancel(); observers[id] = nil
         monitors[id]?.stop(); monitors[id] = nil
     }
@@ -85,6 +92,18 @@ final class GameProcessCoordinator {
     /// `taskkill` cleanup. Wine turns SIGTERM into terminating the hosted game; only PIDs Silo spawned
     /// are signalled, so a co-resident Steam client is never touched.
     func terminateAllSync() {
-        for pid in pids.values { orchestrator.terminate(pid: pid) }
+        for (id, pid) in pids {
+            orchestrator.terminate(pid: pid)
+            ledger?.remove(Self.ledgerKey(id))   // intended-dead: clear now so a quick relaunch isn't blocked
+        }
+    }
+
+    /// The opaque `ProcessLedger` key for a game — stable across launches so a record upserts/removes in
+    /// place. (The ledger only needs a unique string per owner; it never decodes this back into a `GameID`.)
+    private static func ledgerKey(_ id: GameID) -> String {
+        switch id {
+        case let .steam(appID, backend): "steam:\(appID):\(backend.rawValue)"
+        case let .manual(uuid): "manual:\(uuid.uuidString)"
+        }
     }
 }

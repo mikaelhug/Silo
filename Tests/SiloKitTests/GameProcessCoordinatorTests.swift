@@ -101,6 +101,48 @@ struct GameProcessCoordinatorTests {
         #expect(Set(fake.terminatedPIDs) == [100, 200])
     }
 
+    /// A coordinator wired to a real `ProcessLedger` over a temp file, plus that ledger + fake runner.
+    private func makeWithLedger(_ tmp: TempDir) -> (GameProcessCoordinator, ProcessLedger, FakeProcessRunner) {
+        let fake = FakeProcessRunner()
+        let ledger = ProcessLedger(url: tmp.url.appendingPathComponent("running.json"), runner: fake)
+        let coordinator = GameProcessCoordinator(
+            orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()), ledger: ledger)
+        return (coordinator, ledger, fake)
+    }
+
+    @Test("track shadows the launch into the crash-durable ledger")
+    func ledgerRecordsOnTrack() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (coordinator, ledger, fake) = makeWithLedger(tmp)
+        fake.setAlive(4242, true)                  // the ledger only records a live PID (it reads its start time)
+        #expect(!ledger.hasLiveSurvivor())
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 4242)
+        #expect(ledger.hasLiveSurvivor())
+    }
+
+    @Test("clear removes the ledger entry even while the PID is still alive (active removal, not prune)")
+    func ledgerClearRemovesLiveEntry() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (coordinator, ledger, fake) = makeWithLedger(tmp)
+        fake.setAlive(4242, true)
+        coordinator.track(.manual(UUID(1)), pid: 4242)
+        #expect(ledger.hasLiveSurvivor())
+        coordinator.clear(.manual(UUID(1)))
+        #expect(!ledger.hasLiveSurvivor())         // gone despite 4242 still alive ⇒ clear removed it
+    }
+
+    @Test("terminateAllSync clears the ledger (processes are intended-dead at quit)")
+    func ledgerClearedAtQuit() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (coordinator, ledger, fake) = makeWithLedger(tmp)
+        fake.setAlive(100, true); fake.setAlive(200, true)
+        coordinator.track(.steam(appID: 220, backend: .gptk), pid: 100)
+        coordinator.track(.manual(UUID(2)), pid: 200)
+        #expect(ledger.hasLiveSurvivor())
+        coordinator.terminateAllSync()
+        #expect(!ledger.hasLiveSurvivor())
+    }
+
     @Test("the same appID under GPTK and DXMT are INDEPENDENT keys (both bottle copies tracked at once)")
     func sameAppIDBothBackendsAreIndependent() throws {
         let (coordinator, _) = make()

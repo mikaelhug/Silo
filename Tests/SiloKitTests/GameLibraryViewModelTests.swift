@@ -470,6 +470,45 @@ struct GameLibraryViewModelTests {
         })
     }
 
+    /// Manifest + install dir for a Steam game with a specific exe basename (so two games can be made to
+    /// share one — the `taskkill /IM` collision case).
+    private func writeInstalledGame(
+        _ paths: AppPaths, appID: Int, name: String, dir: String, exe: String) throws {
+        try writeManifest(paths, #""AppState" { "appid" "\#(appID)" "name" "\#(name)" "StateFlags" "4" "installdir" "\#(dir)" "LastOwner" "76561197960287930" "SizeOnDisk" "12000000" }"#, appID: appID)
+        let common = paths.steamBottleClientDir.appendingPathComponent("steamapps/common/\(dir)")
+        try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: common.appendingPathComponent(exe).path, contents: Data("MZ".utf8))
+    }
+
+    @Test("stop skips taskkill /IM when a co-resident sibling shares the exe basename, but fires it otherwise")
+    func stopAvoidsSiblingImageCollision() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        // Two DIFFERENT Steam games in the SAME (GPTK) bottle whose exes share a basename.
+        try writeInstalledGame(paths, appID: 220, name: "A", dir: "GameA", exe: "launcher.exe")
+        try writeInstalledGame(paths, appID: 400, name: "B", dir: "GameB", exe: "launcher.exe")
+        await vm.load()
+        let a = try #require(vm.games.first { $0.appID == 220 })
+        let b = try #require(vm.games.first { $0.appID == 400 })
+        await vm.play(a)
+        await vm.play(b)
+        #expect(vm.isRunning(a) && vm.isRunning(b))
+        let loaderA = try #require(vm.pid(for: a))
+        let kill: [String] = ["taskkill", "/F", "/IM", "launcher.exe"]
+
+        // Stop A while B — same bottle, same image name — is live: /IM would take B down too, so it's dropped.
+        await vm.stop(a)
+        #expect(!vm.isRunning(a))
+        #expect(fake.terminatedPIDs.contains(loaderA))                    // SIGTERM the loader still happens
+        #expect(!fake.invocations.contains { $0.arguments == kill })      // but NOT the bystander-killing /IM
+
+        // With A gone, B has no co-resident sharing its image — /IM is safe and fires.
+        await vm.stop(b)
+        #expect(fake.invocations.contains { $0.arguments == kill })
+    }
+
     @Test("a game exiting on its own clears the running state")
     func gameExitClearsState() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

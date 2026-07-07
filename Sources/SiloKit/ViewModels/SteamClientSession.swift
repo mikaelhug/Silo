@@ -11,6 +11,10 @@ import Foundation
 public final class SteamClientSession {
     private let bottle: SteamBottle
     private let orchestrator: LaunchOrchestrator
+    /// Crash-durable shadow of the live client PID (see `ProcessLedger`) — an orphaned Steam client is as
+    /// much a live wineserver on a bottle as a game, so relocation/update must refuse for it too after a
+    /// hard crash. nil in tests that don't exercise it.
+    private let ledger: ProcessLedger?
     private var wineBinary: URL?
 
     /// The running client's PID (set only after the launch `await`, so concurrent callers coalesce).
@@ -25,10 +29,14 @@ public final class SteamClientSession {
     /// The last launch failure message (for the UI), cleared on a successful launch.
     public private(set) var launchError: String?
 
-    public init(bottle: SteamBottle, orchestrator: LaunchOrchestrator) {
+    public init(bottle: SteamBottle, orchestrator: LaunchOrchestrator, ledger: ProcessLedger? = nil) {
         self.bottle = bottle
         self.orchestrator = orchestrator
+        self.ledger = ledger
     }
+
+    /// The client's stable `ProcessLedger` key (one Steam client per backend bottle).
+    private var ledgerKey: String { "client:\(bottle.backend.rawValue)" }
 
     /// Defensive teardown: the live VMs are process-lifetime singletons, so this normally never fires, but
     /// it ensures the exit observation + any in-flight launch don't outlive the session if that ever changes.
@@ -52,6 +60,7 @@ public final class SteamClientSession {
         guard let pid = steamPID else { return }
         orchestrator.terminate(pid: pid)
         steamPID = nil
+        ledger?.remove(ledgerKey)
         steamObserver?.cancel(); steamObserver = nil
     }
 
@@ -202,8 +211,13 @@ public final class SteamClientSession {
         guard let pid = await launchSteamProcess() else { return }
         steamPID = pid
         launchError = nil
+        ledger?.record(ledgerKey, pid: pid)
         steamObserver = orchestrator.observeExit(pid: pid) { [weak self] in
-            Task { @MainActor in if self?.steamPID == pid { self?.steamPID = nil } }
+            Task { @MainActor in
+                guard let self, self.steamPID == pid else { return }
+                self.steamPID = nil
+                self.ledger?.remove(self.ledgerKey)
+            }
         }
         await awaitSteamReady()
     }

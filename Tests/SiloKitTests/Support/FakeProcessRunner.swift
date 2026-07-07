@@ -33,6 +33,9 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
 
     private var _nextSpawnPID: Int32 = 4242
     private var _alivePIDs: Set<Int32> = []
+    /// Synthetic start times backing `startTime(pid:)` (for `ProcessLedger` identity). Auto-assigned per
+    /// PID on first query of a live PID; a test overrides one via `setStartTime` to simulate PID reuse.
+    private var _startTimes: [Int32: Date] = [:]
     private var _terminatedPIDs: [Int32] = []
     private var _exitHandlers: [Int32: [(id: Int, run: @Sendable () -> Void)]] = [:]
     private var _nextObservationID = 0
@@ -54,6 +57,21 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
         handlers.forEach { $0() }
     }
     func isRunning(pid: Int32) -> Bool { lock.withLock { _alivePIDs.contains(pid) } }
+
+    /// Mirrors the real runner: a start time only for a LIVE pid, deterministic per pid, stable across
+    /// calls. `setStartTime` overrides it to simulate a reused pid (same pid, different start time).
+    func startTime(pid: Int32) -> Date? {
+        lock.withLock {
+            guard _alivePIDs.contains(pid) else { return nil }
+            if let existing = _startTimes[pid] { return existing }
+            let assigned = Date(timeIntervalSince1970: 1_700_000_000 + Double(pid))
+            _startTimes[pid] = assigned
+            return assigned
+        }
+    }
+
+    /// Override a PID's start time (simulate PID reuse for `ProcessLedger` tests).
+    func setStartTime(_ pid: Int32, _ date: Date) { lock.withLock { _startTimes[pid] = date } }
 
     /// Record a SIGTERM and stop reporting the PID as alive (mirrors the real runner; does NOT fire
     /// `observeExit` handlers, matching SIGTERM-vs-kqueue-exit semantics).

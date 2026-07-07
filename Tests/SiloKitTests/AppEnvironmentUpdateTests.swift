@@ -294,4 +294,42 @@ struct AppEnvironmentUpdateTests {
         await env.bootstrap()
         #expect(env.dxmtRuntime.defaultName == "dxmt-v0.72-cx26.2.0")
     }
+
+    // MARK: - Crash-orphan gate (ProcessLedger)
+
+    @Test("a process orphaned by a prior run's crash blocks the relocation/update gate, then clears when it exits")
+    func crashOrphanBlocksBottleGate() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let runner = FakeProcessRunner()
+        // A prior run recorded a live game PID into the durable ledger, then crashed before clearing it.
+        let priorRun = ProcessLedger(url: paths.processLedgerFile, runner: runner)
+        runner.setAlive(4242, true)
+        priorRun.record("steam:220:gptk", pid: 4242)
+
+        // A fresh AppEnvironment builds its own ledger over the same file.
+        let env = AppEnvironment(paths: paths, runner: runner)
+        #expect(!env.anythingRunning)          // nothing running in THIS session (in-memory is empty)…
+        #expect(env.blockedForBottleWork())    // …but the durable gate sees the still-alive orphan
+        #expect(env.bottles.isBlocked())       // wired: relocation refuses
+        #expect(env.updates.isBlocked())       // wired: self-update refuses
+
+        runner.setAlive(4242, false)           // the orphan finally exits
+        #expect(!env.blockedForBottleWork())   // gate reopens (and prunes the dead entry)
+        #expect(!env.bottles.isBlocked())
+    }
+
+    @Test("a cleanly-shut prior run leaves no ledger survivor (gate open on restart)")
+    func cleanPriorRunLeavesNoOrphan() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let runner = FakeProcessRunner()
+        let priorRun = ProcessLedger(url: paths.processLedgerFile, runner: runner)
+        runner.setAlive(4242, true)
+        priorRun.record("steam:220:gptk", pid: 4242)
+        priorRun.remove("steam:220:gptk")      // clean quit cleared it
+
+        let env = AppEnvironment(paths: paths, runner: runner)
+        #expect(!env.blockedForBottleWork())
+    }
 }

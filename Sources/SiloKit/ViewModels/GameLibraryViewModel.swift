@@ -52,7 +52,8 @@ public final class GameLibraryViewModel {
         backend: BackendConfig,
         session: SteamClientSession,
         dxmtSession: SteamClientSession? = nil,
-        provisioner: WinePrefixProvisioner
+        provisioner: WinePrefixProvisioner,
+        ledger: ProcessLedger? = nil
     ) {
         self.bottle = bottle
         self.discovery = discovery
@@ -63,7 +64,7 @@ public final class GameLibraryViewModel {
         self.session = session
         self.dxmtSession = dxmtSession
         self.provisioner = provisioner
-        self.processes = GameProcessCoordinator(orchestrator: orchestrator)
+        self.processes = GameProcessCoordinator(orchestrator: orchestrator, ledger: ledger)
     }
 
     /// The Steam client session that owns a given backend's bottle. Falls back to the GPTK session when a
@@ -375,11 +376,36 @@ public final class GameLibraryViewModel {
     /// Keyed by (appID, backend), so Stop on the non-running bottle copy is a clean no-op.
     public func stop(_ game: SteamApp) async {
         guard let pid = processes.pid(for: gameID(game)) else { return }
-        let config = await configStore.load().config(for: game.appID, backend: game.backend)
+        let state = await configStore.load()
+        let config = state.config(for: game.appID, backend: game.backend)
         let exeName = orchestrator.resolvedExecutableName(app: game, config: config)
+        // `taskkill /IM <image>` matches by image name across the WHOLE wineserver (one per bottle). Two
+        // DIFFERENT Steam games co-resident in this backend's shared bottle CAN run at once, so if another
+        // one happens to share this exe's basename, /IM would take it down too. Drop to a SIGTERM-only stop
+        // (the loader PID) in that rare case rather than risk a bystander. Manual games each get their own
+        // isolated bottle, so they never share this wineserver.
+        let siblings = coResidentImageNames(excluding: game, in: state)
+        let safeExeName = exeName.flatMap { siblings.contains($0) ? nil : $0 }
         await orchestrator.stopGame(
-            pid: pid, exeName: exeName, prefix: paths.steamBottle(game.backend), backend: backend)
+            pid: pid, exeName: safeExeName, prefix: paths.steamBottle(game.backend), backend: backend)
         processes.clear(gameID(game), ifPID: pid)
+    }
+
+    /// Exe basenames of OTHER Steam games currently running in the SAME backend's shared Steam bottle
+    /// (they share one wineserver, so a `taskkill /IM` would hit them). Excludes `game` itself and any game
+    /// in a different bottle. Used by `stop` to avoid a basename collision.
+    private func coResidentImageNames(excluding game: SteamApp, in state: AppState) -> Set<String> {
+        var names: Set<String> = []
+        for other in games
+        where other.backend == game.backend
+            && (other.appID != game.appID)
+            && processes.pid(for: gameID(other)) != nil {
+            if let name = orchestrator.resolvedExecutableName(
+                app: other, config: state.config(for: other.appID, backend: other.backend)) {
+                names.insert(name)
+            }
+        }
+        return names
     }
 
     /// SIGTERM every game Silo launched (Steam + manual), synchronously. Used at app quit (where there's no

@@ -13,10 +13,10 @@ public final class BackendServices {
     public let bottleVM: SteamBottleViewModel
 
     init(backend: GraphicsBackend, runner: ProcessRunning, paths: AppPaths,
-         orchestrator: LaunchOrchestrator, setupGate: SteamSetupGate) {
+         orchestrator: LaunchOrchestrator, setupGate: SteamSetupGate, ledger: ProcessLedger) {
         self.backend = backend
         self.bottle = SteamBottle(runner: runner, paths: paths, backend: backend)
-        self.session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        self.session = SteamClientSession(bottle: bottle, orchestrator: orchestrator, ledger: ledger)
         self.bottleVM = SteamBottleViewModel(bottle: bottle, session: session, setupGate: setupGate)
     }
 }
@@ -64,6 +64,10 @@ public final class AppEnvironment {
     /// The DXMT Steam bottle's client session (one Steam install/login per backend).
     public var dxmtClientSession: SteamClientSession { services(for: .dxmt).session }
     private let updater: Updater
+    /// Crash-durable record of the processes Silo has launched into a bottle — the relocation/update gate
+    /// consults it (`blockedForBottleWork`) so a relaunched Silo (after a hard crash) still refuses while a
+    /// prior run's game/client is alive. See `ProcessLedger`.
+    private let processLedger: ProcessLedger
     /// The inline self-update flow (check / download / relaunch) — Settings → General → Updates.
     public let updates: UpdateCoordinator
     /// The bottles-location move flow (Settings → General → Bottles).
@@ -83,6 +87,8 @@ public final class AppEnvironment {
         self.updater = updater
         self.updates = UpdateCoordinator(updater: updater, updatesDir: paths.updatesDir)
         self.bottles = BottlesRelocationCoordinator(paths: paths, updater: updater)
+        let processLedger = ProcessLedger(url: paths.processLedgerFile, runner: runner)
+        self.processLedger = processLedger
 
         let configStore = ConfigStore(paths: paths)
         let linker = GraphicsLinker()
@@ -114,7 +120,8 @@ public final class AppEnvironment {
         var backends: [GraphicsBackend: BackendServices] = [:]
         for backend in GraphicsBackend.allCases {
             backends[backend] = BackendServices(
-                backend: backend, runner: runner, paths: paths, orchestrator: orchestrator, setupGate: setupGate)
+                backend: backend, runner: runner, paths: paths, orchestrator: orchestrator,
+                setupGate: setupGate, ledger: processLedger)
         }
         self.backends = backends
 
@@ -122,7 +129,7 @@ public final class AppEnvironment {
             bottle: backends[.gptk]!.bottle, discovery: discovery, orchestrator: orchestrator,
             configStore: configStore, paths: paths, backend: initialBackend,
             session: backends[.gptk]!.session, dxmtSession: backends[.dxmt]?.session,
-            provisioner: WinePrefixProvisioner(runner: runner))
+            provisioner: WinePrefixProvisioner(runner: runner), ledger: processLedger)
         self.gameLibrary = gameLibrary
 
         backendSettings.onChange = { [weak self] in self?.applyBackend($0) }
@@ -158,10 +165,11 @@ public final class AppEnvironment {
                 self?.gameLibrary.stopOtherSteamClients(except: backend)
             }
         }
-        // Relocation must refuse while anything runs in a bottle (see `anythingRunning`).
-        bottles.isBlocked = { [weak self] in self?.anythingRunning ?? true }
+        // Relocation must refuse while anything runs in a bottle (see `anythingRunning`). Both gates
+        // re-probe the crash-orphan ledger at the decision point (a button press — not a hot path).
+        bottles.isBlocked = { [weak self] in self?.blockedForBottleWork() ?? true }
         // A self-update relaunches Silo (tearing everything down), so refuse it while a game/client is live.
-        updates.isBlocked = { [weak self] in self?.anythingRunning ?? true }
+        updates.isBlocked = { [weak self] in self?.blockedForBottleWork() ?? true }
         // Refuse launches while bottles are being moved (the prefixes are being copied off-volume + deleted).
         gameLibrary.isRelocating = { [weak self] in self?.bottles.busy ?? false }
     }
@@ -210,8 +218,20 @@ public final class AppEnvironment {
     /// True while any game OR any bottle's Steam client is live — relocation is refused then (we'd be
     /// moving prefixes out from under running wineservers). Checks EVERY backend's session: a live DXMT
     /// client is just as much a running wineserver as the GPTK one.
+    /// Live, in-memory "is anything running in a bottle right now" — cheap and never stale, so it's safe to
+    /// read in a SwiftUI body (it drives the Move/Update button's disabled state). It does NOT probe the
+    /// crash-durable ledger; that (a file read + per-PID syscalls) belongs only at the action gate, see
+    /// `blockedForBottleWork`.
     public var anythingRunning: Bool {
         gameLibrary.isAnythingRunning || backends.values.contains { $0.session.isRunning }
+    }
+
+    /// The relocation/update gate — evaluated at the moment the user acts (a button press, never a hot
+    /// path), so it can afford the durable check: refuse while anything runs in a bottle now, OR while a
+    /// process orphaned by a PRIOR run's hard crash is still alive (its in-memory tracking died with that
+    /// run; moving/updating a bottle out from under its live wineserver would corrupt it).
+    func blockedForBottleWork() -> Bool {
+        anythingRunning || processLedger.hasLiveSurvivor()
     }
 
     /// Best-effort synchronous teardown on app quit (and before a self-update relaunch): SIGTERM every game
