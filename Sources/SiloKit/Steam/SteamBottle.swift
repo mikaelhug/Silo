@@ -193,11 +193,20 @@ public struct SteamBottle: Sendable {
         }
     }
 
-    /// If a SIBLING backend's bottle already has a complete Steam client, seed THIS bottle from it by
-    /// cloning the client (+ its core fonts) instead of re-downloading ~242 MB and re-extracting fonts —
-    /// the client files are identical across bottles; only the per-prefix login differs, so it's reset for
-    /// a fresh sign-in. Near-instant on APFS (copy-on-write). Returns whether it seeded. Best-effort: any
-    /// failure returns false so the caller falls back to a normal download install.
+    /// Per-instance Steam state that must NEVER be seeded from another bottle — the game library + its
+    /// manifests, the signed-in account, and regenerable caches. Only the CLIENT binaries (steamui.dll,
+    /// CEF, the dlls) are identical across bottles; copying these dirs would give the new bottle the other's
+    /// installed games (which discovery then lists TWICE — once per backend) and its login. Steam recreates
+    /// `config`/`userdata` fresh on first launch, so a truly-fresh bottle needs none of them.
+    static let seedExcludedEntries: Set<String> =
+        ["steamapps", "userdata", "config", "logs", "dumps", "appcache", "depotcache"]
+
+    /// If a SIBLING backend's bottle already has a complete Steam client, seed THIS bottle's CLIENT BINARIES
+    /// from it (+ core fonts) instead of re-downloading ~242 MB and re-running the first-run warm-up — the
+    /// client files are identical across bottles. It copies ONLY the client: the game library, login, and
+    /// caches (`seedExcludedEntries` + `ssfn*`) are skipped, so the new bottle is genuinely fresh — no
+    /// inherited games, no sign-in. Near-instant on APFS (per-entry copy-on-write). Returns whether it
+    /// seeded. Best-effort: any failure returns false so the caller falls back to a normal download install.
     func seedFromCompleteBottle(wine: URL?) async -> Bool {
         guard let wine, !isClientFullyDownloaded else { return false }
         guard let source = GraphicsBackend.allCases.first(where: {
@@ -205,14 +214,19 @@ public struct SteamBottle: Sendable {
         }) else { return false }
         do {
             try await provision(wine: wine)   // this bottle still needs its own valid Wine prefix
-            // Clone the Steam client dir (create its parent; clear any partial dst first — clonefile needs
-            // the destination to not exist).
+            // Seed ONLY the client binaries: clone each top-level entry of the source Steam install EXCEPT
+            // the per-instance state (games/library/login/caches). Per-entry clones (clonefile needs each
+            // destination to not exist) into a freshly-emptied client dir.
             let srcClient = paths.steamBottleClientDir(source)
-            try fileManager.createDirectory(
-                at: clientDir.deletingLastPathComponent(), withIntermediateDirectories: true)
             if fileManager.fileExists(atPath: clientDir.path) { try fileManager.removeItem(at: clientDir) }
-            try Filesystem.clone(from: srcClient, to: clientDir, using: fileManager)
-            // Clone the core fonts too (skips the per-bottle font extraction).
+            try fileManager.createDirectory(at: clientDir, withIntermediateDirectories: true)
+            let entries = try fileManager.contentsOfDirectory(at: srcClient, includingPropertiesForKeys: nil)
+            for entry in entries {
+                let name = entry.lastPathComponent
+                if Self.seedExcludedEntries.contains(name.lowercased()) || name.hasPrefix("ssfn") { continue }
+                try Filesystem.clone(from: entry, to: clientDir.appendingPathComponent(name), using: fileManager)
+            }
+            // Clone the core fonts too (skips the per-bottle font extraction) — shared, not account state.
             let srcFonts = paths.steamBottle(source).appendingPathComponent("drive_c/windows/Fonts")
             let dstFonts = prefixDir.appendingPathComponent("drive_c/windows/Fonts")
             if fileManager.fileExists(atPath: srcFonts.appendingPathComponent("Arial.TTF").path) {
@@ -221,7 +235,6 @@ public struct SteamBottle: Sendable {
                 if fileManager.fileExists(atPath: dstFonts.path) { try? fileManager.removeItem(at: dstFonts) }
                 try? Filesystem.clone(from: srcFonts, to: dstFonts, using: fileManager)
             }
-            try? resetLogin()   // the login is per-prefix — sign in fresh in this bottle
             return true
         } catch {
             return false

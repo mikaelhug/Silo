@@ -261,7 +261,7 @@ struct SteamBottleTests {
         #expect(fake.invocations.count == extractRunsBefore)
     }
 
-    @Test("seedFromCompleteBottle clones a sibling's complete client + fonts instead of downloading")
+    @Test("seedFromCompleteBottle clones a sibling's CLIENT (not its games/login) + fonts, no download")
     func seedFromSibling() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
@@ -275,6 +275,14 @@ struct SteamBottleTests {
         let gptkFonts = paths.steamBottle(.gptk).appendingPathComponent("drive_c/windows/Fonts")
         try FileManager.default.createDirectory(at: gptkFonts, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: gptkFonts.appendingPathComponent("Arial.TTF").path, contents: Data("F".utf8))
+        // …plus per-instance state that must NOT be seeded: installed games + a saved login.
+        let gptkApps = gptkSteam.appendingPathComponent("steamapps")
+        try FileManager.default.createDirectory(at: gptkApps, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: gptkApps.appendingPathComponent("appmanifest_220.acf").path, contents: Data("acf".utf8))
+        let gptkConfig = gptkSteam.appendingPathComponent("config")
+        try FileManager.default.createDirectory(at: gptkConfig, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: gptkConfig.appendingPathComponent("loginusers.vdf").path, contents: Data("login".utf8))
+        FileManager.default.createFile(atPath: gptkSteam.appendingPathComponent("ssfn12345").path, contents: Data("tok".utf8))
 
         // DXMT bottle: fresh — seeds from the GPTK sibling.
         let dxmt = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
@@ -286,6 +294,13 @@ struct SteamBottleTests {
         #expect(dxmt.hasCoreFonts)                      // fonts cloned too
         // No SteamSetup download-install ran — provisioned + cloned only.
         #expect(!fake.invocations.contains { $0.arguments.contains { $0.hasSuffix("SteamSetup.exe") } })
+        // The game library + login are NOT seeded (the fix): the new bottle is fresh, so discovery can't
+        // list the sibling's games under this backend too, and there's no inherited sign-in.
+        let dxmtSteam = paths.steamBottleClientDir(.dxmt)
+        #expect(FileManager.default.fileExists(atPath: dxmtSteam.appendingPathComponent("steamui.dll").path))   // client IS seeded
+        #expect(!FileManager.default.fileExists(atPath: dxmtSteam.appendingPathComponent("steamapps").path))    // games are NOT
+        #expect(!FileManager.default.fileExists(atPath: dxmtSteam.appendingPathComponent("config").path))       // login is NOT
+        #expect(!FileManager.default.fileExists(atPath: dxmtSteam.appendingPathComponent("ssfn12345").path))    // machine token NOT
 
         // Returns false when no sibling has a complete client (nothing to clone → normal install path).
         let tmp2 = try TempDir(); defer { tmp2.cleanup() }
