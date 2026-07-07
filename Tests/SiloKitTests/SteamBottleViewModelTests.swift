@@ -110,6 +110,18 @@ struct SteamBottleViewModelTests {
         #expect(!vm.busy)
     }
 
+    @Test("Launch Steam refuses while a game runs in the other bottle (one account, one client)")
+    func launchSteamRefusesCrossBottleGame() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)          // a GPTK bottle VM
+        paths.createWarmedSteamClient()
+        vm.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        vm.otherBottleRunningGame = { .dxmt }      // a game is live in the DXMT bottle
+        await vm.launchSteam()
+        #expect(vm.status.contains("DXMT"))                        // refused, pointing at the other bottle
+        #expect(!fake.invocations.contains { $0.detached })        // no second client was brought up
+    }
+
     @Test("setUp surfaces a 'Setup failed' status when the silent install fails")
     func setUpFailure() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
