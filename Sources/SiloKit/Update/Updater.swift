@@ -8,17 +8,23 @@ public struct Updater: Sendable {
     private let currentVersion: String
     private let session: URLSession
     private let runner: ProcessRunning
+    /// Resolver for the running `.app` bundle to replace on self-update. Injectable so tests can pin it —
+    /// the default reads the ambient `Bundle.main`, which resolves differently between `swift test`
+    /// invocation modes (parallel vs `--no-parallel`), which made the no-bundle assertion flaky.
+    private let appBundleResolver: @Sendable () -> URL?
 
     public init(
         repo: String = Silo.updateRepo,
         currentVersion: String = Silo.version,
         session: URLSession = .shared,
-        runner: ProcessRunning = SystemProcessRunner()
+        runner: ProcessRunning = SystemProcessRunner(),
+        appBundleResolver: @escaping @Sendable () -> URL? = { Updater.runningAppBundle() }
     ) {
         self.repo = repo
         self.currentVersion = currentVersion
         self.session = session
         self.runner = runner
+        self.appBundleResolver = appBundleResolver
     }
 
     public enum UpdateError: Error, Sendable, Equatable {
@@ -164,6 +170,10 @@ public struct Updater: Sendable {
             logURL: FileManager.default.temporaryDirectory.appendingPathComponent("silo-relaunch.log"))
         exit(0)
     }
+
+    /// The running `.app` to replace on self-update, via the injected resolver (default = the static
+    /// `runningAppBundle()`). Callers use this instance accessor so tests can substitute a fixed result.
+    public func appBundleToReplace() -> URL? { appBundleResolver() }
 
     /// The enclosing `.app` of the running executable (the bundle to replace), or nil when running
     /// outside a bundle (e.g. `swift run` in development or a CLI invocation) — in which case there is
