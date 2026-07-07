@@ -3,6 +3,19 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🖥️ High Resolution Mode: pair LogPixels with RetinaMode (2026-07-07, on-device validated).** The Retina
+  toggle wrote only `HKCU\Software\Wine\Mac Driver\RetinaMode`, so turning it on made game/UI text render
+  tiny (Wine renders at native backing pixels with no DPI compensation). That's the missing half of what
+  CrossOver calls "High Resolution Mode" — it reports **192 DPI** alongside RetinaMode so the UI scales up to
+  match. `WineTools.setRetinaMode` now writes the **coupled pair**: `RetinaMode` (y/n) **and**
+  `HKCU\Control Panel\Desktop\LogPixels` (192/96), so retina is never tiny and the two can't drift; LogPixels
+  is only ever written here (192 DPI on a non-retina bottle would just bloat the UI). Validated on-device in
+  the DXMT bottle: Overcooked 2 runs on DXMT (feature level 11_1) crisp + legible. Two findings recorded:
+  (1) **second monitor stays live in fullscreen** because Silo never enables `CaptureDisplaysForFullscreen`
+  (Wine's default-off = non-capturing borderless fullscreen; capture=y is what blanks other displays).
+  (2) **games must be launched via Silo, not the co-resident Steam client's Play button** — Steam runs on the
+  BASE runtime with no DXMT override, so a game it spawns falls to wined3d → "None of the requested D3D
+  feature levels" → `InitializeEngineGraphics failed` (see the `silo-steam-launch-gotcha` note).
 - **🔎 Dependency + per-runtime audit vs AppleGamingWiki (2026-07-06) — two gaps closed, on-device validated.**
   - **Core fonts (dependency gap).** Wine ships no MS TrueType fonts (the bottle's `windows/Fonts` was
     empty), which the Wine-Steam community flags as blank/garbled text in the client UI + games. `setUp()`
