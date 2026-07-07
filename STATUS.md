@@ -3,6 +3,62 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🐛 Adversarial correctness pass — 10 bugs fixed (2026-07-07, `swift build` clean + `Scripts/test.sh`
+  green, +2 tests).** Two independent adversarial reviewers swept the GPTK bottle path for BUGS (not just
+  rot). The GPTK core came back clean; the fixes (most-severe first):
+  1. **Steam readiness race (GPTK, the one important core bug).** `SteamClientSession.ensureRunning` checked
+     the `steamPID` fast path before joining an in-flight launch — so a 2nd Play during Steam cold-start
+     returned "ready" before Steam had registered its `ActiveProcess` pid, and the game's `SteamAPI_Init`
+     could lose to Steam's init. Now joins the in-flight launch (which owns the readiness wait) FIRST.
+  2. **DXMT manual-game shortcuts never seeded `winemetal.dll` into the prefix.** `makeShortcut` called
+     `makePlan` directly, bypassing `linkGraphics`/`installDXMTPrefixLoaders`; a shortcut made before any
+     in-Silo launch produced a `.app` that fell back to wined3d and failed. New
+     `LaunchOrchestrator.prepareGraphics` (launch-free graphics prep); `makeShortcut` now calls it. Test added.
+  3. **Clone race + interrupted-clone reuse.** `RuntimeVariants.ensureClone` was check-then-act; two quick
+     first-time DXMT launches could make the loser's copy-fallback hit EEXIST, and a hard-killed mid-clone
+     left a partial tree later reused. Now clones into a `.cloning-<uuid>` staging dir published by atomic
+     rename (loser reuses the winner's; a partial never becomes the clone).
+  4. **GPTK importer leaked a mount** when `hdiutil attach` succeeded but the plist had no mount-point (the
+     caller never received a URL to detach). `attach` now best-effort detaches the parsed `dev-entry`. Test added.
+  5. **`overlayGPTK` partial-overlay masquerade.** A mid-copy failure could leave a fresh `d3d11.dll` (the
+     witness) beside stale siblings, so the next launch's witness check wrongly skipped. Copy the witness LAST.
+  6. **Webhelper wrap could strand a CEF dir** (real webhelper preserved as `_orig`, no `steamwebhelper.exe`)
+     on a mid-op I/O failure → black login, no self-heal. Now stage-then-rename (byte copy first, swap by rename).
+  7. **Stale `errno`** in the clone copy-fallback error message — now the underlying POSIX code, captured at
+     the failure point.
+  8. **`RuntimeManager.install` reinstall was non-atomic** — extracted in place and removed `dest` on a
+     mid-extract failure (nuking an existing good install; also merged stale files on reinstall). Now extracts
+     into a `.extracting-<uuid>` staging dir and publishes with an atomic rename.
+  9. **`stripBundledSDL` only searched `lib/silo-bundled`** — a custom-repo runtime bundling libSDL2 elsewhere
+     kept the winebus/SDL crash. Now walks the whole runtime tree.
+  10. **`GraphicsFallbackMonitor` armed a kqueue watch even when the pre-check already fired** — now returns
+      before arming, so no fd lingers.
+  Ruled out after tracing: `stopGame`'s base-wine taskkill (correct — wineserver is prefix-keyed) and the
+  double-overlay (harmless idempotent no-op). **Left as-is (documented):** the readiness kqueue watch on
+  `user.reg` can miss an atomic rename-replace and fall back to the bounded 20 s failsafe — but it's
+  on-device-validated as event-driven, degrades gracefully, and the only fix touches the shared `FileWatch`
+  the log tailer also uses (wide blast radius for a case the evidence says doesn't occur).
+- **🧹 GPTK-path quality pass — 5 review findings fixed (2026-07-07, `swift build` clean + `Scripts/test.sh`
+  green, EXIT=0/"All tests passed").** A focused audit of the GPTK bottle path (deterministic core, launch
+  pipeline, runtime pieces) found it largely clean; five items closed:
+  1. **Dead pre-dual-bottle shims removed.** All five no-arg `AppPaths.steamBottle*` convenience vars
+     (`steamBottle`/`ClientDir`/`Exe`/`CEFDir`/`Log`) dropped from the shipping type — four were unused in
+     Sources, the one live caller (`GeneralSettingsView`) now passes `.gptk`; the four the test suite uses
+     moved to `Tests/SiloKitTests/Support/AppPaths+TestSupport.swift`. Also removed the dead
+     `RuntimeVariants.variantWine` (superseded by `prepare`/`ensureClone`; test-only) + its `cloneWine` helper
+     and the now-orphaned test.
+  2. **`ManualGame.gameConfig`** — the `GameConfig(appID: 0, …)` mapping was open-coded in two places
+     (`LaunchOrchestrator.launchManualGame`, `GameLibraryViewModel.makeShortcut`); now one computed property.
+  3. **Resolver output threaded explicitly.** `makePlan`/`launchInBottle`/`launchManualGame` gained an
+     optional `wine:` param (defaults to `backend.wineBinaryPath`), so the VM feeds the resolved variant
+     runtime directly instead of mutating a `BackendConfig` copy at three call sites; `linkGraphics` takes the
+     wine explicitly too. Backward-compatible — every existing makePlan/pipeline test unchanged.
+  4. **Test-only PID projections retired.** `GameLibraryViewModel.runningPIDs`/`manualRunningPIDs` (dictionary
+     reshaping that existed only for the test suite) replaced by narrow `pid(for:)` accessors mirroring
+     `isRunning`; the ~8 test sites migrated.
+  5. **Doc fix:** `WineRuntimeLayout`'s no-arg `windowsModulesDir`/`unixModulesDir` were mislabeled
+     "back-compat" — they're the live GPTK-x86_64-only overlay path (`overlayGPTK` uses them; `overlayDXMT`
+     passes an explicit `WineArch`) — relabeled.
 - **🖥️ High Resolution Mode: pair LogPixels with RetinaMode (2026-07-07, on-device validated).** The Retina
   toggle wrote only `HKCU\Software\Wine\Mac Driver\RetinaMode`, so turning it on made game/UI text render
   tiny (Wine renders at native backing pixels with no DPI compensation). That's the missing half of what

@@ -46,6 +46,13 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
         set { customArgs = newValue.split(whereSeparator: \.isWhitespace).map(String.init) }
     }
 
+    /// The `GameConfig` used to launch this manual game: appID 0 (not a Steam title), no Steam presence,
+    /// and the game's own env flags + args. The single place a `ManualGame` maps to a launch config —
+    /// shared by the launch path and the Desktop-shortcut builder.
+    public var gameConfig: GameConfig {
+        GameConfig(appID: 0, envFlags: envFlags, presence: .none, customArgs: customArgs)
+    }
+
     // MARK: - Codable (tolerates a missing `backend` so old config.json keeps its manual games)
 
     private enum CodingKeys: String, CodingKey {

@@ -256,16 +256,29 @@ public struct SteamBottle: Sendable {
         // one while Steam runs the unwrapped binary → black window.
         for helper in webHelpers() {
             if fileManager.contentsEqual(atPath: helper.path, andPath: wrapper.path) { continue }   // already wrapped
-            let real = helper.deletingLastPathComponent().appendingPathComponent("steamwebhelper_orig.exe")
-            if fileManager.fileExists(atPath: real.path) {
-                // Real webhelper already preserved; `helper` is a STALE wrapper — replace just it, so we
-                // never move a wrapper over the genuine `…_orig.exe`.
-                try fileManager.removeItem(at: helper)
-            } else {
-                // `helper` is the real webhelper (fresh install or a Steam update): preserve it once.
-                try fileManager.moveItem(at: helper, to: real)
+            let dir = helper.deletingLastPathComponent()
+            let real = dir.appendingPathComponent("steamwebhelper_orig.exe")
+            // Stage the wrapper copy FIRST, then swap it in with renames only — so a copy failure (the one
+            // step doing real byte I/O) disturbs nothing, and we can never strand the CEF dir with the real
+            // webhelper preserved as `…_orig.exe` but no `steamwebhelper.exe` in place (→ black login, no
+            // self-heal, since `webHelpers()` then skips the dir).
+            let staged = dir.appendingPathComponent("steamwebhelper_wrap.tmp")
+            if fileManager.fileExists(atPath: staged.path) { try fileManager.removeItem(at: staged) }
+            try fileManager.copyItem(at: wrapper, to: staged)
+            do {
+                if fileManager.fileExists(atPath: real.path) {
+                    // Real webhelper already preserved; `helper` is a STALE wrapper — replace just it, so we
+                    // never move a wrapper over the genuine `…_orig.exe`.
+                    try fileManager.removeItem(at: helper)
+                } else {
+                    // `helper` is the real webhelper (fresh install or a Steam update): preserve it once.
+                    try fileManager.moveItem(at: helper, to: real)
+                }
+                try fileManager.moveItem(at: staged, to: helper)   // atomic publish (same-dir rename)
+            } catch {
+                try? fileManager.removeItem(at: staged)
+                throw error
             }
-            try fileManager.copyItem(at: wrapper, to: helper)
         }
     }
 

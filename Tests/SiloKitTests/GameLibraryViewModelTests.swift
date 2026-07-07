@@ -195,6 +195,12 @@ struct GameLibraryViewModelTests {
         #expect(script.contains("wine-dxmt"))       // the cloned DXMT variant runtime, not the base wine
         #expect(script.contains("winemetal=b"))     // DXMT's builtin override set…
         #expect(!script.contains("d3d12"))          // …and never GPTK's (which includes d3d12)
+        // The shortcut ALSO seeds winemetal.dll into the game's own prefix (system32). Without it a DXMT
+        // game launched from the standalone .app — which execs wine with no launch pipeline — can't load the
+        // winemetal builtin and silently falls back to wined3d → graphics-init failure.
+        let winemetal = paths.manualBottle(game.id)
+            .appendingPathComponent("drive_c/windows/system32/winemetal.dll")
+        #expect(FileManager.default.fileExists(atPath: winemetal.path))
     }
 
     @Test("resolveMessage maps every launch-stack error to actionable text")
@@ -387,7 +393,7 @@ struct GameLibraryViewModelTests {
         await vm.play(game)
         #expect(vm.isRunning(game))
         // Steam cold-starts first (PID 4242), so the game loader is the next spawn (4243).
-        let loaderPID = try #require(vm.runningPIDs[220])
+        let loaderPID = try #require(vm.pid(for: game))
         #expect(loaderPID == 4243)
         // The game was launched detached with WINEPREFIX forced to the shared bottle.
         #expect(fake.invocations.contains {
@@ -415,7 +421,7 @@ struct GameLibraryViewModelTests {
         await vm.play(game)
         #expect(vm.isRunning(game))
 
-        let pid = try #require(vm.runningPIDs[220])
+        let pid = try #require(vm.pid(for: game))
         fake.setAlive(pid, false)   // simulate the game process exiting
         for _ in 0..<20 where vm.isRunning(game) { await Task.yield() }   // let the @MainActor handler run
         #expect(!vm.isRunning(game))
@@ -439,7 +445,7 @@ struct GameLibraryViewModelTests {
 
         await vm.playManual(game)
         #expect(vm.isRunning(game))
-        let pid = try #require(vm.manualRunningPIDs[game.id])
+        let pid = try #require(vm.pid(for: game))
         let ownBottle = paths.manualBottle(game.id).path
         #expect(ownBottle != paths.steamBottle.path)     // isolated, NOT the shared bottle
         // Spawned detached into its OWN bottle prefix, with the absolute exe — and NO Steam cold-start.
@@ -603,7 +609,7 @@ struct GameLibraryViewModelTests {
         try installSteam(paths)
         let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
 
-        await vm.play(game)                          // launches the game → runningPIDs[220] set
+        await vm.play(game)                          // launches the game → tracked as running
         #expect(vm.isRunning(game))
 
         await vm.uninstall(game)                      // guard !isRunning must short-circuit
@@ -667,9 +673,9 @@ struct GameLibraryViewModelTests {
 
         await vm.play(game)
 
-        #expect(!vm.isRunning(game))                  // never reached runningPIDs[id] = pid
+        #expect(!vm.isRunning(game))                  // never tracked a PID
         #expect(!vm.isBusy(game))                     // defer cleared busyGames
-        #expect(vm.runningPIDs[220] == nil)
+        #expect(vm.pid(for: game) == nil)
         #expect(vm.statusMessage?.contains("HL2") == true)   // the catch surfaced "<name>: <error>"
         // The game itself was never spawned detached (resolution failed before spawn).
         #expect(!fake.invocations.contains {
@@ -699,7 +705,7 @@ struct GameLibraryViewModelTests {
         await vm.play(game)
 
         #expect(!vm.isRunning(game))
-        #expect(vm.runningPIDs[220] == nil)
+        #expect(vm.pid(for: game) == nil)
         #expect(vm.statusMessage?.contains("Steam") == true)         // surfaced WHY, not a misleading "Launched"
         #expect(!fake.invocations.contains { $0.detached })          // nothing spawned — not even the game
     }
@@ -797,9 +803,11 @@ struct GameLibraryViewModelTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, fake, paths) = make(tmp)
         try installSteam(paths)
-        await vm.play(try installedGame(paths, appID: 220, name: "HL2", dir: "HL2"))
-        await vm.play(try installedGame(paths, appID: 440, name: "TF2", dir: "TF2"))
-        let gamePIDs = Set(vm.runningPIDs.values)
+        let hl2 = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        let tf2 = try installedGame(paths, appID: 440, name: "TF2", dir: "TF2")
+        await vm.play(hl2)
+        await vm.play(tf2)
+        let gamePIDs = Set([hl2, tf2].compactMap { vm.pid(for: $0) })
         try #require(gamePIDs.count == 2)                            // both games launched
 
         vm.terminateAllSync()

@@ -87,14 +87,6 @@ public struct AppPaths: Sendable, Hashable {
         return logsDir.appendingPathComponent(name)
     }
 
-    // Convenience aliases for the GPTK (default/primary) bottle — the common path, and back-compat for
-    // callers written before the dual-bottle split.
-    public var steamBottle: URL { steamBottle(.gptk) }
-    public var steamBottleClientDir: URL { steamBottleClientDir(.gptk) }
-    public var steamBottleExe: URL { steamBottleExe(.gptk) }
-    public var steamBottleCEFDir: URL { steamBottleCEFDir(.gptk) }
-    public var steamBottleLog: URL { steamBottleLog(.gptk) }
-
     /// Parent of the per-game isolated bottles used by manual (non-Steam) games.
     public var manualBottlesDir: URL { bottlesRoot.appendingPathComponent("ManualBottles", isDirectory: true) }
 

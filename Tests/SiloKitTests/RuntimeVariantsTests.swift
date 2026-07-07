@@ -83,17 +83,6 @@ struct RuntimeVariantsTests {
         #expect(try String(contentsOf: marker, encoding: .utf8) == "MUTATED")   // clone NOT re-created
     }
 
-    @Test("variantWine is pure path math — no side effects on disk")
-    func variantWinePaths() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let wine = tmp.url.appendingPathComponent("rt/wine/bin/wine64")
-        let variants = RuntimeVariants()
-        #expect(variants.variantWine(backend: .gptk, baseWine: wine) == wine)
-        let dxmt = variants.variantWine(backend: .dxmt, baseWine: wine)
-        #expect(dxmt.path.hasSuffix("rt/wine-dxmt/bin/wine64"))
-        #expect(!FileManager.default.fileExists(atPath: dxmt.path))   // nothing was created
-    }
-
     @Test("cloneName + isVariantClone are the ONE naming source — and never flag a real DXMT release tag")
     func cloneNaming() {
         #expect(RuntimeVariants.cloneName(ofBase: "wine-cx-26.2.0", backend: .dxmt) == "wine-cx-26.2.0-dxmt")

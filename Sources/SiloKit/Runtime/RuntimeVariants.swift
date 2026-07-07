@@ -41,15 +41,6 @@ public struct RuntimeVariants: Sendable {
         }
     }
 
-    /// The wine binary a backend's variant *would* use, without preparing it (for callers that only need
-    /// the path — e.g. to check existence). Mirrors `prepare`'s location logic.
-    public func variantWine(backend: GraphicsBackend, baseWine: URL) -> URL {
-        switch backend {
-        case .gptk: baseWine
-        case .dxmt: cloneWine(of: baseWine, backend: backend)
-        }
-    }
-
     // MARK: - Clone naming (the ONE source of truth for the `<base>-<backend>` sibling scheme)
 
     /// The runtime-dir name of `backend`'s variant clone of the base runtime `base` — a sibling of the
@@ -82,28 +73,40 @@ public struct RuntimeVariants: Sendable {
             .appendingPathComponent(baseWine.lastPathComponent)
     }
 
-    private func cloneWine(of baseWine: URL, backend: GraphicsBackend) -> URL {
-        cloneRoot(of: WineRuntimeLayout(wineBinary: baseWine).root, backend: backend)
-            .appendingPathComponent("bin", isDirectory: true)
-            .appendingPathComponent(baseWine.lastPathComponent)
-    }
-
     private func cloneRoot(of baseRoot: URL, backend: GraphicsBackend) -> URL {
         baseRoot.deletingLastPathComponent()
             .appendingPathComponent(
                 Self.cloneName(ofBase: baseRoot.lastPathComponent, backend: backend), isDirectory: true)
     }
 
-    /// APFS copy-on-write clone (`clonefile`), falling back to a deep copy when the target volume can't
-    /// clone (non-APFS / cross-volume). Either way `dst` ends up a full, independent runtime tree.
+    /// Clone `src` into a private staging dir, then publish it to `dst` with an atomic rename — so `dst`
+    /// only ever appears as a COMPLETE tree. This makes concurrent first-time launches of two DXMT games
+    /// race-safe (the loser finds `dst` already published and reuses it, instead of its fallback copy hitting
+    /// EEXIST) and prevents a hard-killed mid-clone from leaving a partial tree that later launches would
+    /// silently reuse (it stays an ignored `.cloning-*` temp). APFS copy-on-write (`clonefile`) into the
+    /// staging dir, falling back to a deep copy on a non-APFS / cross-volume target.
     private func cloneTree(from src: URL, to dst: URL) throws {
-        let rc = src.path.withCString { s in dst.path.withCString { d in clonefile(s, d, 0) } }
+        let staging = dst.deletingLastPathComponent()
+            .appendingPathComponent(".\(dst.lastPathComponent).cloning-\(UUID().uuidString)", isDirectory: true)
+        let rc = src.path.withCString { s in staging.path.withCString { d in clonefile(s, d, 0) } }
         if rc != 0 {
             do {
-                try fileManager.copyItem(at: src, to: dst)
+                try fileManager.copyItem(at: src, to: staging)
             } catch {
-                throw VariantError.cloneFailed(dst, errno)
+                try? fileManager.removeItem(at: staging)
+                // Surface the underlying POSIX code from the copy failure (not the process-global `errno`,
+                // which the Foundation call above may have overwritten since the `clonefile` return).
+                let posix = ((error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError)?.code
+                throw VariantError.cloneFailed(dst, Int32(posix ?? Int(errno)))
             }
+        }
+        do {
+            try fileManager.moveItem(at: staging, to: dst)   // atomic publish
+        } catch {
+            // Lost the race — another launch already published an identical clone. Use theirs; only a
+            // still-absent `dst` is a real failure.
+            try? fileManager.removeItem(at: staging)
+            guard fileManager.fileExists(atPath: dst.path) else { throw error }
         }
     }
 }

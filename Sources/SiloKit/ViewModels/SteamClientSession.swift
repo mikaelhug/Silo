@@ -61,8 +61,13 @@ public final class SteamClientSession {
     /// Play + "Launch Steam") coalesce onto ONE launch via `steamLaunch`.
     @discardableResult
     func ensureRunning() async -> Bool {
-        if let pid = steamPID, orchestrator.isRunning(pid: pid) { return true }
+        // Join an in-flight launch FIRST — it owns the cold-start readiness wait (`startSteam` sets
+        // `steamPID` before it `await`s `awaitSteamReady`). Checking the `steamPID` fast path before this
+        // would let a caller racing the readiness window (Steam up, but its `ActiveProcess` pid not yet in
+        // `user.reg`) return "ready" early and launch a game whose `SteamAPI_Init` then loses to Steam's own
+        // init — the exact failure the readiness gate exists to prevent.
         if let inFlight = steamLaunch { await inFlight.value; return steamPID != nil }
+        if let pid = steamPID, orchestrator.isRunning(pid: pid) { return true }
         let task = Task { @MainActor in await startSteam() }
         steamLaunch = task
         await task.value

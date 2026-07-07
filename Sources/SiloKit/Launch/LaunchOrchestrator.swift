@@ -41,15 +41,19 @@ public struct LaunchOrchestrator: Sendable {
 
     /// Build the launch plan for ANY executable in the bottle (a Steam game's resolved exe or a manual
     /// game's `.exe`) — it's keyed off `gameExe` + `config`, not the app identity, so it serves both.
+    /// - Parameter wine: the resolved launch binary — the per-backend variant runtime `BottleResolver`
+    ///   hands back (the DXMT clone, or the base for GPTK). Defaults to `backend.wineBinaryPath` when a
+    ///   caller has no variant to inject, so `backend` still gates the graphics overrides via `libDir(for:)`.
     public static func makePlan(
         config: GameConfig,
         backend: BackendConfig,
         graphics: GraphicsBackend = .gptk,
+        wine: URL? = nil,
         gameExe: URL,
         prefix: URL,
         logURL: URL
     ) throws -> LaunchPlan {
-        guard let wine = backend.wineBinaryPath else {
+        guard let wine = wine ?? backend.wineBinaryPath else {
             throw LaunchError.wineNotConfigured
         }
 
@@ -104,15 +108,16 @@ public struct LaunchOrchestrator: Sendable {
     @discardableResult
     public func launchInBottle(
         app: SteamApp, config: GameConfig, backend: BackendConfig,
-        graphics: GraphicsBackend = .gptk, prefix: URL, logURL: URL
+        graphics: GraphicsBackend = .gptk, wine: URL? = nil, prefix: URL, logURL: URL
     ) async throws -> Int32 {
-        guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
+        guard let launchWine = wine ?? backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }
         let gameExe = try resolveExecutable(app: app, config: config)
         try check32BitSupported(gameExe, graphics: graphics)
-        try linkGraphics(backendConfig: backend, graphics: graphics, prefix: prefix)
+        try linkGraphics(backendConfig: backend, graphics: graphics, wine: launchWine, prefix: prefix)
         try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)
         let plan = try Self.makePlan(
-            config: config, backend: backend, graphics: graphics, gameExe: gameExe, prefix: prefix, logURL: logURL
+            config: config, backend: backend, graphics: graphics, wine: launchWine,
+            gameExe: gameExe, prefix: prefix, logURL: logURL
         )
         return try await spawn(plan)
     }
@@ -124,18 +129,17 @@ public struct LaunchOrchestrator: Sendable {
     @discardableResult
     public func launchManualGame(
         _ game: ManualGame, backend: BackendConfig,
-        graphics: GraphicsBackend = .gptk, prefix: URL, logURL: URL
+        graphics: GraphicsBackend = .gptk, wine: URL? = nil, prefix: URL, logURL: URL
     ) async throws -> Int32 {
-        guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
+        guard let launchWine = wine ?? backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }
         guard FileManager.default.fileExists(atPath: game.executablePath.path) else {
             throw LaunchError.executableNotFound(game.executablePath)
         }
         try check32BitSupported(game.executablePath, graphics: graphics)
-        try linkGraphics(backendConfig: backend, graphics: graphics, prefix: prefix)
-        let config = GameConfig(appID: 0, envFlags: game.envFlags, presence: .none, customArgs: game.customArgs)
+        try linkGraphics(backendConfig: backend, graphics: graphics, wine: launchWine, prefix: prefix)
         let plan = try Self.makePlan(
-            config: config, backend: backend, graphics: graphics, gameExe: game.executablePath,
-            prefix: prefix, logURL: logURL)
+            config: game.gameConfig, backend: backend, graphics: graphics, wine: launchWine,
+            gameExe: game.executablePath, prefix: prefix, logURL: logURL)
         return try await spawn(plan)
     }
 
@@ -145,15 +149,27 @@ public struct LaunchOrchestrator: Sendable {
     public func runInstaller(
         exe: URL, backend: BackendConfig, graphics: GraphicsBackend = .gptk, prefix: URL, logURL: URL
     ) async throws -> Int32 {
-        guard backend.wineBinaryPath != nil else { throw LaunchError.wineNotConfigured }
+        guard let wine = backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }
         guard FileManager.default.fileExists(atPath: exe.path) else {
             throw LaunchError.executableNotFound(exe)
         }
-        try linkGraphics(backendConfig: backend, graphics: graphics, prefix: prefix)
+        try linkGraphics(backendConfig: backend, graphics: graphics, wine: wine, prefix: prefix)
         let plan = try Self.makePlan(
             config: GameConfig(appID: 0, presence: .none), backend: backend, graphics: graphics,
-            gameExe: exe, prefix: prefix, logURL: logURL)
+            wine: wine, gameExe: exe, prefix: prefix, logURL: logURL)
         return try await spawn(plan)
+    }
+
+    /// Prepare a bottle's graphics WITHOUT launching: overlay the backend's translated d3d into the runtime
+    /// and (for DXMT) seed `winemetal.dll` into the game `prefix`. Used by the Desktop-shortcut builder,
+    /// whose standalone `.app` execs wine directly with no launch pipeline — so the prefix must already
+    /// carry the DXMT loader (a normal first launch seeds it via `launch…` → `linkGraphics`; a shortcut made
+    /// before any launch would otherwise leave the prefix without it → DXMT falls back to wined3d and fails).
+    /// No-op for GPTK (needs no prefix loader) and for an unconfigured backend.
+    public func prepareGraphics(
+        backendConfig: BackendConfig, graphics: GraphicsBackend, wine: URL, prefix: URL
+    ) throws {
+        try linkGraphics(backendConfig: backendConfig, graphics: graphics, wine: wine, prefix: prefix)
     }
 
     private func spawn(_ plan: LaunchPlan) async throws -> Int32 {
@@ -243,9 +259,10 @@ public struct LaunchOrchestrator: Sendable {
     /// DXMT it ALSO seeds `winemetal.dll` into the game `prefix` (see `installDXMTPrefixLoaders` — wine can't
     /// load the winemetal builtin otherwise). Skipped when that backend is unconfigured — the game then falls
     /// back to wine's own wined3d.
-    private func linkGraphics(backendConfig: BackendConfig, graphics: GraphicsBackend, prefix: URL) throws {
-        guard let wine = backendConfig.wineBinaryPath,
-              let libDir = backendConfig.libDir(for: graphics) else { return }
+    private func linkGraphics(
+        backendConfig: BackendConfig, graphics: GraphicsBackend, wine: URL, prefix: URL
+    ) throws {
+        guard let libDir = backendConfig.libDir(for: graphics) else { return }
         switch graphics {
         case .gptk: try linker.overlayGPTK(wineBinary: wine, gptkLibDir: libDir)
         case .dxmt:

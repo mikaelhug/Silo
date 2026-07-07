@@ -37,6 +37,21 @@ struct GPTKImporterTests {
         #expect(GPTKImporter.mountPoint(fromPlist: Data("not a plist".utf8)) == nil)
     }
 
+    @Test("Parses the first dev-entry (the detach handle for a mount-less attach)")
+    func devEntryParse() {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0"><dict><key>system-entities</key><array>
+          <dict><key>dev-entry</key><string>/dev/disk7</string></dict>
+          <dict><key>dev-entry</key><string>/dev/disk7s1</string></dict>
+        </array></dict></plist>
+        """
+        #expect(GPTKImporter.devEntry(fromPlist: Data(xml.utf8)) == "/dev/disk7")   // whole-disk node, first
+        #expect(GPTKImporter.devEntry(fromPlist: Data("not a plist".utf8)) == nil)
+        // A plist carrying only a mount-point (no dev-entry) yields nil — nothing to detach by node.
+        #expect(GPTKImporter.devEntry(fromPlist: attachPlist(mountPoint: "/Volumes/X").standardOutput) == nil)
+    }
+
     @Test("Derives a versioned runtime name from the DMG filename")
     func nameDerivation() {
         #expect(GPTKImporter.runtimeName(

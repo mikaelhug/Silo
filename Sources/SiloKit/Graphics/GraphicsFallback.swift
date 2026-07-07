@@ -65,6 +65,9 @@ final class GraphicsFallbackMonitor {
             FileManager.default.createFile(atPath: url.path, contents: nil)
         }
         check(url.tailString())
+        // If the fallback signature is already in the log, `check` fired + tore down — don't then arm a
+        // watch we don't need (it would sit holding a live kqueue fd until the monitor is dropped).
+        guard !fired else { return }
         watch = FileWatch(url: url) {
             let tail = url.tailString()                                  // read off the main actor
             Task { @MainActor [weak self] in self?.check(tail) }
