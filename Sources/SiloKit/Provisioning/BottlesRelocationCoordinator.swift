@@ -79,7 +79,10 @@ public final class BottlesRelocationCoordinator {
         // Persist (nil = back to the default), then adopt via relaunch.
         let isDefault = newRoot.standardizedFileURL == paths.supportDir.standardizedFileURL
         BottlesLocation.write(isDefault ? nil : newRoot, supportDir: paths.supportDir)
-        if let bundle = Updater.runningAppBundle() {
+        // Use the injectable resolver (not the ambient static `runningAppBundle`) so tests can pin it to nil
+        // — otherwise the ambient `Bundle.main` resolves to a bundle under `swift test --no-parallel` and
+        // `relaunch`'s `exit(0)` kills the whole test run.
+        if let bundle = updater.appBundleToReplace() {
             message = "Bottles moved. Relaunching…"
             await updater.relaunch(bundle)   // launches the new instance + exit(0); never returns
         } else {

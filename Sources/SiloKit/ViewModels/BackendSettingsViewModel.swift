@@ -41,6 +41,22 @@ public final class BackendSettingsViewModel {
         await save()
     }
 
+    /// Clear a persisted default whose runtime was just removed, so the readiness gates stop pointing at a
+    /// deleted path (`wineReady`/`gptkReady`/`dxmtReady` are `!= nil` checks) and onboarding re-surfaces the
+    /// step instead of failing every launch with a dangling-path error.
+    public func clearWineDefault() async {
+        config.wineBinaryPath = nil; config.wineRuntimeName = nil
+        await save()
+    }
+    public func clearGPTKDefault() async {
+        config.gptkLibDirPath = nil; config.gptkRuntimeName = nil
+        await save()
+    }
+    public func clearDXMTDefault() async {
+        config.dxmtLibDirPath = nil; config.dxmtRuntimeName = nil
+        await save()
+    }
+
     public func save() async {
         do {
             try await configStore.saveBackend(config)

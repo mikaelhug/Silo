@@ -244,8 +244,7 @@ struct ViewModelTests {
         env.backendSettings.config.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
         env.backendSettings.config.gptkLibDirPath = URL(fileURLWithPath: "/g/lib")
         #expect(!env.setupComplete)                       // Steam not installed in the bottle yet
-        try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        paths.createWarmedSteamClient()
         #expect(!env.setupComplete)                       // steamReady is a CACHE — not probed yet
         await env.gameLibrary.refreshSteamInstalled()
         #expect(env.setupComplete)

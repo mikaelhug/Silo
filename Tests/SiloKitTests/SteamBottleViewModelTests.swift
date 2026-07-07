@@ -34,6 +34,15 @@ struct SteamBottleViewModelTests {
         try FileManager.default.createDirectory(
             at: paths.steamBottleClientDir, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        // A bare bootstrapper is NOT "installed" anymore — the probe keys on the warmed client.
+        await vm.refreshInstalled()
+        #expect(!vm.steamInstalled)
+        // Warm the client: steamui.dll + a CEF webhelper (what steamInstalled now keys on).
+        FileManager.default.createFile(
+            atPath: paths.steamBottleClientDir.appendingPathComponent("steamui.dll").path, contents: Data())
+        let cef = paths.steamBottleCEFDir.appendingPathComponent("cef.win7x64")
+        try FileManager.default.createDirectory(at: cef, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: cef.appendingPathComponent("steamwebhelper.exe").path, contents: Data())
         #expect(!vm.steamInstalled)          // still the cache — no probe yet
         await vm.refreshInstalled()
         #expect(vm.steamInstalled)
@@ -82,8 +91,13 @@ struct SteamBottleViewModelTests {
     @Test("setUp installs Steam into the bottle and reports success")
     func setUpSuccess() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, _) = make(tmp)
+        let (vm, fake, paths) = make(tmp)
         FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("installer".utf8))
+        // Simulate the silent install + first-run warm-up producing a WARMED client (steamui.dll + webhelper)
+        // when SteamSetup runs — that's what setUp now keys "ready" on (C1).
+        fake.onRun = { inv in
+            if inv.arguments.contains("/S") { paths.createWarmedSteamClient() }
+        }
         vm.updateWine(URL(fileURLWithPath: "/w/wine64"))
 
         await vm.setUp()

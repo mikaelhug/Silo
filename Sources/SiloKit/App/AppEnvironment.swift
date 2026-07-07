@@ -138,6 +138,12 @@ public final class AppEnvironment {
             guard let lib = install.artifact else { return }
             Task { await self?.backendSettings.applyDXMTLibDir(lib, name: install.name) }
         }
+        // Removing the CURRENT default runtime clears its persisted config path, so the readiness gates
+        // (all `!= nil` checks) don't stick true against a deleted runtime — every launch would otherwise
+        // fail with a dangling path, and onboarding would keep showing the step "Done".
+        runtime.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearWineDefault() } }
+        gptkManager.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearGPTKDefault() } }
+        dxmtRuntime.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearDXMTDefault() } }
         // A fresh Steam install must flip the library's cached `steamReady` gate (it drives onboarding);
         // load() re-probes the cache off-main. Without this, onboarding would stall until a relaunch.
         for services in backends.values {
@@ -183,7 +189,10 @@ public final class AppEnvironment {
 
     /// Reload the bottle's game library (e.g. on app re-activation).
     public func refreshLibraryIfReady() async {
-        guard didBootstrap, gameLibrary.steamReady else { return }
+        // Reload on every re-activation once bootstrapped — NOT gated on the last-known `steamReady`, which
+        // would block the very reload that would notice a bottle deleted (or restored) out-of-band. `load()`
+        // re-probes readiness off-main, so the cache re-syncs both directions.
+        guard didBootstrap else { return }
         await gameLibrary.load()
     }
 
@@ -208,9 +217,18 @@ public final class AppEnvironment {
 
     public var wineReady: Bool { backendSettings.config.wineBinaryPath != nil }
     public var gptkReady: Bool { backendSettings.config.gptkLibDirPath != nil }
-    /// The Windows Steam client is installed in the bottle (the user signs into it in-app).
+    /// Any Steam bottle (GPTK or DXMT) has a warmed client — drives the library's onboarding-vs-content gate.
     public var steamReady: Bool { gameLibrary.steamReady }
-    public var setupComplete: Bool { wineReady && gptkReady && steamReady }
+    /// The GPTK Steam bottle specifically is set up (mirrors `dxmtSteamReady`). Onboarding's step 3 and
+    /// `setupComplete` key on THIS, not the any-backend `steamReady` — otherwise setting up DXMT first would
+    /// mark the GPTK step "Done" and let the user finish onboarding with no GPTK Steam bottle at all.
+    public var gptkSteamReady: Bool { gameLibrary.steamInstalled(.gptk) }
+    public var setupComplete: Bool { wineReady && gptkReady && gptkSteamReady }
+
+    /// The bottles live on a relocated drive that isn't currently mounted — a distinct "reconnect the drive"
+    /// state, NOT first-run onboarding (the app would otherwise fall back to onboarding when it finds no
+    /// bottle on the missing volume). Cheap: a couple of stats, fast even when the volume is absent.
+    public var bottlesDisconnected: Bool { paths.bottlesRelocated && !paths.bottlesRootReachable }
 
     // MARK: - DXMT (optional older-games backend)
 

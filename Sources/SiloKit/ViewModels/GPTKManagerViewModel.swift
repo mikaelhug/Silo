@@ -12,6 +12,9 @@ public final class GPTKManagerViewModel {
 
     /// Called when the default GPTK changes so the backend config can adopt its lib dir.
     public var onDefaultChanged: ((GPTKInstall) -> Void)?
+    /// Called when the CURRENT default GPTK is removed, so the backend config can clear the dangling lib
+    /// dir (otherwise `gptkReady` stays true against a deleted runtime and launches fall back / fail).
+    public var onDefaultRemoved: (() -> Void)?
 
     public init(importer: GPTKImporter, defaultName: String? = nil) {
         self.importer = importer
@@ -51,8 +54,10 @@ public final class GPTKManagerViewModel {
     public func remove(_ install: GPTKInstall) async {
         do {
             try importer.remove(name: install.name)
-            if defaultName == install.name { defaultName = nil }
+            let wasDefault = defaultName == install.name
+            if wasDefault { defaultName = nil }
             refresh()
+            if wasDefault { onDefaultRemoved?() }   // clear the dangling lib dir in the persisted config
             statusMessage = "Removed \(install.displayName)."
         } catch {
             statusMessage = "Remove failed: \((error as NSError).localizedDescription)"

@@ -38,7 +38,9 @@ public final class SteamBottleViewModel {
     /// Re-probe whether the bottle's Steam is installed (off the main actor). Called at bootstrap.
     public func refreshInstalled() async {
         let bottle = self.bottle
-        steamInstalled = await Task.detached { bottle.isSteamInstalled }.value
+        // The WARMED client (steamui.dll + webhelper), not the bootstrapper — a bottle with only steam.exe
+        // (interrupted warm-up) is not usable and must not gate onboarding as "ready".
+        steamInstalled = await Task.detached { bottle.isClientFullyDownloaded }.value
     }
 
     /// Wine configured and nothing blocking. A DIFFERENT bottle mid-setup blocks this one — seeding from a
@@ -57,6 +59,12 @@ public final class SteamBottleViewModel {
     /// webhelper wrapper is applied AFTER the warm-up, when the CEF dir it wraps actually exists.
     public func setUp() async {
         guard !busy else { return }
+        // Refuse if the bottles' (relocated) drive is unplugged — provisioning would otherwise create a
+        // phantom bottle on the boot disk at the now-missing /Volumes/... path.
+        guard bottle.isRootReachable else {
+            status = "Your bottles drive isn't connected. Reconnect it, then set up Steam."
+            return
+        }
         // Refuse while the OTHER bottle is being set up: seeding from a sibling whose client is still
         // downloading would clone a broken Steam. One bottle at a time.
         guard !setupGate.isBlocked(bottle.backend) else {
@@ -86,9 +94,13 @@ public final class SteamBottleViewModel {
                     try? await bottle.installCoreFonts(wine: wine)
                 }
             }
-            status = "Steam is ready. Launch it and sign in once — it caches the login."
-            steamInstalled = true
-            onSteamInstalled?()
+            // Report "ready" only if the client actually WARMED (steamui.dll + webhelper). A failed or
+            // interrupted warm-up leaves just the bootstrapper and must not flip the onboarding gate.
+            steamInstalled = bottle.isClientFullyDownloaded
+            status = steamInstalled
+                ? "Steam is ready. Launch it and sign in once — it caches the login."
+                : "Steam setup didn't finish downloading its client — check your connection and run Set up again."
+            onSteamInstalled?()   // refresh the library's cached readiness (now reflects the warmed client)
         } catch {
             warmingUp = false; warmUpFraction = nil
             status = "Setup failed: \(message(error))"
