@@ -241,10 +241,11 @@ public final class AppEnvironment {
         bottleToolsMessage = "Opened \(tool)."
     }
 
-    /// Build a per-game settings view model with the game's persisted config.
-    public func makeGameSettings(appID: Int) async -> GameSettingsViewModel {
+    /// Build a per-game settings view model with the game's persisted config for a specific bottle. Keyed by
+    /// (appID, backend) so editing the GPTK card's settings doesn't mutate the DXMT card's, and vice versa.
+    public func makeGameSettings(appID: Int, backend: GraphicsBackend = .gptk) async -> GameSettingsViewModel {
         let state = await configStore.load()
-        return GameSettingsViewModel(config: state.config(for: appID), configStore: configStore)
+        return GameSettingsViewModel(config: state.config(for: appID, backend: backend), configStore: configStore)
     }
 
     /// A game's launch log (per appID + graphics backend — the GPTK and DXMT copies log separately).
