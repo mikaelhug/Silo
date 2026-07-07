@@ -333,6 +333,19 @@ struct GameLibraryViewModelTests {
         #expect(fake.terminatedPIDs.count == stopsBefore)                     // GPTK Steam client NOT stopped
     }
 
+    @Test("launches are refused while a bottles move is in progress")
+    func launchRefusedWhileRelocating() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+        vm.isRelocating = { true }                        // a bottles move is underway
+        await vm.play(game)
+        #expect(!vm.isRunning(game))
+        #expect(vm.statusMessage?.contains("moving your bottles") == true)
+        #expect(!fake.invocations.contains { $0.detached })   // nothing spawned into a prefix being moved
+    }
+
     @Test("only the launching copy's button spins — the other bottle's copy stays idle mid-launch")
     func busySpinnerIsPerCopy() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

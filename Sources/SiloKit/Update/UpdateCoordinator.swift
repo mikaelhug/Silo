@@ -20,6 +20,9 @@ public final class UpdateCoordinator {
     private let updater: Updater
     /// Scratch dir the downloaded `.zip` is staged into (`AppPaths.updatesDir`).
     private let updatesDir: URL
+    /// Set by AppEnvironment: true while a game or Steam client is live. A self-update relaunches Silo
+    /// (which tears everything down), so it's refused while something runs.
+    var isBlocked: () -> Bool = { false }
 
     init(updater: Updater, updatesDir: URL) {
         self.updater = updater
@@ -41,6 +44,10 @@ public final class UpdateCoordinator {
     /// or on a download/install error. On success it relaunches and never returns.
     public func installUpdate() async {
         guard let check = updateCheck, check.isNewer else { return }
+        guard !isBlocked() else {
+            updateState = .failed("Stop running games first — installing an update relaunches Silo.")
+            return
+        }
         guard let appBundle = updater.appBundleToReplace() else {
             updateState = .failed("Silo isn't running from an installed app bundle.")
             return
