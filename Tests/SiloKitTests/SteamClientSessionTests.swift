@@ -89,6 +89,31 @@ struct SteamClientSessionTests {
         #expect(clock.now - start >= .seconds(0.25))   // it actually waited the failsafe, not an instant return
     }
 
+    @Test("stop() cancels a client caught MID-SPAWN — it self-terminates instead of becoming a 2nd client")
+    func stopCancelsMidSpawnBringUp() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let session = SteamClientSession(
+            bottle: SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths),
+            orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
+        session.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        session.readinessTimeout = 0
+        // Hold the spawn in flight so we can `stop()` before the session adopts the PID.
+        let gate = OneShotGate()
+        fake.onSpawnAwait = { await gate.wait() }
+
+        let launching = Task { await session.ensureRunning() }
+        for _ in 0..<500 where fake.invocations.isEmpty { await Task.yield() }   // spawn is now in flight
+        session.stop()             // cross-bottle teardown cancels the in-flight bring-up
+        await gate.open()          // let the spawn return its PID
+        let up = await launching.value
+
+        #expect(!up)               // the bring-up did NOT adopt the client…
+        #expect(!session.isRunning)
+        #expect(!fake.terminatedPIDs.isEmpty)   // …it terminated the process it had spawned (no 2nd client)
+    }
+
     // MARK: - Warm-up (first-run self-update folded into setup)
 
     /// A fresh-bootstrapper session (steam.exe present, no client yet) + its fake runner + paths.
@@ -176,5 +201,23 @@ struct SteamClientSessionTests {
         await session.warmUpUpdate { _ in }
 
         #expect(!fake.invocations.contains { $0.detached })   // never launched Steam — nothing to download
+    }
+}
+
+/// A one-shot async barrier for tests: `wait()` suspends until `open()` (returns immediately if already
+/// opened). Used to hold a fake spawn "in flight" while the test drives a mid-spawn race.
+actor OneShotGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var opened = false
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        guard !opened else { return }
+        opened = true
+        continuation?.resume(); continuation = nil
     }
 }

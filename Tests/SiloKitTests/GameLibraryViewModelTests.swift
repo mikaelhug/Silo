@@ -210,6 +210,34 @@ struct GameLibraryViewModelTests {
         #expect(FileManager.default.fileExists(atPath: winemetal.path))
     }
 
+    /// A minimal valid PE with the given COFF machine type (0x014c = i386/32-bit, 0x8664 = amd64).
+    private func makePE(machine: UInt16, peOffset: Int = 0x40) -> Data {
+        var data = Data(count: peOffset + 6)
+        data[0] = 0x4D; data[1] = 0x5A                                   // "MZ"
+        data[0x3C] = UInt8(peOffset & 0xFF); data[0x3D] = UInt8((peOffset >> 8) & 0xFF)
+        data[peOffset] = 0x50; data[peOffset + 1] = 0x45                 // "PE"
+        data[peOffset + 4] = UInt8(machine & 0xFF); data[peOffset + 5] = UInt8(machine >> 8)
+        return data
+    }
+
+    @Test("makeShortcut refuses a 32-bit game on GPTK (would launch to a wined3d-fallback failure, no steer)")
+    func makeShortcutRefuses32BitGPTK() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, _) = make(tmp)                       // GPTK-configured
+        let exe = tmp.url.appendingPathComponent("old32/game.exe")
+        try FileManager.default.createDirectory(
+            at: exe.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try makePE(machine: 0x014c).write(to: exe)          // a real i386 (32-bit) PE
+        let game = ManualGame(name: "Old32", executablePath: exe, backend: .gptk)
+        let dest = try tmp.makeDir("dest")
+
+        let app = await vm.makeShortcut(for: game, into: dest)
+
+        #expect(app == nil)                                 // refused up front, like playManual
+        #expect(vm.statusMessage?.contains("32-bit") == true)
+        #expect(!fake.invocations.contains { $0.arguments.contains("wineboot") })   // no prefix work done
+    }
+
     @Test("resolveMessage maps every launch-stack error to actionable text")
     func resolveMessageTable() {
         let cases: [(Error, String)] = [
@@ -487,7 +515,9 @@ struct GameLibraryViewModelTests {
         let (vm, fake, paths) = make(tmp)
         try installSteam(paths)
         // Two DIFFERENT Steam games in the SAME (GPTK) bottle whose exes share a basename.
-        try writeInstalledGame(paths, appID: 220, name: "A", dir: "GameA", exe: "launcher.exe")
+        // Basenames differ only in CASE — wine's taskkill /IM matches case-insensitively, so this must
+        // still be treated as a collision.
+        try writeInstalledGame(paths, appID: 220, name: "A", dir: "GameA", exe: "Launcher.exe")
         try writeInstalledGame(paths, appID: 400, name: "B", dir: "GameB", exe: "launcher.exe")
         await vm.load()
         let a = try #require(vm.games.first { $0.appID == 220 })
@@ -496,17 +526,17 @@ struct GameLibraryViewModelTests {
         await vm.play(b)
         #expect(vm.isRunning(a) && vm.isRunning(b))
         let loaderA = try #require(vm.pid(for: a))
-        let kill: [String] = ["taskkill", "/F", "/IM", "launcher.exe"]
 
-        // Stop A while B — same bottle, same image name — is live: /IM would take B down too, so it's dropped.
+        // Stop A ("Launcher.exe") while B ("launcher.exe") is live: /IM matches case-insensitively and would
+        // take B down too, so NO taskkill is issued at all (SIGTERM the loader only).
         await vm.stop(a)
         #expect(!vm.isRunning(a))
-        #expect(fake.terminatedPIDs.contains(loaderA))                    // SIGTERM the loader still happens
-        #expect(!fake.invocations.contains { $0.arguments == kill })      // but NOT the bystander-killing /IM
+        #expect(fake.terminatedPIDs.contains(loaderA))                       // SIGTERM the loader still happens
+        #expect(!fake.invocations.contains { $0.arguments.first == "taskkill" })   // but NO bystander-killing /IM
 
         // With A gone, B has no co-resident sharing its image — /IM is safe and fires.
         await vm.stop(b)
-        #expect(fake.invocations.contains { $0.arguments == kill })
+        #expect(fake.invocations.contains { $0.arguments == ["taskkill", "/F", "/IM", "launcher.exe"] })
     }
 
     @Test("play is refused while a self-update is installing (it relaunches Silo — a game would be orphaned)")
