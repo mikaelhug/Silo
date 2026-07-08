@@ -21,9 +21,10 @@
 </div>
 
 Silo stands up a real **Windows Steam client inside a Wine bottle**, and launches your games
-**co-resident with it** under Apple's D3DMetal — so Steamworks and Steam DRM just work, no emulator,
-no fakery. It downloads its own Wine (compiled from CrossOver's LGPL sources in Silo's CI), imports
-Apple's Game Porting Toolkit from your `.dmg`, and self-updates from GitHub Releases.
+**co-resident with it** on a Metal graphics backend — Apple's D3DMetal, or DXMT for titles it can't
+run — so Steamworks and Steam DRM just work, no emulator, no fakery. It downloads its own Wine
+(compiled from CrossOver's LGPL sources in Silo's CI), imports Apple's Game Porting Toolkit from your
+`.dmg`, and self-updates from GitHub Releases.
 
 ## Highlights
 
@@ -42,8 +43,9 @@ Apple's Game Porting Toolkit from your `.dmg`, and self-updates from GitHub Rele
   Steam readiness, and log tailing are all kqueue-driven. Bottles are relocatable to an external
   drive (with a progress bar; exFAT refused).
 - **Guardrails everywhere.** A silent GPTK→wined3d fallback is detected and surfaced instead of a
-  black window; a corrupt `config.json` restores from its automatic backup; launch logs open with
-  the fully resolved environment.
+  black window; a corrupt `config.json` restores from its automatic backup; a bottles move or
+  self-update is refused while a game or Steam client is live (and won't run over a process orphaned
+  by a prior crash); launch logs open with the fully resolved environment.
 
 ## How it works
 
