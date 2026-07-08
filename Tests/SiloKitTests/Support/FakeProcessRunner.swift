@@ -60,6 +60,28 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
         }
         handlers.forEach { $0() }
     }
+    /// Records the invocation (detached) so tests can assert a fire-and-forget teardown fired. Like the real
+    /// runner it does NOT wait; a `taskkill` here also clears the spawned "alive" PIDs so a session's Steam
+    /// reads as gone afterward, mirroring `run`'s taskkill handling.
+    func spawnDetachedForget(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, logURL: URL) {
+        let invocation = Invocation(
+            executable: executable, arguments: arguments, environment: environment,
+            currentDirectory: currentDirectory, detached: true, logURL: logURL)
+        let (hook, killed): (((Invocation) -> Void)?, [@Sendable () -> Void]) = lock.withLock {
+            _invocations.append(invocation)
+            var fired: [@Sendable () -> Void] = []
+            if arguments.first == "taskkill" {
+                for pid in _alivePIDs { fired += _exitHandlers[pid]?.map(\.run) ?? [] }
+                _alivePIDs.removeAll(); _exitHandlers.removeAll()
+            }
+            return (onRun, fired)
+        }
+        hook?(invocation)
+        killed.forEach { $0() }
+    }
+
     func isRunning(pid: Int32) -> Bool { lock.withLock { _alivePIDs.contains(pid) } }
 
     /// Mirrors the real runner: a start time only for a LIVE pid, deterministic per pid, stable across

@@ -22,6 +22,11 @@ public final class SteamClientSession {
     private var steamObserver: (any ProcessObservation)?
     /// The in-flight launch, so concurrent callers coalesce onto ONE instead of each starting Steam.
     private var steamLaunch: Task<Void, Never>?
+    /// Whether this session ever brought a client up in its bottle (incl. the warm-up). `stop()` force-quits
+    /// by image name only when true — Steam is multi-process AND re-execs itself, so the tracked `steamPID`
+    /// isn't enough (and goes nil after a re-exec); this gate also keeps a force-quit from touching a bottle
+    /// whose prefix we never provisioned. Stays true for the session once set (a repeat kill is a safe no-op).
+    private var didStartClient = false
     /// Last-resort failsafe (seconds) for the readiness wait so a missing signal can't hang a launch — NOT
     /// a fixed wait: a cold start resolves the instant Steam registers its `ActiveProcess` (event-driven,
     /// see `awaitSteamReady`). 0 disables the wait entirely (tests).
@@ -42,7 +47,11 @@ public final class SteamClientSession {
     /// setup (there's no tracked `steamPID` then — the warm-up owns the PID locally) is still caught by the
     /// next launch's relocation/update gate. Upsert by key (a relaunch replaces the prior pid); self-pruned
     /// once it dies (the warm-up force-quits it at the end, so normally it's gone by the next gate read).
-    private func recordWarmUp(_ pid: Int32?) { if let pid { ledger?.record(ledgerKey, pid: pid) } }
+    private func recordWarmUp(_ pid: Int32?) {
+        guard let pid else { return }
+        didStartClient = true          // a quit during warm-up must still force-quit this bottle's Steam
+        ledger?.record(ledgerKey, pid: pid)
+    }
 
     /// Defensive teardown: the live VMs are process-lifetime singletons, so this normally never fires, but
     /// it ensures the exit observation + any in-flight launch don't outlive the session if that ever changes.
@@ -68,6 +77,12 @@ public final class SteamClientSession {
         // terminating by PID alone would miss it and leave two clients live. `startSteam` checks
         // `Task.isCancelled` right after the spawn and self-terminates the process it just launched.
         steamLaunch?.cancel()
+        // Force-quit the WHOLE Steam tree by image name, independent of the tracked PID. Steam is
+        // multi-process (a loader SIGTERM leaves steamwebhelper alive) and re-execs itself (so `steamPID` is
+        // often nil here) — the loader SIGTERM below alone leaves Steam running, which is exactly the "Steam
+        // stays open after quit / after switching bottles" bug. Fire-and-forget so it also works from
+        // `applicationWillTerminate`, where an async kill wouldn't finish before `exit(0)`.
+        if didStartClient { bottle.forceQuitSync(wine: wineBinary) }
         guard let pid = steamPID else { return }
         orchestrator.terminate(pid: pid)
         steamPID = nil
@@ -228,6 +243,7 @@ public final class SteamClientSession {
         // adopt the process — terminate it, so we never end up with two Steam clients for one account.
         guard !Task.isCancelled else { orchestrator.terminate(pid: pid); return }
         steamPID = pid
+        didStartClient = true          // so `stop()` force-quits the tree even after Steam re-execs itself
         launchError = nil
         ledger?.record(ledgerKey, pid: pid)
         steamObserver = orchestrator.observeExit(pid: pid) { [weak self] in

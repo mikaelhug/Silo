@@ -376,10 +376,28 @@ public struct SteamBottle: Sendable {
     /// them all. Runs with the bottle's msync env so it attaches to the same wineserver.
     func forceQuit(wine: URL?) async {
         guard let wine else { return }
-        for image in ["steamwebhelper.exe", "steam.exe"] {
+        for image in Self.steamProcessImages {
             _ = try? await runner.run(
                 executable: wine, arguments: ["taskkill", "/F", "/IM", image],
                 environment: steamEnvironment(wine: wine), currentDirectory: clientDir)
+        }
+    }
+
+    /// The Steam process images `forceQuit` kills by name. steamwebhelper first — it's the CEF tree a plain
+    /// loader-SIGTERM leaves alive; `steam.exe` is the client (and any re-exec'd copy the updater spawned).
+    static let steamProcessImages = ["steamwebhelper.exe", "steam.exe"]
+
+    /// Synchronous, fire-and-forget force-quit for the **app-quit** path — `taskkill /F /IM` each Steam
+    /// image via `spawnDetachedForget`, so the kills survive Silo's own `exit(0)` and take down the whole
+    /// Steam tree even though `stop()`'s loader SIGTERM can't (Steam is multi-process and re-execs itself).
+    /// Mirrors `forceQuit` but never awaits; caller gates on having actually started a client so this never
+    /// touches an untouched prefix.
+    func forceQuitSync(wine: URL?) {
+        guard let wine else { return }
+        for image in Self.steamProcessImages {
+            runner.spawnDetachedForget(
+                executable: wine, arguments: ["taskkill", "/F", "/IM", image],
+                environment: steamEnvironment(wine: wine), currentDirectory: clientDir, logURL: log)
         }
     }
 

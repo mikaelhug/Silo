@@ -54,6 +54,16 @@ public struct SystemProcessRunner: ProcessRunning {
         }
     }
 
+    public func spawnDetachedForget(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, logURL: URL) {
+        // Synchronous fork+exec, no wait — the child is a separate process that survives our own exit(0).
+        // Best-effort: at app-quit there's no one to surface an error to.
+        _ = try? Self.spawnSync(
+            executable: executable, arguments: arguments,
+            environment: environment, currentDirectory: currentDirectory, logURL: logURL)
+    }
+
     public func isRunning(pid: Int32) -> Bool {
         guard pid > 0 else { return false }
         // kill(pid, 0): 0 → alive & signalable; EPERM → alive but not ours; ESRCH → gone.
