@@ -3,6 +3,35 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔁 Second adversarial sweep (post-0.3.0) — 8 more real bugs, all fixed (2026-07-08, `main`; serial +
+  parallel green, 362 tests).** Prompted by "are there no more remaining fixes?" — a fresh three-lens review
+  (ledger/gates, launch/co-residency, setup/readiness) that INCLUDED the just-shipped crash-orphan code found
+  bugs file-local review missed. Commits `656f608`→`3ebcf11`:
+  - **(HIGH) Durable ledger dropped an entry before confirmed death.** `terminateAllSync`/`stop`/`clear`
+    removed optimistically right after a bare async SIGTERM — on a clean quit where the game outlived the
+    signal, the next launch's gate saw no survivor → move/update over a live wineserver. Now removed ONLY on
+    confirmed death (kqueue exit) or self-prune (once the PID is actually gone). The exact false-negative the
+    ledger exists to prevent.
+  - **(HIGH) Relocation vacuously "succeeded" when the current root was on an ejected drive** → persisted the
+    new location + relaunched into an empty dir while the real bottles sat orphaned on the drive. Now refuses
+    until `bottlesRootReachable`.
+  - **(MED-HIGH) The gate was blind to in-flight work:** `isAnythingRunning` ignored the busy sets (a launch
+    that claimed a bottle but hadn't spawned), and `anythingRunning` ignored a bottle mid-setup/warm-up. Both
+    now count; the warm-up download client is also recorded in the ledger (crash-during-setup).
+  - **(MED) Launches weren't blocked during a self-update** (ends in `exit(0)`, no teardown → orphan) and a
+    move + update could overlap (both relaunch). `launchBlockedByBottles` now refuses during an update; the
+    gate is mutually exclusive with a move/update in flight.
+  - **(MED) openSteam/uninstall could race a cross-bottle `play` into TWO live Steam clients** (one account →
+    Steam logs one out). `stop()` no-op'd against a client caught mid-spawn; it now cancels the in-flight
+    launch and `startSteam` self-terminates if cancelled after the spawn.
+  - **(LOW-MED) `makeShortcut` skipped the 32-bit-on-GPTK refusal** → a shortcut that launches to a
+    wined3d-fallback failure with no steer. Now refused like `playManual`.
+  - **(LOW) taskkill sibling-collision guard was case-sensitive** but wine's `/IM` isn't — `Game.exe` vs
+    `game.exe` slipped through. Now case-folded.
+  - **Verified sound (no change):** the `(pid, startTime)` reuse-proofing, the seed exclude-list + setup-gate
+    (the two earlier user-found bugs can't regress), `ensureRunning` coalescing/readiness, ConfigStore
+    recovery. Residual: a game that re-execs under a PID Silo never recorded still needs the on-device
+    wineserver-lock probe (a Wine-verified handoff item).
 - **🏛️ Architecture-level review before onboarding users — 4 themes, ~15 bugs, all fixed (2026-07-07, branch
   `gptk-path-review`; SERIAL + PARALLEL both green, 340 tests).** Three lifecycle-scoped adversarial reviewers
   (launch/co-residency, setup/discovery/onboarding, relocation/update/persistence) found cross-subsystem
