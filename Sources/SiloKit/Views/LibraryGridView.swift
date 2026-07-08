@@ -33,8 +33,8 @@ struct LibraryGridView: View {
         .navigationTitle("Library")
         .toolbar {
             if showLibrary {
-                Button { Task { await lib.openSteam() } } label: { Label("Open Steam", systemImage: "cart") }
-                    .help("Open the bottle's Steam to browse + install games")
+                openSteamControl(lib) { Label("Open Steam", systemImage: "cart") }
+                    .help("Open a Steam bottle to browse + install games")
                 Button { showAddGame = true } label: { Label("Add Game", systemImage: "plus") }
                     .help("Add a non-Steam .exe game")
                 Button { Task { await lib.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
@@ -69,6 +69,22 @@ struct LibraryGridView: View {
         "\(count) \(count == 1 ? "game" : "games")"
     }
 
+    /// "Open Steam" — a plain button that opens the GPTK bottle, or a menu (GPTK + DXMT) once the DXMT
+    /// Steam bottle is also set up. Each bottle has its own Steam install/login, so a dual-bottle user picks
+    /// which one to browse/install in; a single-bottle user still gets a one-click button.
+    @ViewBuilder
+    private func openSteamControl<L: View>(
+        _ lib: GameLibraryViewModel, @ViewBuilder label: () -> L) -> some View {
+        if lib.steamInstalled(.dxmt) {
+            Menu {
+                Button("\(GraphicsBackend.gptk.displayName) bottle") { Task { await lib.openSteam(.gptk) } }
+                Button("\(GraphicsBackend.dxmt.displayName) bottle") { Task { await lib.openSteam(.dxmt) } }
+            } label: { label() }
+        } else {
+            Button { Task { await lib.openSteam(.gptk) } } label: { label() }
+        }
+    }
+
     private let columns = [GridItem(.adaptive(minimum: 250), spacing: 16)]
 
     @ViewBuilder
@@ -85,7 +101,7 @@ struct LibraryGridView: View {
                 } description: {
                     Text("Install games from the bottle's Steam, or add a non-Steam .exe game.")
                 } actions: {
-                    Button("Open Steam") { Task { await lib.openSteam() } }
+                    openSteamControl(lib) { Text("Open Steam") }
                     Button("Add Game…") { showAddGame = true }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

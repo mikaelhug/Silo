@@ -267,18 +267,19 @@ public final class GameLibraryViewModel {
 
     // MARK: - Install / uninstall (routed through the shared Steam client)
 
-    /// Open the (GPTK, primary) bottle's Steam so the user can browse + install games. Refuses if a game is
-    /// live in the OTHER bottle (bringing a second client up for the same account would kill it), and stops
-    /// any idle client in the other bottle to keep the one-client rule.
-    public func openSteam() async {
+    /// Open a bottle's Steam so the user can browse + install games. Backend-parameterized — each bottle
+    /// (GPTK, DXMT) has its OWN Steam install/login, so the library offers whichever bottles are set up.
+    /// Refuses if a game is live in the OTHER bottle (bringing a second client up for the same account would
+    /// kill it), and stops any idle client in the other bottle to keep the one-client rule.
+    public func openSteam(_ graphics: GraphicsBackend = .gptk) async {
         if launchBlockedByBottles() { return }
-        if let otherBackend = activeSteamBackend(excluding: .gptk) {
+        if let otherBackend = activeSteamBackend(excluding: graphics) {
             setStatus("A game is running in the \(otherBackend.displayName) bottle — "
                 + "stop it first before opening Steam.")
             return
         }
-        stopOtherSteamClients(except: .gptk)
-        await session.ensureRunning()
+        stopOtherSteamClients(except: graphics)
+        await clientSession(for: graphics).ensureRunning()
     }
 
     /// Ask the game's OWN bottle's Steam to uninstall it, then refresh. Routes through that backend's
