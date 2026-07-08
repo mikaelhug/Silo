@@ -6,14 +6,14 @@
     <title>Silo - Windows Steam games on Apple Silicon</title>
     <meta
       name="description"
-      content="Silo is a native, open-source macOS launcher for your Windows Steam library. It runs games through Wine and Apple's Game Porting Toolkit (D3DMetal), each in its own isolated runtime, with a real Steam client so Steamworks works."
+      content="Silo is a native, open-source macOS launcher for your Windows Steam library. It runs games through Wine on two selectable Metal backends — Apple's GPTK/D3DMetal and DXMT — co-resident with a real Steam client so Steamworks and DRM work, plus isolated Wine bottles for non-Steam games."
     >
     <meta name="theme-color" content="#0a0c10">
     <link rel="canonical" href="https://mikaelhug.github.io/Silo/">
     <meta property="og:title" content="Silo - Windows Steam games on Apple Silicon">
     <meta
       property="og:description"
-      content="A native macOS launcher for Windows Steam games: Wine + Apple GPTK/D3DMetal graphics, isolated per-game runtimes, and a co-resident Steam client so Steamworks works."
+      content="A native macOS launcher for Windows Steam games: Wine with two Metal backends (Apple GPTK/D3DMetal + DXMT), a co-resident Steam client so Steamworks and DRM work, and isolated bottles for non-Steam games."
     >
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://mikaelhug.github.io/Silo/">
@@ -22,7 +22,7 @@
     <meta name="twitter:title" content="Silo - Windows Steam games on Apple Silicon">
     <meta
       name="twitter:description"
-      content="A native, open-source macOS launcher for Windows Steam games via Wine + Apple's Game Porting Toolkit."
+      content="A native, open-source macOS launcher for Windows Steam games — Wine with GPTK/D3DMetal + DXMT graphics and a real co-resident Steam client."
     >
     <meta name="twitter:image" content="https://mikaelhug.github.io/Silo/images/dashboard.png">
     <link rel="stylesheet" href="styles.css">
@@ -33,7 +33,7 @@
         "name": "Silo",
         "applicationCategory": "GameApplication",
         "operatingSystem": "macOS 15+ on Apple Silicon",
-        "description": "A native, open-source macOS launcher for Windows Steam games via Wine and Apple's Game Porting Toolkit (D3DMetal).",
+        "description": "A native, open-source macOS launcher for Windows Steam games via Wine, with two selectable Metal graphics backends — Apple's Game Porting Toolkit (D3DMetal) and DXMT — and a co-resident Steam client so Steamworks and DRM work.",
         "url": "https://mikaelhug.github.io/Silo/",
         "downloadUrl": "https://github.com/mikaelhug/Silo/releases",
         "codeRepository": "https://github.com/mikaelhug/Silo",
@@ -92,8 +92,8 @@
         <h1>Silo</h1>
         <p class="lede">
           A native macOS launcher for your Windows Steam library — run games
-          through Wine and Apple's Game Porting Toolkit, each in its own isolated
-          runtime, with a real Steam client so Steamworks just works.
+          through Wine on two Metal backends, Apple's GPTK/D3DMetal and DXMT,
+          co-resident with a real Steam client so Steamworks and DRM just work.
         </p>
         <div class="actions" aria-label="Primary actions">
           <a class="button primary" href="#install">Install Silo</a>
@@ -104,7 +104,7 @@
         <img
           src="images/dashboard.png"
           alt="Silo library window — a grid of installed Steam games (Bloons TD 6, Bloons TD Battles 2, It Takes Two, Overcooked 2, Split Fiction, Victoria 3), each with cover art, install size, a per-game GPTK or DXMT graphics-backend badge, and a Play button"
-          width="1180"
+          width="960"
         >
       </div>
     </header>
@@ -113,8 +113,8 @@
       <section class="section" style="padding-top: clamp(48px, 7vw, 84px)">
         <div class="metric-band" aria-label="Silo at a glance">
           <div class="metric">
-            <span class="metric-value">GPTK</span>
-            <span class="metric-label">Apple D3DMetal maps DirectX 10/11/12 straight to Metal</span>
+            <span class="metric-value">GPTK + DXMT</span>
+            <span class="metric-label">two Metal backends, selectable per game</span>
           </div>
           <div class="metric">
             <span class="metric-value">One prefix</span>
@@ -149,8 +149,8 @@
             <h3>Your real Steam library</h3>
             <p>
               Silo discovers the games installed in its Steam bottle and launches
-              each one under GPTK — co-resident with a logged-in Steam client, so
-              Steamworks and DRM titles run.
+              each one on its backend — co-resident with a logged-in Steam client,
+              so Steamworks and DRM titles run. No emulator, no fakery.
             </p>
           </article>
           <article class="feature">
@@ -161,10 +161,12 @@
                 <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"></path>
               </svg>
             </div>
-            <h3>Apple GPTK graphics</h3>
+            <h3>Two Metal backends, per game</h3>
             <p>
-              D3DMetal maps DirectX 10/11/12 and DXGI straight to Metal; DirectX 9,
-              8, and OpenGL fall back to Wine's own renderer. No DXVK, no Homebrew.
+              GPTK / D3DMetal (Apple's) maps DirectX 10/11/12 to Metal; DXMT
+              translates DirectX 10/11 directly — the per-game fallback for titles
+              GPTK can't run. DirectX 9/8 and OpenGL use Wine's own renderer. No
+              DXVK, no Homebrew.
             </p>
           </article>
           <article class="feature">
@@ -175,11 +177,12 @@
                 <path d="M3 17l9 4 9-4"></path>
               </svg>
             </div>
-            <h3>A bottle per game</h3>
+            <h3>Non-Steam games too</h3>
             <p>
               Add any Windows <code>.exe</code> — an installer or a portable build —
-              and Silo provisions a dedicated, isolated Wine prefix for it. Relocate
-              every bottle to an external drive anytime.
+              and Silo provisions a dedicated, isolated Wine bottle for it, with its
+              own backend and launch options, plus an optional Desktop shortcut.
+              Relocate every bottle to an external drive anytime.
             </p>
           </article>
           <article class="feature">
@@ -203,12 +206,12 @@
       <section class="split" id="how">
         <div>
           <p class="eyebrow">How a launch works</p>
-          <h2>Single downloader, isolated runtimes</h2>
+          <h2>One Steam per backend, games co-resident</h2>
           <p>
-            Steam is installed once into a single master bottle that only downloads
-            games. Each game then launches in its own runtime — graphics backend and
-            environment injected at launch — so one finicky title can't disturb the
-            rest of your library.
+            Each backend gets one shared Steam bottle. A Steam game launches
+            <em>co-resident</em> with that logged-in client — so Steamworks and DRM
+            work — with the graphics backend and environment injected at launch.
+            Non-Steam <code>.exe</code>s each get their own isolated bottle instead.
           </p>
         </div>
         <div class="flow" aria-label="The launch pipeline">
@@ -216,28 +219,28 @@
             <span class="n" aria-hidden="true">1</span>
             <div>
               <h4>Discover</h4>
-              <p>Parse the bottle's <code>appmanifest_*.acf</code> for installed games, skipping Steam's redistributables.</p>
+              <p>Parse each bottle's <code>appmanifest_*.acf</code> for installed games — a game's backend is the bottle it's in — skipping Steam's redistributables.</p>
             </div>
           </div>
           <div class="flow-step">
             <span class="n" aria-hidden="true">2</span>
             <div>
               <h4>Provision</h4>
-              <p>Seed the game's Wine prefix with an idempotent <code>wineboot</code>.</p>
+              <p>Seed the target prefix — the backend's shared Steam bottle, or a manual game's own bottle — with an idempotent <code>wineboot</code>.</p>
             </div>
           </div>
           <div class="flow-step">
             <span class="n" aria-hidden="true">3</span>
             <div>
               <h4>Link graphics</h4>
-              <p>Overlay Apple GPTK / D3DMetal into the runtime for DirectX&nbsp;→&nbsp;Metal.</p>
+              <p>Overlay the chosen backend (GPTK/D3DMetal or DXMT) into the runtime's own <code>lib/wine</code>, forced builtin so nothing can shadow it.</p>
             </div>
           </div>
           <div class="flow-step">
             <span class="n" aria-hidden="true">4</span>
             <div>
               <h4>Launch</h4>
-              <p>Spawn the game detached, with <code>WINEPREFIX</code> pointed at its isolated bottle.</p>
+              <p>Spawn the game detached — co-resident with its Steam client for Steam titles, or in its own bottle for non-Steam <code>.exe</code>s.</p>
             </div>
           </div>
         </div>
@@ -250,12 +253,16 @@
         </div>
         <div class="comparison">
           <div class="comparison-row">
-            <span>DirectX 12 / 11 / 10 + DXGI</span>
+            <span>DirectX 12</span>
             <strong>GPTK · D3DMetal → Metal</strong>
           </div>
           <div class="comparison-row">
+            <span>DirectX 11 / 10 + DXGI</span>
+            <strong>GPTK · D3DMetal — or DXMT → Metal</strong>
+          </div>
+          <div class="comparison-row">
             <span>DirectX 9 / 8 / DirectDraw</span>
-            <strong>Wine wined3d → OpenGL</strong>
+            <strong>Wine's wined3d → OpenGL</strong>
           </div>
           <div class="comparison-row">
             <span>OpenGL</span>
@@ -267,8 +274,9 @@
           </div>
         </div>
         <p class="note">
-          Apple's Game Porting Toolkit accelerates modern DirectX; Wine's own stack
-          covers the rest. The game drives the API — Silo picks the translation.
+          GPTK / D3DMetal is the default; DXMT is the per-game fallback for DirectX
+          10/11 titles GPTK's device creation can't run. Wine's own stack covers
+          DirectX 9 and OpenGL. The game drives the API — you pick the backend per game.
         </p>
       </section>
 

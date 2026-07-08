@@ -290,7 +290,7 @@ h3 {
 .hero-shot {
   position: relative;
   z-index: 1;
-  width: min(1100px, calc(100% - 24px));
+  width: min(960px, calc(100% - 24px));
   margin: clamp(52px, 7vw, 92px) auto 0;
 }
 
