@@ -188,6 +188,31 @@ struct SteamClientSessionTests {
         #expect(phases.contains(.finishing))
     }
 
+    @Test("warmUpUpdate shadows its download client into the ledger (crash-during-setup safety)")
+    func warmUpRecordsClientToLedger() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let ledger = ProcessLedger(url: paths.processLedgerFile, runner: fake)
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+        let session = SteamClientSession(
+            bottle: bottle, orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()),
+            ledger: ledger)
+        session.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        session.warmUpPollInterval = 0.005
+        session.warmUpTimeout = 0.05        // never commits → exits via the failsafe quickly
+        session.warmUpMaxRelaunches = 0
+        session.warmUpForceQuitSettle = 0
+        try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+
+        // The download client is alive AND recorded during the warm-up — observed via onProgress, before the
+        // failsafe shutdown tears it down. A crash in this window would otherwise orphan an untracked client.
+        let sawSurvivor = LockedBox(false)
+        await session.warmUpUpdate { _ in if ledger.hasLiveSurvivor() { sawSurvivor.set(true) } }
+        #expect(sawSurvivor.value)
+    }
+
     @Test("warmUpUpdate is a no-op when the client is already fully downloaded")
     func warmUpNoOpWhenPresent() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
