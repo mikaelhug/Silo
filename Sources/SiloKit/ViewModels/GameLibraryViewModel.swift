@@ -23,9 +23,16 @@ public final class GameLibraryViewModel {
     public private(set) var manualBusyIDs: Set<UUID> = []
 
     public var searchText: String = ""
-    /// The most recent action result, shown in the library's status bar. Persists until the next action
-    /// replaces it (no timed auto-dismiss — nothing in the app waits).
+    /// The most recent action result, shown in the library's status bar. Transient: it self-clears a few
+    /// seconds after it's set (see `setStatus`), so a stale "Launched …" doesn't linger once the game's
+    /// closed. The next action replaces it immediately (and resets the timer).
     public private(set) var statusMessage: String?
+    /// The pending auto-dismiss of `statusMessage` — cancelled/replaced by the next `setStatus` so a stale
+    /// timer can never wipe a newer message.
+    private var statusDismissal: Task<Void, Never>?
+    /// How long a status line stays before it self-clears. A transient confirmation, not a persistent
+    /// banner. Overridable so tests assert the auto-dismiss without a real-time wait.
+    var statusVisibleDuration: Duration = .seconds(5)
 
     private let bottle: SteamBottle
     private let discovery: DiscoveryEngine
@@ -200,7 +207,21 @@ public final class GameLibraryViewModel {
         return ByteCountFormatter.string(fromByteCount: game.sizeOnDisk, countStyle: .file)
     }
 
-    private func setStatus(_ message: String?) { statusMessage = message }
+    /// Show a transient status line, then auto-clear it after `statusVisibleDuration`. Each call cancels the
+    /// previous message's dismissal, so a fresh status resets the timer and a stale timer can never clear a
+    /// newer message. Passing nil clears immediately.
+    private func setStatus(_ message: String?) {
+        statusDismissal?.cancel()
+        statusMessage = message
+        guard message != nil else { statusDismissal = nil; return }
+        let duration = statusVisibleDuration
+        statusDismissal = Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled else { return }   // superseded by a newer status → leave it be
+            self?.statusMessage = nil
+            self?.statusDismissal = nil
+        }
+    }
 
     // MARK: - Library
 
