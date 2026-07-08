@@ -31,6 +31,15 @@ public protocol ProcessRunning: Sendable {
         logURL: URL
     ) async throws -> Int32
 
+    /// Launch detached **synchronously** — fork+exec on the calling thread, return immediately without an
+    /// `async` hop and without waiting for the child. For app-quit teardown (`applicationWillTerminate`),
+    /// where an `async` spawn wouldn't complete before `exit(0)`: the child outlives Silo, so a
+    /// fire-and-forget `taskkill` / `wineserver -k` still runs after it exits. Best-effort — a launch
+    /// failure is swallowed. Default: no-op.
+    func spawnDetachedForget(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, logURL: URL)
+
     /// Whether a process with this PID is currently alive (for tracking a launched game).
     func isRunning(pid: Int32) -> Bool
 
@@ -56,5 +65,8 @@ public final class NoopObservation: ProcessObservation {
 
 extension ProcessRunning {
     public func terminate(pid: Int32) {}
+    public func spawnDetachedForget(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, logURL: URL) {}
     public func startTime(pid: Int32) -> Date? { nil }
 }

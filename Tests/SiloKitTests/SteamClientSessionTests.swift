@@ -114,6 +114,44 @@ struct SteamClientSessionTests {
         #expect(!fake.terminatedPIDs.isEmpty)   // …it terminated the process it had spawned (no 2nd client)
     }
 
+    @Test("stop() force-quits the whole Steam tree by image name (a loader SIGTERM alone leaves it running)")
+    func stopForceQuitsSteamTree() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let session = SteamClientSession(
+            bottle: SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths),
+            orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
+        session.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        session.readinessTimeout = 0
+        await session.ensureRunning()
+        #expect(session.isRunning)
+
+        session.stop()
+
+        // Killed BOTH Steam images (steamwebhelper — the CEF tree a loader SIGTERM leaves alive — then
+        // steam.exe, incl. any re-exec'd copy), regardless of the tracked loader PID.
+        for image in ["steamwebhelper.exe", "steam.exe"] {
+            #expect(fake.invocations.contains { $0.arguments == ["taskkill", "/F", "/IM", image] })
+        }
+        #expect(!session.isRunning)
+    }
+
+    @Test("stop() does NOT force-quit a bottle whose client it never started (no phantom taskkill)")
+    func stopSkipsUntouchedBottle() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let session = SteamClientSession(
+            bottle: SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths),
+            orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
+        session.updateWine(URL(fileURLWithPath: "/w/wine64"))
+
+        session.stop()   // never started a client this session
+
+        #expect(!fake.invocations.contains { $0.arguments.first == "taskkill" })
+    }
+
     // MARK: - Warm-up (first-run self-update folded into setup)
 
     /// A fresh-bootstrapper session (steam.exe present, no client yet) + its fake runner + paths.
