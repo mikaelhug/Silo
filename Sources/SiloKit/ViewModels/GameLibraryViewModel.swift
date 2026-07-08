@@ -395,8 +395,10 @@ public final class GameLibraryViewModel {
         // one happens to share this exe's basename, /IM would take it down too. Drop to a SIGTERM-only stop
         // (the loader PID) in that rare case rather than risk a bystander. Manual games each get their own
         // isolated bottle, so they never share this wineserver.
+        // Case-insensitive: wine's `taskkill /IM` matches image names case-insensitively, so `Game.exe`
+        // and `game.exe` collide.
         let siblings = coResidentImageNames(excluding: game, in: state)
-        let safeExeName = exeName.flatMap { siblings.contains($0) ? nil : $0 }
+        let safeExeName = exeName.flatMap { siblings.contains($0.lowercased()) ? nil : $0 }
         await orchestrator.stopGame(
             pid: pid, exeName: safeExeName, prefix: paths.steamBottle(game.backend), backend: backend)
         processes.clear(gameID(game), ifPID: pid)
@@ -413,7 +415,7 @@ public final class GameLibraryViewModel {
             && processes.pid(for: gameID(other)) != nil {
             if let name = orchestrator.resolvedExecutableName(
                 app: other, config: state.config(for: other.appID, backend: other.backend)) {
-                names.insert(name)
+                names.insert(name.lowercased())   // case-folded — see `stop`'s case-insensitive match
             }
         }
         return names
@@ -604,6 +606,13 @@ public final class GameLibraryViewModel {
     @discardableResult
     public func makeShortcut(for game: ManualGame, into directory: URL? = nil) async -> URL? {
         if launchBlockedByBottles() { return nil }   // prepareGraphics seeds the prefix — not during a move
+        // A 32-bit game on GPTK can't render (GPTK / D3DMetal is 64-bit-only), so the shortcut would launch
+        // to a wined3d-fallback failure with no in-app steer. Refuse here exactly like `playManual` does.
+        if game.backend == .gptk, WindowsExecutable.is32Bit(game.executablePath) {
+            setStatus(Self.unsupported32BitMessage(
+                name: game.name, isSteamGame: false, dxmtAvailable: backend.libDir(for: .dxmt) != nil))
+            return nil
+        }
         guard let dir = directory
             ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first else { return nil }
         let cfg = backend

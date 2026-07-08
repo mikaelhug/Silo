@@ -30,6 +30,10 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
     }
     /// Invoked (outside the lock) for every call, before returning — use to mutate a fake FS.
     var onRun: (@Sendable (Invocation) -> Void)?
+    /// Optional async barrier awaited inside `spawnDetached` AFTER the invocation is recorded but BEFORE the
+    /// PID is returned — lets a test hold a spawn "in flight" to exercise mid-spawn races (e.g. a `stop()`
+    /// cancelling a Steam client bring-up before it adopts its PID).
+    var onSpawnAwait: (@Sendable () async -> Void)?
 
     private var _nextSpawnPID: Int32 = 4242
     private var _alivePIDs: Set<Int32> = []
@@ -146,6 +150,7 @@ final class FakeProcessRunner: ProcessRunning, @unchecked Sendable {
             return (onRun, pid)
         }
         hook?(invocation)
+        if let barrier = onSpawnAwait { await barrier() }   // hold the spawn in flight if a test asked
         return pid
     }
 }

@@ -57,6 +57,11 @@ public final class SteamClientSession {
     /// Stop this bottle's Steam client (best-effort). Used to keep only ONE client online at a time across
     /// the two Steam bottles — the same Steam account can't be "in-game" on two clients at once.
     public func stop() {
+        // Cancel any in-flight bring-up too: `stopOtherSteamClients` relies on `stop` to enforce the
+        // one-account-one-client rule across bottles, but a client caught MID-SPAWN has no `steamPID` yet, so
+        // terminating by PID alone would miss it and leave two clients live. `startSteam` checks
+        // `Task.isCancelled` right after the spawn and self-terminates the process it just launched.
+        steamLaunch?.cancel()
         guard let pid = steamPID else { return }
         orchestrator.terminate(pid: pid)
         steamPID = nil
@@ -211,6 +216,9 @@ public final class SteamClientSession {
 
     private func startSteam() async {
         guard let pid = await launchSteamProcess() else { return }
+        // A cross-bottle `stop()` cancelled this bring-up while the spawn was in flight (see `stop`). Don't
+        // adopt the process — terminate it, so we never end up with two Steam clients for one account.
+        guard !Task.isCancelled else { orchestrator.terminate(pid: pid); return }
         steamPID = pid
         launchError = nil
         ledger?.record(ledgerKey, pid: pid)
