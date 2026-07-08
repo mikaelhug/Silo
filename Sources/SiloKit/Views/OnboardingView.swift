@@ -53,8 +53,12 @@ struct OnboardingView: View {
                         .multilineTextAlignment(.center).frame(maxWidth: 540)
                 }
 
-                Link("Get GPTK from Apple (Apple ID required)", destination: Silo.appleGPTKURL)
-                    .font(.caption)
+                // Only until GPTK is imported — once the user has pointed Silo at the .dmg (step 2 "Done"),
+                // the "where to download it" link is just clutter.
+                if !env.gptkReady {
+                    Link("Get GPTK from Apple (Apple ID required)", destination: Silo.appleGPTKURL)
+                        .font(.caption)
+                }
             }
             .padding(40)
             .frame(maxWidth: .infinity)
