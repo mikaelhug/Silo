@@ -304,11 +304,13 @@ h3 {
   z-index: -1;
 }
 
-.hero-shot svg {
+.hero-shot img {
   display: block;
   width: 100%;
   height: auto;
-  filter: drop-shadow(0 40px 100px rgba(0, 0, 0, 0.62));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.62);
 }
 
 /* ---------- buttons ---------- */
