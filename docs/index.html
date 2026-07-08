@@ -17,12 +17,14 @@
     >
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://mikaelhug.github.io/Silo/">
-    <meta name="twitter:card" content="summary">
+    <meta property="og:image" content="https://mikaelhug.github.io/Silo/images/dashboard.png">
+    <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Silo - Windows Steam games on Apple Silicon">
     <meta
       name="twitter:description"
       content="A native, open-source macOS launcher for Windows Steam games via Wine + Apple's Game Porting Toolkit."
     >
+    <meta name="twitter:image" content="https://mikaelhug.github.io/Silo/images/dashboard.png">
     <link rel="stylesheet" href="styles.css">
     <script type="application/ld+json">
       {
@@ -35,7 +37,8 @@
         "url": "https://mikaelhug.github.io/Silo/",
         "downloadUrl": "https://github.com/mikaelhug/Silo/releases",
         "codeRepository": "https://github.com/mikaelhug/Silo",
-        "programmingLanguage": ["Swift"]
+        "programmingLanguage": ["Swift"],
+        "screenshot": "https://mikaelhug.github.io/Silo/images/dashboard.png"
       }
     </script>
   </head>
@@ -98,89 +101,11 @@
         </div>
       </div>
       <div class="hero-shot">
-        <svg viewBox="0 0 1100 680" role="img" aria-label="The Silo library window: a grid of game cards under a title bar, with one game selected and ready to launch" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="cardA" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#3b82d6"></stop>
-              <stop offset="0.62" stop-color="#1e477f"></stop>
-              <stop offset="1" stop-color="#0d1626"></stop>
-            </linearGradient>
-            <linearGradient id="cardB" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#8a6ef0"></stop>
-              <stop offset="0.62" stop-color="#4a3a86"></stop>
-              <stop offset="1" stop-color="#161226"></stop>
-            </linearGradient>
-            <linearGradient id="cardC" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#2bb6c4"></stop>
-              <stop offset="0.62" stop-color="#1a5e6e"></stop>
-              <stop offset="1" stop-color="#0d2026"></stop>
-            </linearGradient>
-            <linearGradient id="cardD" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#d6633b"></stop>
-              <stop offset="0.62" stop-color="#7a3a1e"></stop>
-              <stop offset="1" stop-color="#261410"></stop>
-            </linearGradient>
-          </defs>
-
-          <!-- window -->
-          <rect x="8" y="8" width="1084" height="664" rx="18" fill="#11141b" stroke="rgba(255,255,255,0.10)"></rect>
-          <!-- title bar -->
-          <circle cx="40" cy="44" r="7" fill="#ff5f57"></circle>
-          <circle cx="62" cy="44" r="7" fill="#febc2e"></circle>
-          <circle cx="84" cy="44" r="7" fill="#28c840"></circle>
-          <text x="550" y="50" text-anchor="middle" fill="#eef1f6" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="700" letter-spacing="-0.01em">Silo</text>
-          <rect x="856" y="31" width="200" height="26" rx="13" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.10)"></rect>
-          <circle cx="874" cy="44" r="5" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.6"></circle>
-          <line x1="878" y1="48" x2="882" y2="52" stroke="rgba(255,255,255,0.5)" stroke-width="1.6" stroke-linecap="round"></line>
-          <line x1="8" y1="84" x2="1092" y2="84" stroke="rgba(255,255,255,0.07)"></line>
-
-          <!-- row 1 -->
-          <g>
-            <rect x="50" y="120" width="232" height="244" rx="14" fill="url(#cardA)"></rect>
-            <rect x="68" y="316" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
-            <rect x="68" y="336" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
-          </g>
-          <!-- selected card -->
-          <g>
-            <rect x="306" y="120" width="232" height="244" rx="14" fill="url(#cardB)" stroke="#84b6ff" stroke-width="2.5"></rect>
-            <circle cx="422" cy="208" r="27" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.55)" stroke-width="1.5"></circle>
-            <path d="M414 195 L437 208 L414 221 Z" fill="#ffffff"></path>
-            <rect x="324" y="316" width="130" height="10" rx="5" fill="rgba(255,255,255,0.92)"></rect>
-            <rect x="324" y="336" width="78" height="7" rx="3.5" fill="rgba(132,182,255,0.7)"></rect>
-          </g>
-          <g>
-            <rect x="562" y="120" width="232" height="244" rx="14" fill="url(#cardC)"></rect>
-            <rect x="580" y="316" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
-            <rect x="580" y="336" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
-          </g>
-          <g>
-            <rect x="818" y="120" width="232" height="244" rx="14" fill="url(#cardD)"></rect>
-            <rect x="836" y="316" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
-            <rect x="836" y="336" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
-          </g>
-
-          <!-- row 2 -->
-          <g>
-            <rect x="50" y="388" width="232" height="244" rx="14" fill="url(#cardC)"></rect>
-            <rect x="68" y="584" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
-            <rect x="68" y="604" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
-          </g>
-          <g>
-            <rect x="306" y="388" width="232" height="244" rx="14" fill="url(#cardD)"></rect>
-            <rect x="324" y="584" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
-            <rect x="324" y="604" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
-          </g>
-          <g>
-            <rect x="562" y="388" width="232" height="244" rx="14" fill="url(#cardA)"></rect>
-            <rect x="580" y="584" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
-            <rect x="580" y="604" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
-          </g>
-          <g>
-            <rect x="818" y="388" width="232" height="244" rx="14" fill="url(#cardB)"></rect>
-            <rect x="836" y="584" width="130" height="10" rx="5" fill="rgba(255,255,255,0.9)"></rect>
-            <rect x="836" y="604" width="78" height="7" rx="3.5" fill="rgba(255,255,255,0.4)"></rect>
-          </g>
-        </svg>
+        <img
+          src="images/dashboard.png"
+          alt="Silo library window — a grid of installed Steam games (Bloons TD 6, Bloons TD Battles 2, It Takes Two, Overcooked 2, Split Fiction, Victoria 3), each with cover art, install size, a per-game GPTK or DXMT graphics-backend badge, and a Play button"
+          width="1180"
+        >
       </div>
     </header>
 

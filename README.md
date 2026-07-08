@@ -16,6 +16,8 @@
 [Wine build](WINE-BUILD.md) ·
 [Status](STATUS.md)
 
+<img src="docs/images/dashboard.png" width="820" alt="Silo library — a grid of installed Steam games (Bloons TD 6, Bloons TD Battles 2, It Takes Two, Overcooked 2, Split Fiction, Victoria 3), each with cover art, install size, a per-game GPTK or DXMT graphics-backend badge, and a Play button" />
+
 </div>
 
 Silo stands up a real **Windows Steam client inside a Wine bottle**, and launches your games
