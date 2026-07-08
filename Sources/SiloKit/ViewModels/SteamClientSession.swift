@@ -38,6 +38,12 @@ public final class SteamClientSession {
     /// The client's stable `ProcessLedger` key (one Steam client per backend bottle).
     private var ledgerKey: String { "client:\(bottle.backend.rawValue)" }
 
+    /// Shadow a warm-up download client into the ledger under the client key, so a crash DURING first-time
+    /// setup (there's no tracked `steamPID` then — the warm-up owns the PID locally) is still caught by the
+    /// next launch's relocation/update gate. Upsert by key (a relaunch replaces the prior pid); self-pruned
+    /// once it dies (the warm-up force-quits it at the end, so normally it's gone by the next gate read).
+    private func recordWarmUp(_ pid: Int32?) { if let pid { ledger?.record(ledgerKey, pid: pid) } }
+
     /// Defensive teardown: the live VMs are process-lifetime singletons, so this normally never fires, but
     /// it ensures the exit observation + any in-flight launch don't outlive the session if that ever changes.
     /// `isolated` so it can touch the `@MainActor` state it's cleaning up.
@@ -133,6 +139,7 @@ public final class SteamClientSession {
         bottle.resetLog()   // so `committed` reflects THIS run, not a stale marker from a prior setup
         var elapsed = 0.0
         var pid = try? await bottle.launchForUpdate(wine: wine)
+        recordWarmUp(pid)
         var relaunches = 0
         while elapsed < warmUpTimeout {
             try? await Task.sleep(for: .seconds(warmUpPollInterval))
@@ -166,6 +173,7 @@ public final class SteamClientSession {
                 relaunches += 1
                 try? await Task.sleep(for: .seconds(3))
                 pid = try? await bottle.launchForUpdate(wine: wine)
+                recordWarmUp(pid)
             }
         }
         // Failsafe / exhausted — best-effort. Shut down whatever's running; a partial download resumes on the
