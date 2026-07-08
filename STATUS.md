@@ -3,6 +3,12 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✨ Library status line is now transient — auto-dismisses (2026-07-08, `main`; shipped in 0.3.2).** The
+  bottom status bar set `"Launched X."` once and never cleared it, so it lingered long after the game closed
+  (the game card's running indicator cleared correctly via kqueue; only the status *text* was sticky).
+  `setStatus` now schedules a self-clear (default 5s) and each new status cancels the prior message's timer,
+  so a stale timer can never wipe a newer line (e.g. a graphics-fallback warning that legitimately replaced
+  it). Scoped to the library bar; settings/manager panes keep their own `statusMessage`. +2 tests, 365 green.
 - **🔁 Second adversarial sweep (post-0.3.0) — 8 more real bugs, all fixed (2026-07-08, `main`; serial +
   parallel green, 362 tests).** Prompted by "are there no more remaining fixes?" — a fresh three-lens review
   (ledger/gates, launch/co-residency, setup/readiness) that INCLUDED the just-shipped crash-orphan code found

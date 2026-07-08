@@ -53,6 +53,11 @@ struct GameLibraryViewModelTests {
                         stateFlags: .fullyInstalled, sizeOnDisk: 100, libraryPath: paths.steamBottleClientDir)
     }
 
+    /// Bounded wait for the status auto-dismiss timer (a main-actor hop after a real sleep) to land.
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0..<200 where !condition() { try await Task.sleep(for: .milliseconds(5)) }
+    }
+
     @Test("load discovers games installed in the bottle's Steam library")
     func loadsInstalledGames() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -523,6 +528,40 @@ struct GameLibraryViewModelTests {
         #expect(fake.invocations.contains {
             $0.arguments == ["taskkill", "/F", "/IM", "HL2.exe"] && $0.environment["WINEMSYNC"] == "1"
         })
+    }
+
+    @Test("the status line self-clears after its visible window (a stale 'Launched …' doesn't linger)")
+    func statusAutoDismisses() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        vm.statusVisibleDuration = .milliseconds(20)   // keep the test fast; real app uses seconds
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+
+        await vm.play(game)
+        #expect(vm.statusMessage == "Launched HL2.")   // shown right after the action
+
+        // No further action: the message self-clears once its window elapses.
+        try await waitUntil { vm.statusMessage == nil }
+        #expect(vm.statusMessage == nil)
+    }
+
+    @Test("a fresh status resets the dismissal so the prior message's timer can't wipe it")
+    func statusTimerResetsOnNewMessage() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, _, paths) = make(tmp)
+        vm.statusVisibleDuration = .milliseconds(120)
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
+
+        await vm.play(game)                            // arms a dismissal for "Launched HL2."
+        // Second action → new status ("Removed …"), which must cancel the first message's timer.
+        await vm.removeManual(ManualGame(name: "G", executablePath: URL(fileURLWithPath: "/g/g.exe")))
+        let second = try #require(vm.statusMessage)
+        // Wait well past the FIRST message's window but short of the second's: a stale timer must not have
+        // cleared the newer message.
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(vm.statusMessage == second)
     }
 
     /// Manifest + install dir for a Steam game with a specific exe basename (so two games can be made to
