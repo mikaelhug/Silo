@@ -256,6 +256,33 @@ struct GameLibraryViewModelTests {
         }
     }
 
+    @Test("openSteam is backend-aware: .dxmt opens the DXMT bottle's Steam, .gptk the GPTK bottle's")
+    func openSteamRoutesPerBackend() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let gptkBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .gptk)
+        let dxmtBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        let gptkSession = SteamClientSession(bottle: gptkBottle, orchestrator: orchestrator)
+        let dxmtSession = SteamClientSession(bottle: dxmtBottle, orchestrator: orchestrator)
+        gptkSession.updateWine(backend.wineBinaryPath); dxmtSession.updateWine(backend.wineBinaryPath)
+        gptkSession.readinessTimeout = 0; dxmtSession.readinessTimeout = 0
+        let vm = GameLibraryViewModel(
+            bottle: gptkBottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend,
+            session: gptkSession, dxmtSession: dxmtSession, provisioner: WinePrefixProvisioner(runner: fake))
+
+        await vm.openSteam(.dxmt)
+        #expect(fake.invocations.contains {   // brought Steam up in the DXMT bottle's prefix…
+            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle(.dxmt).path })
+
+        await vm.openSteam(.gptk)
+        #expect(fake.invocations.contains {   // …and the GPTK request lands in the GPTK bottle's prefix
+            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle(.gptk).path })
+    }
+
     @Test("a DXMT Steam game launches in the DXMT bottle on the DXMT runtime (co-resident DXMT client)")
     func dxmtSteamGameRoutesToDXMTBottle() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
