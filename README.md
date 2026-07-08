@@ -14,7 +14,8 @@
 [Releases](https://github.com/mikaelhug/Silo/releases) ·
 [Architecture](CLAUDE.md) ·
 [Wine build](WINE-BUILD.md) ·
-[Status](STATUS.md)
+[Status](STATUS.md) ·
+[Discord](https://discord.gg/UCXFzfF38)
 
 <img src="docs/images/dashboard.png" width="820" alt="Silo library — a grid of installed Steam games (Bloons TD 6, Bloons TD Battles 2, It Takes Two, Overcooked 2, Split Fiction, Victoria 3), each with cover art, install size, a per-game GPTK or DXMT graphics-backend badge, and a Play button" />
 
