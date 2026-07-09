@@ -86,6 +86,21 @@ struct SystemProcessRunnerTests {
         }
         #expect(contents.contains("detached-hello"))
     }
+
+    @Test("rejects non-file process URLs without raising an Objective-C exception")
+    func rejectsNonFileURLs() async {
+        let malformed = URL(string: "/Users/example/wine64")!
+        await #expect(throws: SystemProcessRunner.RunnerError.nonFileExecutableURL(malformed.absoluteString)) {
+            _ = try await runner.run(
+                executable: malformed, arguments: ["--version"], environment: [:], currentDirectory: nil)
+        }
+
+        let log = URL(fileURLWithPath: "/tmp/silo-test.log")
+        await #expect(throws: SystemProcessRunner.RunnerError.nonFileExecutableURL(malformed.absoluteString)) {
+            _ = try await runner.spawnDetached(
+                executable: malformed, arguments: [], environment: [:], currentDirectory: nil, logURL: log)
+        }
+    }
 }
 
 @Suite("FakeProcessRunner")

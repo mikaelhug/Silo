@@ -10,6 +10,15 @@ import Darwin
 public struct SystemProcessRunner: ProcessRunning {
     public init() {}
 
+    /// `Foundation.Process` raises an Objective-C exception (not a catchable Swift error) when handed a
+    /// non-file executable URL. Validate every filesystem role before touching `Process` so a malformed or
+    /// hand-edited config becomes an ordinary surfaced error instead of terminating Silo.
+    public enum RunnerError: Error, Sendable, Equatable {
+        case nonFileExecutableURL(String)
+        case nonFileCurrentDirectoryURL(String)
+        case nonFileLogURL(String)
+    }
+
     public func run(
         executable: URL,
         arguments: [String],
@@ -120,6 +129,7 @@ public struct SystemProcessRunner: ProcessRunning {
         executable: URL, arguments: [String],
         environment: [String: String], currentDirectory: URL?
     ) throws -> ProcessResult {
+        try validate(executable: executable, currentDirectory: currentDirectory)
         let fileManager = FileManager.default
         let tmp = fileManager.temporaryDirectory
         let outURL = tmp.appendingPathComponent("silo-out-\(UUID().uuidString)")
@@ -155,6 +165,8 @@ public struct SystemProcessRunner: ProcessRunning {
         executable: URL, arguments: [String],
         environment: [String: String], currentDirectory: URL?, logURL: URL
     ) throws -> Int32 {
+        try validate(executable: executable, currentDirectory: currentDirectory)
+        guard logURL.isFileURL else { throw RunnerError.nonFileLogURL(logURL.absoluteString) }
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true
@@ -179,6 +191,15 @@ public struct SystemProcessRunner: ProcessRunning {
         // so closing our handle afterward is safe.
         try process.run()
         return process.processIdentifier
+    }
+
+    private static func validate(executable: URL, currentDirectory: URL?) throws {
+        guard executable.isFileURL else {
+            throw RunnerError.nonFileExecutableURL(executable.absoluteString)
+        }
+        if let currentDirectory, !currentDirectory.isFileURL {
+            throw RunnerError.nonFileCurrentDirectoryURL(currentDirectory.absoluteString)
+        }
     }
 }
 
