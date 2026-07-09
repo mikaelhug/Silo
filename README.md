@@ -4,7 +4,7 @@
 
 **A fast, native way to run Windows Steam games on Apple-silicon Macs.**
 
-100% SwiftUI · Wine built from CrossOver's open source · Apple GPTK/D3DMetal + DXMT graphics · no Homebrew, no Electron
+100% SwiftUI · Apple GPTK4/D3DMetal + DXMT graphics
 
 [![Latest release](https://img.shields.io/github/v/release/mikaelhug/Silo)](https://github.com/mikaelhug/Silo/releases)
 ![Platform](https://img.shields.io/badge/platform-macOS%2015%2B%20%C2%B7%20Apple%20Silicon-blue)
@@ -23,9 +23,8 @@
 
 Silo stands up a real **Windows Steam client inside a Wine bottle**, and launches your games
 **co-resident with it** on a Metal graphics backend — Apple's D3DMetal, or DXMT for titles it can't
-run — so Steamworks and Steam DRM just work, no emulator, no fakery. It downloads its own Wine
-(compiled from CrossOver's LGPL sources in Silo's CI), imports Apple's Game Porting Toolkit from your
-`.dmg`, and self-updates from GitHub Releases.
+run — so Steamworks and Steam DRM just work, no emulator, no fakery. It downloads its own Wine,
+imports Apple's Game Porting Toolkit from your `.dmg`, and self-updates from GitHub Releases.
 
 ## Highlights
 
