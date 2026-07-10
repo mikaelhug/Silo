@@ -116,6 +116,17 @@ public enum Silo {
         enforceMsync(&env)
         return env
     }
+
+    /// Pin the real wine loader + server in `env`. Needed only when a launch spawns the loader via a FOREIGN
+    /// path — the in-bundle symlink of a Dock-naming `.app` wrapper (see `DockAppBundle`): the macOS loader
+    /// self-locates its `lib/wine` tree + `wineserver` from the executable path, which is then the wrapper
+    /// path, so `WINELOADER`/`WINESERVER` point it back at the real runtime. (The loader maps ntdll
+    /// in-process without re-execing, so setting these does not replace the in-bundle image → the `.app`
+    /// bundle identity, hence the Dock name, is preserved.)
+    public static func pinWineLoader(_ env: inout [String: String], loader: URL) {
+        env["WINELOADER"] = loader.path
+        env["WINESERVER"] = WineRuntimeLayout(wineBinary: loader).wineserver.path
+    }
 }
 
 extension URL {

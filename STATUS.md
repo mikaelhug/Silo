@@ -3,6 +3,33 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🪟 Phase 3 — correctly NAMED Dock tiles for Silo-launched Steam + games (2026-07-10, `main`; `swift build`
+  clean + zero warnings, 371 tests green).** A bare `wine steam.exe` launch shows a Dock tile named "wine".
+  macOS names a GUI process's tile from `[NSBundle mainBundle].CFBundleName`, resolved from the executable
+  path AS INVOKED — so Silo now spawns each launch through a generated `.app` wrapper whose
+  `Contents/MacOS/<name>` is a **symlink to the wine loader**: spawning that in-bundle path makes `mainBundle`
+  resolve to the wrapper → the tile is named "Steam" / the game's name. Confirmed from the loader binary that
+  this is safe: the macOS loader maps ntdll **in-process** (no preloader re-exec — no exec symbols; it
+  `realpath`s `_NSGetExecutablePath` for lib discovery, which FOLLOWS the symlink to the real runtime, while
+  CFBundle uses the UNRESOLVED invoked path), so a bare symlink yields BOTH the name AND correct lib
+  self-location at once.
+  - New `DockAppBundle` (`Sources/SiloKit/Launch/DockAppBundle.swift`): pure plist builder + `write` that
+    (re)creates `<folder>.app` with the `MacOS/<exe>` symlink. No bundle icon — `winemac.drv` supplies the
+    live tile icon from the game window at runtime; the wrapper only fixes the NAME.
+  - `Silo.pinWineLoader` sets `WINELOADER`/`WINESERVER` to the REAL runtime (safe: the INITIAL process never
+    re-execs the loader; only child procs do — so it must NOT be the symlink, or every child would be named).
+    `makePlan` gains `launchVia`; `launchInBottle`/`launchManualGame` gain a `DockIdentity` (name + stable
+    folder slug + `paths.dockAppsDir`). `SteamBottle.launchSteam` wraps the client as `Steam.app` (its
+    `explorer /desktop=` root window owns the tile). Best-effort: a wrapper-write failure falls back to
+    launching the loader directly (tile → "wine").
+  - Wrappers live under `supportDir/DockApps` (always reachable — not the relocatable bottles drive).
+  - Tests (+7): `DockAppBundleTests` (names via CFBundleName, no icon/LSUIElement, symlink target, idempotent
+    repoint); `makePlan` launchVia (spawns the symlink + pins WINELOADER/WINESERVER); the DXMT-manual + Steam
+    launch tests now assert the wrapper executable + pinned loader.
+  - **On-device (Wine absent here):** confirm the Steam window's PID reports `<Name>` via
+    `lsappinfo info -only name <pid>` and that a single primary tile appears (a stray `steamwebhelper` tile
+    would be a child-coalescing follow-up — CrossOver solves that with a proprietary helper Silo doesn't have).
+    Known follow-up: `GameAppShortcut` (Desktop shortcuts) still `exec`s wine, so ITS tile reads "wine".
 - **🔧 Phase 2 — default Wine config for the Steam bottle (2026-07-10, `main`; `swift build` clean +
   zero warnings, 364 tests green serial + parallel).** A vanilla `wineboot` prefix carries no
   `HKCU\Software\Wine\DllOverrides`, but games expect the standard Windows-compatibility set. Silo now applies

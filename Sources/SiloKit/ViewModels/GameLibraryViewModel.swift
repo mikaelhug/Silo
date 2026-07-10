@@ -259,7 +259,8 @@ public final class GameLibraryViewModel {
             let pid = try await orchestrator.launchInBottle(
                 app: game, config: config, backend: backend, graphics: .gptk,
                 wine: context.wineBinary, prefix: context.prefix,
-                logURL: paths.log(forAppID: game.appID))
+                logURL: paths.log(forAppID: game.appID),
+                dock: .init(name: game.name, folder: "app-\(game.appID)", containerDir: paths.dockAppsDir))
             processes.track(gameID(game), pid: pid)
             do {
                 _ = try await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
@@ -436,7 +437,9 @@ public final class GameLibraryViewModel {
             // The resolved runtime is the backend's variant; feed it to the orchestrator as the launch wine.
             let pid = try await orchestrator.launchManualGame(
                 game, backend: backend, graphics: context.graphics,
-                wine: context.wineBinary, prefix: context.prefix, logURL: paths.manualLog(game.id))
+                wine: context.wineBinary, prefix: context.prefix, logURL: paths.manualLog(game.id),
+                dock: .init(name: game.name, folder: "manual-\(game.id.uuidString)",
+                            containerDir: paths.dockAppsDir))
             processes.track(.manual(game.id), pid: pid)
             do {
                 _ = try await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }

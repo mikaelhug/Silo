@@ -559,16 +559,27 @@ public struct SteamBottle: Sendable {
     public static let desktopGeometry = "1440x900"
 
     /// Launch the bottle's Steam client detached, inside a Wine virtual desktop (so CEF presents on our
-    /// `winemac.drv` — see `desktopGeometry`), with the verified software-GL CEF flags + env.
+    /// `winemac.drv` — see `desktopGeometry`), with the verified software-GL CEF flags + env. Spawned via a
+    /// generated `Steam.app` wrapper so the macOS Dock tile is named "Steam", not "wine" (see `dockLauncher`).
     @discardableResult
     public func launchSteam(wine: URL?) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }
         let args = ["explorer", "/desktop=Silo,\(Self.desktopGeometry)", exe.path]
             + Self.cefRenderArgs
+        let launcher = dockLauncher(named: "Steam", folder: "Steam", wine: wine)
+        var env = steamEnvironment(wine: wine)
+        if launcher != nil { Silo.pinWineLoader(&env, loader: wine) }
         return try await runner.spawnDetached(
-            executable: wine, arguments: args,
-            environment: steamEnvironment(wine: wine),
-            currentDirectory: clientDir, logURL: log)
+            executable: launcher ?? wine, arguments: args,
+            environment: env, currentDirectory: clientDir, logURL: log)
+    }
+
+    /// The launcher to spawn so a bottle process's Dock tile is named (via a generated `.app` wrapper whose
+    /// in-bundle executable symlinks to `wine` — see `DockAppBundle`), or nil to spawn the loader directly
+    /// (tile falls back to "wine"). Best-effort — never fails the launch.
+    private func dockLauncher(named displayName: String, folder: String, wine: URL) -> URL? {
+        try? DockAppBundle(displayName: displayName, folderName: folder, wineLoader: wine)
+            .write(into: paths.dockAppsDir)
     }
 
     /// Launch Steam for a one-time first-run self-update, ROOTLESS (no `explorer /desktop`) so no window is

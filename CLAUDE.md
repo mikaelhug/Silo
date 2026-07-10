@@ -13,6 +13,12 @@ Pipeline: **Discovery** (parse `appmanifest_*.acf`) → **Provision** (seed per-
 **Graphics Linker** (inject GPTK/D3DMetal, wined3d fallback) → **Launch Orchestrator** (detached
 process with `WINEPREFIX` overridden to the isolated prefix).
 
+**Dock tiles (Phase 3):** launches spawn through a generated `.app` wrapper (`DockAppBundle`) whose
+`Contents/MacOS/<name>` is a **symlink to the wine loader**, so macOS names the Dock tile from the
+wrapper's `CFBundleName` (`[NSBundle mainBundle]` resolves from the *unresolved* invoked path) instead of
+"wine". The loader still self-locates its runtime because it `realpath`s the symlink; `Silo.pinWineLoader`
+sets `WINELOADER`/`WINESERVER` to the real runtime for child processes. Wrappers live in `paths.dockAppsDir`.
+
 ## Hard constraints (non-negotiable)
 1. **SwiftPM only — never call `xcodebuild`.** This machine has Command Line Tools only (no Xcode).
    Build with `swift build`; the `.app` is assembled by `Scripts/build-app.sh`.

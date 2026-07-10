@@ -28,6 +28,10 @@ public struct AppPaths: Sendable, Hashable {
     public var configFile: URL { supportDir.appendingPathComponent("config.json") }
     /// Scratch dir for downloaded app-update archives (the inline updater stages the `.zip` here).
     public var updatesDir: URL { supportDir.appendingPathComponent("Updates", isDirectory: true) }
+    /// Generated per-game `.app` wrappers that give each Silo-launched Wine process a correctly named Dock
+    /// tile (see `DockAppBundle`). Under `supportDir` — NOT `bottlesRoot` — so a launch never depends on the
+    /// bottles drive being mounted to find its launcher wrapper.
+    public var dockAppsDir: URL { supportDir.appendingPathComponent("DockApps", isDirectory: true) }
     /// The crash-durable process ledger (`ProcessLedger`). Lives under `supportDir` — NOT `bottlesRoot` —
     /// so it's always reachable even when the bottles drive is unplugged (that's exactly when a relaunched
     /// Silo needs it to know a prior run's process is still alive).

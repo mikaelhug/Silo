@@ -506,7 +506,10 @@ struct GameLibraryViewModelTests {
         await vm.playManual(game)
 
         let spawn = try #require(fake.invocations.last { $0.detached })
-        #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))   // the cloned DXMT runtime, not the base
+        // Launched via the game's Dock-naming `.app` wrapper (so the tile reads "Old", not "wine")…
+        #expect(spawn.executable.path.hasSuffix("DockApps/manual-\(game.id.uuidString).app/Contents/MacOS/Old"))
+        // …with the cloned DXMT runtime pinned via WINELOADER so wine still self-locates it.
+        #expect(spawn.environment["WINELOADER"]?.contains("/wine-dxmt/bin/wine64") == true)
         #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
         #expect(spawn.environment["WINEPREFIX"] == paths.manualBottle(game.id).path)   // its own isolated bottle
     }
