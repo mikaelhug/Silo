@@ -69,29 +69,6 @@ struct GameLibraryViewModelTests {
         #expect(vm.games.map(\.appID) == [220])
     }
 
-    @Test("load discovers across BOTH Steam bottles, tagging each game with its bottle's backend")
-    func loadsAcrossBothBottles() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, _, paths) = make(tmp)
-
-        // Install Steam + one game manifest in EACH backend's bottle.
-        for (graphics, appID, name) in [(GraphicsBackend.gptk, 220, "HL2"), (.dxmt, 400, "Portal")] {
-            let client = paths.steamBottleClientDir(graphics)
-            try FileManager.default.createDirectory(
-                at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
-            paths.createWarmedSteamClient(graphics)   // warmed client so the bottle counts as installed (C1)
-            let acf = #""AppState" { "appid" "\#(appID)" "name" "\#(name)" "StateFlags" "4" "installdir" "\#(name)" "LastOwner" "76561197960287930" "SizeOnDisk" "12000000" }"#
-            try acf.write(to: client.appendingPathComponent("steamapps/appmanifest_\(appID).acf"),
-                          atomically: true, encoding: .utf8)
-        }
-
-        await vm.load()
-        #expect(vm.loadState == .loaded)
-        // Both games present; each carries the backend of the bottle it came from.
-        #expect(vm.games.first { $0.appID == 220 }?.backend == .gptk)
-        #expect(vm.games.first { $0.appID == 400 }?.backend == .dxmt)
-    }
-
     @Test("steamReady is a cache: stale until load() re-probes off-main")
     func steamReadyCacheRefreshes() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -105,32 +82,26 @@ struct GameLibraryViewModelTests {
         #expect(vm.loadState == .empty)  // ready, no games installed yet
     }
 
-    @Test("an unreadable bottle library surfaces a status while the other bottle's games still load")
+    @Test("an unreadable Steam library surfaces a status while manual games still keep the library up")
     func unreadableBottleSurfacesStatus() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, _, paths) = make(tmp)
 
-        // GPTK bottle: Steam installed but its steamapps can't be listed (permissions).
+        // Steam installed but its steamapps can't be listed (permissions).
         try installSteam(paths)
-        let gptkSteamapps = paths.steamBottleClientDir.appendingPathComponent("steamapps")
-        try FileManager.default.createDirectory(at: gptkSteamapps, withIntermediateDirectories: true)
-        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: gptkSteamapps.path)
+        let steamapps = paths.steamBottleClientDir.appendingPathComponent("steamapps")
+        try FileManager.default.createDirectory(at: steamapps, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: steamapps.path)
         defer {
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gptkSteamapps.path)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: steamapps.path)
         }
-
-        // DXMT bottle: healthy, with one game.
-        let client = paths.steamBottleClientDir(.dxmt)
-        try FileManager.default.createDirectory(
-            at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
-        paths.createWarmedSteamClient(.dxmt)   // warmed client so the bottle counts as installed (C1)
-        try #""AppState" { "appid" "400" "name" "Old" "StateFlags" "4" "installdir" "Old" "LastOwner" "1" "SizeOnDisk" "1" }"#
-            .write(to: client.appendingPathComponent("steamapps/appmanifest_400.acf"),
-                   atomically: true, encoding: .utf8)
+        // A manual game exists → the read failure surfaces as a status, not the load's .error state.
+        let exe = try tmp.write("Games/X/x.exe", "MZ")
+        _ = try #require(await vm.addManualGame(name: "X", executable: exe))
 
         await vm.load()
-        #expect(vm.loadState == .loaded)                    // one bad bottle never hides the other's games
-        #expect(vm.games.map(\.appID) == [400])
+        #expect(vm.loadState == .loaded)                    // the manual game keeps the library up
+        #expect(vm.games.isEmpty)                           // the Steam library couldn't be read
         #expect(vm.statusMessage?.contains("Steam library") == true)
     }
 
@@ -261,143 +232,18 @@ struct GameLibraryViewModelTests {
         }
     }
 
-    @Test("openSteam is backend-aware: .dxmt opens the DXMT bottle's Steam, .gptk the GPTK bottle's")
-    func openSteamRoutesPerBackend() async throws {
+    @Test("play is a no-op for a game that's already running (no relaunch)")
+    func playNoOpWhenAlreadyRunning() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let fake = FakeProcessRunner()
-        let gptkBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .gptk)
-        let dxmtBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
-        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
-        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
-        let gptkSession = SteamClientSession(bottle: gptkBottle, orchestrator: orchestrator)
-        let dxmtSession = SteamClientSession(bottle: dxmtBottle, orchestrator: orchestrator)
-        gptkSession.updateWine(backend.wineBinaryPath); dxmtSession.updateWine(backend.wineBinaryPath)
-        gptkSession.readinessTimeout = 0; dxmtSession.readinessTimeout = 0
-        let vm = GameLibraryViewModel(
-            bottle: gptkBottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
-            configStore: ConfigStore(paths: paths), paths: paths, backend: backend,
-            session: gptkSession, dxmtSession: dxmtSession, provisioner: WinePrefixProvisioner(runner: fake))
-
-        await vm.openSteam(.dxmt)
-        #expect(fake.invocations.contains {   // brought Steam up in the DXMT bottle's prefix…
-            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle(.dxmt).path })
-
-        await vm.openSteam(.gptk)
-        #expect(fake.invocations.contains {   // …and the GPTK request lands in the GPTK bottle's prefix
-            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle(.gptk).path })
-    }
-
-    @Test("a DXMT Steam game launches in the DXMT bottle on the DXMT runtime (co-resident DXMT client)")
-    func dxmtSteamGameRoutesToDXMTBottle() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let fake = FakeProcessRunner()
-        let gptkBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .gptk)
-        let dxmtBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
-        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
-
-        // Real base wine + DXMT source so the resolver can clone the variant + overlay.
-        let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
-        try tmp.makeDir("wine/lib/wine/x86_64-windows"); try tmp.makeDir("wine/lib/wine/x86_64-unix")
-        let dxmtLib = try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
-        for m in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
-            try tmp.write("dxmt/lib/wine/x86_64-windows/\(m)", "DXMT")
-        }
-        try tmp.makeDir("dxmt/lib/wine/x86_64-unix"); try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WM")
-        var backend = BackendConfig(); backend.wineBinaryPath = wine; backend.dxmtLibDirPath = dxmtLib
-
-        let gptkSession = SteamClientSession(bottle: gptkBottle, orchestrator: orchestrator)
-        let dxmtSession = SteamClientSession(bottle: dxmtBottle, orchestrator: orchestrator)
-        gptkSession.updateWine(wine); dxmtSession.updateWine(wine)
-        gptkSession.readinessTimeout = 0; dxmtSession.readinessTimeout = 0
-        let vm = GameLibraryViewModel(
-            bottle: gptkBottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
-            configStore: ConfigStore(paths: paths), paths: paths, backend: backend,
-            session: gptkSession, dxmtSession: dxmtSession, provisioner: WinePrefixProvisioner(runner: fake))
-
-        // Install Steam + a game in the DXMT bottle.
-        let client = paths.steamBottleClientDir(.dxmt)
-        let common = client.appendingPathComponent("steamapps/common/Old")
-        try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: common.appendingPathComponent("Old.exe").path, contents: Data("MZ".utf8))
-        paths.createWarmedSteamClient(.dxmt)   // warmed client so the bottle counts as installed (C1)
-        try #""AppState" { "appid" "400" "name" "Old" "StateFlags" "4" "installdir" "Old" "LastOwner" "76561197960287930" "SizeOnDisk" "100" }"#
-            .write(to: client.appendingPathComponent("steamapps/appmanifest_400.acf"), atomically: true, encoding: .utf8)
-
-        await vm.load()
-        let game = try #require(vm.games.first { $0.appID == 400 })
-        #expect(game.backend == .dxmt)
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
         await vm.play(game)
-
-        let spawn = try #require(fake.invocations.last {
-            $0.detached && $0.arguments.contains { $0.hasSuffix("Old.exe") } })
-        #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))   // the DXMT variant runtime
-        #expect(spawn.environment["WINEPREFIX"] == paths.steamBottle(.dxmt).path)   // the DXMT Steam bottle
-        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
-    }
-
-    @Test("a title installed in BOTH bottles surfaces as two entries with distinct ids")
-    func dualInstallSurfacesTwice() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, _, paths) = make(tmp)
-        // The SAME appID (220) installed in BOTH Steam bottles.
-        for graphics in [GraphicsBackend.gptk, .dxmt] {
-            let client = paths.steamBottleClientDir(graphics)
-            try FileManager.default.createDirectory(
-                at: client.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
-            paths.createWarmedSteamClient(graphics)   // warmed client so the bottle counts as installed (C1)
-            try #""AppState" { "appid" "220" "name" "HL2" "StateFlags" "4" "installdir" "HL2" "LastOwner" "76561197960287930" "SizeOnDisk" "100" }"#
-                .write(to: client.appendingPathComponent("steamapps/appmanifest_220.acf"), atomically: true, encoding: .utf8)
-        }
-        await vm.load()
-        let copies = vm.games.filter { $0.appID == 220 }
-        #expect(copies.count == 2)                          // both surface (no dedup)
-        #expect(Set(copies.map(\.backend)) == [.gptk, .dxmt])
-        #expect(Set(copies.map(\.id)).count == 2)           // distinct SwiftUI identity → both cards render
-    }
-
-    @Test("play refuses a title's other-bottle copy while it runs (never touches the running Steam)")
-    func playBlocksCrossBottleDoubleLaunch() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, paths) = make(tmp)
-        try installSteam(paths)
-        let gptk = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-        await vm.play(gptk)
-        #expect(vm.isRunning(gptk))
+        #expect(vm.isRunning(game))
         let detachedBefore = fake.invocations.filter(\.detached).count
 
-        var dxmt = gptk; dxmt.backend = .dxmt               // the same title's DXMT-bottle copy
-        await vm.play(dxmt)
-
-        #expect(vm.statusMessage?.contains("already running in the GPTK") == true)
-        #expect(vm.isRunning(gptk))                         // the GPTK copy is untouched (Steam not killed)
-        #expect(!vm.isRunning(dxmt))                        // the DXMT copy never launched
-        #expect(fake.invocations.filter(\.detached).count == detachedBefore)   // no new spawn at all
-    }
-
-    @Test("play refuses a DIFFERENT game while one runs in the other bottle (never kills its Steam client)")
-    func playRefusesDifferentGameCrossBottle() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, paths) = make(tmp)
-        try installSteam(paths)
-        let gptk = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-        await vm.play(gptk)
-        #expect(vm.isRunning(gptk))
-        let detachedBefore = fake.invocations.filter(\.detached).count
-        let stopsBefore = fake.terminatedPIDs.count
-
-        // A DIFFERENT title in the DXMT bottle: one account can't be in-game on two clients, and bringing the
-        // DXMT client up would tear down the GPTK client under the running game. Must be refused up front.
-        var dxmt = try installedGame(paths, appID: 570, name: "Dota", dir: "Dota")
-        dxmt.backend = .dxmt
-        await vm.play(dxmt)
-
-        #expect(vm.statusMessage?.contains("already running in the GPTK") == true)
-        #expect(vm.isRunning(gptk))                                            // GPTK copy untouched
-        #expect(!vm.isRunning(dxmt))                                           // DXMT game never launched
-        #expect(fake.invocations.filter(\.detached).count == detachedBefore)  // nothing spawned
-        #expect(fake.terminatedPIDs.count == stopsBefore)                     // GPTK Steam client NOT stopped
+        await vm.play(game)                                                   // already running → no-op
+        #expect(fake.invocations.filter(\.detached).count == detachedBefore)  // no new spawn
     }
 
     @Test("launches are refused while a bottles move is in progress")
@@ -425,72 +271,6 @@ struct GameLibraryViewModelTests {
         #expect(added == nil)                                                             // refused
         #expect(!fake.invocations.contains { $0.arguments == ["wineboot", "--init"] })   // never provisioned
         #expect(vm.statusMessage?.contains("moving your bottles") == true)
-    }
-
-    @Test("only the launching copy's button spins — the other bottle's copy stays idle mid-launch")
-    func busySpinnerIsPerCopy() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, _, paths) = make(tmp)
-        try installSteam(paths)
-        let gptk = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-        var dxmt = gptk; dxmt.backend = .dxmt
-
-        // Observe DURING the launch — that's the only window the bug showed (busy was appID-keyed, so both
-        // cards spun). Run play() concurrently and catch it at its first suspension (busyGames set).
-        let launch = Task { await vm.play(gptk) }
-        var sawBusy = false
-        for _ in 0..<100 where !sawBusy {
-            await Task.yield()
-            sawBusy = vm.isBusy(gptk)
-        }
-        #expect(sawBusy)                 // the GPTK copy's button spins…
-        #expect(!vm.isBusy(dxmt))        // …but the DXMT copy's does NOT
-        await launch.value
-        #expect(!vm.isBusy(gptk))        // cleared once the launch completes
-    }
-
-    @Test("stop on the non-running bottle copy is a clean no-op")
-    func stopNonRunningCopyNoOps() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, paths) = make(tmp)
-        try installSteam(paths)
-        let gptk = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-        await vm.play(gptk)
-        #expect(vm.isRunning(gptk))
-        let invocationsBefore = fake.invocations.count
-
-        var dxmt = gptk; dxmt.backend = .dxmt
-        await vm.stop(dxmt)                                 // that copy isn't running → no-op
-
-        #expect(vm.isRunning(gptk))                         // the running GPTK copy is untouched
-        #expect(fake.invocations.count == invocationsBefore)   // no taskkill fired for the idle copy
-    }
-
-    @Test("uninstall a DXMT game routes steam://uninstall to the DXMT bottle's own Steam")
-    func uninstallRoutesToBackendBottle() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let fake = FakeProcessRunner()
-        let gptkBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .gptk)
-        let dxmtBottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths, backend: .dxmt)
-        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
-        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
-        let gptkSession = SteamClientSession(bottle: gptkBottle, orchestrator: orchestrator)
-        let dxmtSession = SteamClientSession(bottle: dxmtBottle, orchestrator: orchestrator)
-        gptkSession.updateWine(backend.wineBinaryPath); dxmtSession.updateWine(backend.wineBinaryPath)
-        gptkSession.readinessTimeout = 0; dxmtSession.readinessTimeout = 0
-        let vm = GameLibraryViewModel(
-            bottle: gptkBottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
-            configStore: ConfigStore(paths: paths), paths: paths, backend: backend,
-            session: gptkSession, dxmtSession: dxmtSession, provisioner: WinePrefixProvisioner(runner: fake))
-
-        var game = try installedGame(paths, appID: 400, name: "Old", dir: "Old")
-        game.backend = .dxmt
-        await vm.uninstall(game)
-
-        // The steam://uninstall spawn ran against the DXMT bottle, not the GPTK one.
-        let spawn = try #require(fake.invocations.last { $0.arguments.contains("steam://uninstall/400") })
-        #expect(spawn.environment["WINEPREFIX"] == paths.steamBottle(.dxmt).path)
     }
 
     @Test("load → notReady when the bottle has no Steam installed")
@@ -941,69 +721,32 @@ struct GameLibraryViewModelTests {
 
         #expect(vm.statusMessage?.contains("GPTK") == true)          // fallback surfaced, not a silent "Launched"
         #expect(vm.statusMessage?.contains("Launched") != true)
-        // The message is honest + actionable: it doesn't claim a working "fallback", and with no DXMT
-        // bottle set up it points the user at Settings → DXMT (not the DXMT Steam bottle).
+        // Honest: it doesn't claim a working "fallback", and (Steam is GPTK-only now) it admits the class
+        // isn't supported in the Steam bottle yet rather than steering to a removed DXMT Steam bottle.
         #expect(vm.statusMessage?.contains("fallback graphics") != true)
-        #expect(vm.statusMessage?.contains("DXMT") == true)
-        #expect(vm.statusMessage?.contains("Settings → DXMT") == true)
+        #expect(vm.statusMessage?.contains("isn't supported in the Steam bottle") == true)
     }
 
     @Test("graphicsFallbackMessage is honest + backend/kind-aware across all branches")
     func graphicsFallbackMessageBranches() {
         typealias VM = GameLibraryViewModel
-        // GPTK Steam game, DXMT bottle present → point at the DXMT Steam bottle; absent → Settings.
-        let gptkSteamReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: true, dxmtAvailable: true)
-        #expect(gptkSteamReady.contains("DXMT Steam bottle"))
-        let gptkSteamNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: true, dxmtAvailable: false)
-        #expect(gptkSteamNotReady.contains("Settings → DXMT"))
+        // GPTK Steam game → no DXMT Steam bottle to steer to; admit the class isn't supported yet
+        // (dxmtAvailable is irrelevant for a Steam game).
+        let gptkSteam = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: true, dxmtAvailable: false)
+        #expect(gptkSteam.contains("isn't supported in the Steam bottle"))
         // GPTK manual game → switch this game's backend (configured) / set up DXMT first (not).
         let gptkManualReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: false, dxmtAvailable: true)
         #expect(gptkManualReady.contains("Switch this game's graphics backend to DXMT"))
         let gptkManualNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: false, dxmtAvailable: false)
         #expect(gptkManualNotReady.contains("Set up DXMT in Settings → DXMT first"))
-        // DXMT backend → names DXMT, admits the wined3d fallback likely failed, points at Settings.
-        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, isSteamGame: true, dxmtAvailable: true)
+        // DXMT backend (manual only) → names DXMT, admits the wined3d fallback likely failed, points at Settings.
+        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, isSteamGame: false, dxmtAvailable: true)
         #expect(dxmt.contains("DXMT didn't engage") && dxmt.contains("Settings → DXMT"))
         // None of them pretends graphics are "running on fallback graphics".
-        for m in [gptkSteamReady, gptkSteamNotReady, gptkManualReady, gptkManualNotReady, dxmt] {
+        for m in [gptkSteam, gptkManualReady, gptkManualNotReady, dxmt] {
             #expect(m.hasPrefix("OC2: "))
             #expect(!m.contains("running on fallback graphics"))
         }
-    }
-
-    @Test("play's fallback message points at the DXMT Steam bottle once it's set up")
-    func playFallbackWithDXMTBottleReady() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, paths) = make(tmp)
-        try installSteam(paths)
-        // Stand up the DXMT Steam bottle too so the message adapts to "install it in the DXMT Steam bottle".
-        try FileManager.default.createDirectory(at: paths.steamBottleClientDir(.dxmt), withIntermediateDirectories: true)
-        paths.createWarmedSteamClient(.dxmt)   // warmed client so the bottle counts as installed (C1)
-        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-        let log = paths.log(forAppID: 220)
-        fake.onRun = { inv in
-            guard inv.detached, inv.logURL == log, let handle = try? FileHandle(forWritingTo: log) else { return }
-            handle.seekToEndOfFile()
-            handle.write(Data(#"Assertion failed: (GFXTHandle && "Failed to dlopen D3DMetal")"#.utf8))
-            try? handle.close()
-        }
-
-        await vm.load()   // populate the steamInstalled(.dxmt) cache the message reads at detection time
-        await vm.play(game)
-
-        #expect(vm.statusMessage?.contains("DXMT Steam bottle") == true)
-    }
-
-    @Test("a game's launch log is scoped per graphics backend so the two bottle copies don't clobber it")
-    func launchLogIsBackendScoped() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        // GPTK keeps the plain <appID>.log (back-compat); DXMT gets a distinct file — so launching the same
-        // title in both bottles writes two separate logs instead of overwriting one.
-        #expect(paths.log(forAppID: 1276390) == paths.log(forAppID: 1276390, backend: .gptk))
-        #expect(paths.log(forAppID: 1276390, backend: .gptk).lastPathComponent == "1276390.log")
-        #expect(paths.log(forAppID: 1276390, backend: .dxmt).lastPathComponent == "1276390-dxmt.log")
-        #expect(paths.log(forAppID: 1276390, backend: .gptk) != paths.log(forAppID: 1276390, backend: .dxmt))
     }
 
     @Test("terminateAllSync SIGTERMs every launched game, leaving the co-resident Steam client alive")

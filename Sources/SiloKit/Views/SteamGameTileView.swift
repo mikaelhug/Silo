@@ -31,7 +31,6 @@ struct SteamGameTileView: View {
             if let size = lib.sizeString(game) {
                 Text(size).font(.caption).foregroundStyle(.secondary)
             }
-            BackendTag(backend: game.backend)
         } menuItems: {
             menuItems()
         }
@@ -44,9 +43,9 @@ struct SteamGameTileView: View {
         Button("View Log") {
             openWindow(id: LogTarget.windowID,
                        value: LogTarget(title: "\(game.name) — Log",
-                                        url: env.logURL(forAppID: game.appID, backend: game.backend)))
+                                        url: env.logURL(forAppID: game.appID)))
         }
-        Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg(game.backend) } }
+        Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg() } }
             .disabled(!env.gameLibrary.canLaunch)
         Button("View in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([game.installURL])

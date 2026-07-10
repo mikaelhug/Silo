@@ -36,18 +36,14 @@ struct OnboardingView: View {
                     StepRow(
                         number: 3, title: "Set up the Steam bottle",
                         subtitle: "Sign in once.",
-                        done: env.gptkSteamReady, busy: steam.busy, locked: !env.wineReady,
+                        done: env.steamReady, busy: steam.busy, locked: !env.wineReady,
                         actionLabel: "Set up",
                         action: { Task { await env.steamBottleVM.setUp() } })
                 }
                 .frame(maxWidth: 540)
 
-                DXMTOnboardingSection()
-                    .frame(maxWidth: 540)
-
                 let message = steam.status.isEmpty
-                    ? (runtime.statusMessage ?? env.dxmtRuntime.statusMessage
-                        ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
+                    ? (runtime.statusMessage ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
                 if let message {
                     Text(message).font(.callout).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).frame(maxWidth: 540)
@@ -63,38 +59,6 @@ struct OnboardingView: View {
             .padding(40)
             .frame(maxWidth: .infinity)
         }
-    }
-}
-
-/// Optional second-backend setup (collapsed by default): import the DXMT runtime + set up the DXMT Steam
-/// bottle. DXMT is the fallback for older DirectX 10/11 titles GPTK can't run; its own bottle = its own
-/// Steam login (machine tokens are per-prefix, so you sign into each bottle once).
-private struct DXMTOnboardingSection: View {
-    @Environment(AppEnvironment.self) private var env
-    @State private var expanded = false
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(spacing: 12) {
-                StepRow(
-                    number: 1, title: "Install the DXMT runtime",
-                    subtitle: "~7 MB download.",
-                    done: env.dxmtReady, busy: env.dxmtRuntime.isInstalling, locked: !env.wineReady,
-                    actionLabel: "Install",
-                    action: { Task { await env.dxmtRuntime.installLatest() } })
-                StepRow(
-                    number: 2, title: "Set up the DXMT Steam bottle",
-                    subtitle: "Sign in once.",
-                    done: env.dxmtSteamReady, busy: env.dxmtBottleVM.busy, locked: !env.wineReady,
-                    actionLabel: "Set up",
-                    action: { Task { await env.dxmtBottleVM.setUp() } })
-            }
-            .padding(.top, 10)
-        } label: {
-            Text("Older games (DXMT) — optional").font(.headline)
-        }
-        .padding()
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

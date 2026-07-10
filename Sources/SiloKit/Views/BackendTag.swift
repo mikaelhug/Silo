@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// A small capsule tag on a library card showing which graphics backend — i.e. which bottle — the game
-/// runs on (GPTK or DXMT). Shown on every card (Steam + manual) so the split is visible at a glance.
+/// A small capsule tag on a manual game's library card showing which graphics backend (GPTK or DXMT) it
+/// runs on. Steam games all run under GPTK, so only manual cards carry the tag.
 struct BackendTag: View {
     let backend: GraphicsBackend
 

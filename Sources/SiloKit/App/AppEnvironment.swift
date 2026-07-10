@@ -1,26 +1,5 @@
 import Foundation
 
-/// One backend's Steam-bottle service bundle: the bottle, its live client session, and the settings VM
-/// driving setup/launch. Built once per `GraphicsBackend` by `AppEnvironment`, so backend services are
-/// a keyed table instead of gptk/dxmt copy-paste pairs. Every backend's Steam client runs on the BASE
-/// wine (CEF needs no d3d; a co-resident game picks the per-backend variant runtime — shared wineserver);
-/// a secondary backend's bottle stays empty until the user sets it up via onboarding.
-@MainActor
-public final class BackendServices {
-    public let backend: GraphicsBackend
-    public let bottle: SteamBottle
-    public let session: SteamClientSession
-    public let bottleVM: SteamBottleViewModel
-
-    init(backend: GraphicsBackend, runner: ProcessRunning, paths: AppPaths,
-         orchestrator: LaunchOrchestrator, setupGate: SteamSetupGate, ledger: ProcessLedger) {
-        self.backend = backend
-        self.bottle = SteamBottle(runner: runner, paths: paths, backend: backend)
-        self.session = SteamClientSession(bottle: bottle, orchestrator: orchestrator, ledger: ledger)
-        self.bottleVM = SteamBottleViewModel(bottle: bottle, session: session, setupGate: setupGate)
-    }
-}
-
 /// Composition root: constructs every service + the long-lived view models, and wires them together.
 @MainActor
 @Observable
@@ -42,27 +21,12 @@ public final class AppEnvironment {
     /// DXMT (its own releases, its own default persisted to `BackendConfig.dxmtLibDirPath`).
     public let dxmtRuntime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
-    /// Per-backend Steam-bottle service bundles (bottle + client session + settings VM) — the ONE place
-    /// backend services are built, keyed so nothing is duplicated per backend.
-    public let backends: [GraphicsBackend: BackendServices]
+    /// The Steam bottle's settings VM (setup / launch), shared by the Library + the settings pane.
+    public let steamBottleVM: SteamBottleViewModel
+    /// The owner of the Steam bottle's live client (shared by the Library + the settings pane).
+    public let steamClientSession: SteamClientSession
     public let steamStore = SteamStoreClient()
 
-    /// A backend's service bundle. Total by construction — `init` builds one per `GraphicsBackend`.
-    public func services(for backend: GraphicsBackend) -> BackendServices {
-        guard let services = backends[backend] else {
-            preconditionFailure("BackendServices missing for \(backend) — init builds one per backend")
-        }
-        return services
-    }
-
-    // Convenience forwards (the pre-bundle names the views + tests use).
-    public var steamBottleVM: SteamBottleViewModel { services(for: .gptk).bottleVM }
-    /// Setup + launch for the DXMT Steam bottle (the older-games path) — same flow, the DXMT prefix.
-    public var dxmtBottleVM: SteamBottleViewModel { services(for: .dxmt).bottleVM }
-    /// The owner of the GPTK Steam bottle's live client (shared by the Library + the settings pane).
-    public var steamClientSession: SteamClientSession { services(for: .gptk).session }
-    /// The DXMT Steam bottle's client session (one Steam install/login per backend).
-    public var dxmtClientSession: SteamClientSession { services(for: .dxmt).session }
     private let updater: Updater
     /// Crash-durable record of the processes Silo has launched into a bottle — the relocation/update gate
     /// consults it (`blockedForBottleWork`) so a relaunched Silo (after a hard crash) still refuses while a
@@ -113,22 +77,19 @@ public final class AppEnvironment {
             manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
-        // One service bundle (bottle + client session + settings VM) per backend — see BackendServices.
-        // A shared setup gate serializes bottle setup across backends, so the seed can't clone a sibling
-        // whose client is still mid-download (→ a broken Steam).
-        let setupGate = SteamSetupGate()
-        var backends: [GraphicsBackend: BackendServices] = [:]
-        for backend in GraphicsBackend.allCases {
-            backends[backend] = BackendServices(
-                backend: backend, runner: runner, paths: paths, orchestrator: orchestrator,
-                setupGate: setupGate, ledger: processLedger)
-        }
-        self.backends = backends
+        // The single Steam bottle + its live client session + settings VM. The client runs on the base wine
+        // (CEF needs no d3d; a co-resident game picks the variant runtime — shared wineserver).
+        let steamBottle = SteamBottle(runner: runner, paths: paths)
+        let steamClientSession = SteamClientSession(
+            bottle: steamBottle, orchestrator: orchestrator, ledger: processLedger)
+        let steamBottleVM = SteamBottleViewModel(bottle: steamBottle, session: steamClientSession)
+        self.steamClientSession = steamClientSession
+        self.steamBottleVM = steamBottleVM
 
         let gameLibrary = GameLibraryViewModel(
-            bottle: backends[.gptk]!.bottle, discovery: discovery, orchestrator: orchestrator,
+            bottle: steamBottle, discovery: discovery, orchestrator: orchestrator,
             configStore: configStore, paths: paths, backend: initialBackend,
-            session: backends[.gptk]!.session, dxmtSession: backends[.dxmt]?.session,
+            session: steamClientSession,
             provisioner: WinePrefixProvisioner(runner: runner), ledger: processLedger)
         self.gameLibrary = gameLibrary
 
@@ -153,18 +114,7 @@ public final class AppEnvironment {
         dxmtRuntime.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearDXMTDefault() } }
         // A fresh Steam install must flip the library's cached `steamReady` gate (it drives onboarding);
         // load() re-probes the cache off-main. Without this, onboarding would stall until a relaunch.
-        for services in backends.values {
-            let backend = services.backend
-            services.bottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
-            // One account = one client: the settings "Launch Steam" / setUp on a bottle refuses while a game
-            // is live in another, and otherwise stops the other bottles' idle clients before bringing up its own.
-            services.bottleVM.otherBottleRunningGame = { [weak self] in
-                self?.gameLibrary.activeSteamBackend(excluding: backend)
-            }
-            services.bottleVM.stopOtherClients = { [weak self] in
-                self?.gameLibrary.stopOtherSteamClients(except: backend)
-            }
-        }
+        steamBottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
         // Relocation must refuse while anything runs in a bottle (see `anythingRunning`). Both gates
         // re-probe the crash-orphan ledger at the decision point (a button press — not a hot path).
         bottles.isBlocked = { [weak self] in self?.blockedForBottleWork() ?? true }
@@ -180,9 +130,9 @@ public final class AppEnvironment {
     /// Fan out a backend-config change to the view models that depend on it.
     private func applyBackend(_ config: BackendConfig) {
         gameLibrary.updateBackend(config)
-        // Every backend's Steam client runs on the base wine (CEF; co-resident games pick the per-backend
-        // variant). updateWine on each bottle VM also updates its session's wine.
-        for services in backends.values { services.bottleVM.updateWine(config.wineBinaryPath) }
+        // The Steam client runs on the base wine (CEF; a co-resident game picks the variant runtime).
+        // updateWine on the bottle VM also updates its session's wine.
+        steamBottleVM.updateWine(config.wineBinaryPath)
     }
 
     /// Load persisted config and populate the UI. Idempotent.
@@ -198,8 +148,8 @@ public final class AppEnvironment {
         await runtime.refresh()
         dxmtRuntime.defaultName = state.backend.dxmtRuntimeName
         await dxmtRuntime.refresh()
-        // Populate the bottle VMs' cached installed-flags (settings buttons gate on them).
-        for services in backends.values { await services.bottleVM.refreshInstalled() }
+        // Populate the bottle VM's cached installed-flag (settings buttons gate on it).
+        await steamBottleVM.refreshInstalled()
         // Library = games installed in the Steam bottle.
         await gameLibrary.load()
         await updates.checkForUpdate()   // best-effort; nil updateCheck on offline
@@ -218,17 +168,15 @@ public final class AppEnvironment {
 
     // MARK: - Bottles location
 
-    /// True while any game OR any bottle's Steam client is live — relocation is refused then (we'd be
-    /// moving prefixes out from under running wineservers). Checks EVERY backend's session: a live DXMT
-    /// client is just as much a running wineserver as the GPTK one.
+    /// True while any game OR the Steam client is live — relocation is refused then (we'd be moving prefixes
+    /// out from under running wineservers).
     /// Live, in-memory "is anything running in a bottle right now" — cheap and never stale, so it's safe to
     /// read in a SwiftUI body (it drives the Move/Update button's disabled state). It does NOT probe the
     /// crash-durable ledger; that (a file read + per-PID syscalls) belongs only at the action gate, see
     /// `blockedForBottleWork`. Includes a bottle mid-setup/warm-up — that owns a live wineserver actively
     /// writing into the prefix, so a move/update over it would corrupt the download.
     public var anythingRunning: Bool {
-        gameLibrary.isAnythingRunning
-            || backends.values.contains { $0.session.isRunning || $0.bottleVM.busy }
+        gameLibrary.isAnythingRunning || steamClientSession.isRunning || steamBottleVM.busy
     }
 
     /// The relocation/update gate — evaluated at the moment the user acts (a button press, never a hot
@@ -249,33 +197,27 @@ public final class AppEnvironment {
     /// Keeps the in-memory liveness the relocation/update gates rely on accurate across restarts.
     public func terminateAllOnQuit() {
         gameLibrary.terminateAllSync()
-        for services in backends.values { services.session.stop() }
+        steamClientSession.stop()
     }
 
     // MARK: - Setup readiness (drives the Library onboarding)
 
     public var wineReady: Bool { backendSettings.config.wineBinaryPath != nil }
     public var gptkReady: Bool { backendSettings.config.gptkLibDirPath != nil }
-    /// Any Steam bottle (GPTK or DXMT) has a warmed client — drives the library's onboarding-vs-content gate.
+    /// The Steam bottle has a warmed client — drives the library's onboarding-vs-content gate.
     public var steamReady: Bool { gameLibrary.steamReady }
-    /// The GPTK Steam bottle specifically is set up (mirrors `dxmtSteamReady`). Onboarding's step 3 and
-    /// `setupComplete` key on THIS, not the any-backend `steamReady` — otherwise setting up DXMT first would
-    /// mark the GPTK step "Done" and let the user finish onboarding with no GPTK Steam bottle at all.
-    public var gptkSteamReady: Bool { gameLibrary.steamInstalled(.gptk) }
-    public var setupComplete: Bool { wineReady && gptkReady && gptkSteamReady }
+    public var setupComplete: Bool { wineReady && gptkReady && steamReady }
 
     /// The bottles live on a relocated drive that isn't currently mounted — a distinct "reconnect the drive"
     /// state, NOT first-run onboarding (the app would otherwise fall back to onboarding when it finds no
     /// bottle on the missing volume). Cheap: a couple of stats, fast even when the volume is absent.
     public var bottlesDisconnected: Bool { paths.bottlesRelocated && !paths.bottlesRootReachable }
 
-    // MARK: - DXMT (optional older-games backend)
+    // MARK: - DXMT (graphics backend for manual games)
 
-    /// The DXMT runtime (its module dir, built from CrossOver source) is configured.
+    /// The DXMT runtime (its module dir, built from CrossOver source) is configured — enables the DXMT
+    /// graphics backend for manual (non-Steam) games.
     public var dxmtReady: Bool { backendSettings.config.dxmtLibDirPath != nil }
-    /// The DXMT Steam bottle has its Windows Steam client installed (the library's off-main cache — a
-    /// blocking `fileExists` here would run inside SwiftUI body evaluation).
-    public var dxmtSteamReady: Bool { gameLibrary.steamInstalled(.dxmt) }
 
     // MARK: - Steam-bottle Wine tools (Settings → General)
 
@@ -286,9 +228,9 @@ public final class AppEnvironment {
     /// The wine binary games launch with (nil until Wine is configured).
     public var wineBinary: URL? { backendSettings.config.wineBinaryPath }
 
-    /// Toggle macOS Retina/HiDPI ("High Resolution Mode") for the Steam bottles: persist the ONE preference,
-    /// then write the coupled `RetinaMode` + `LogPixels` (DPI companion) registry keys into EVERY installed
-    /// bottle's prefix (GPTK + DXMT stay consistent). Takes effect on the next game launch.
+    /// Toggle macOS Retina/HiDPI ("High Resolution Mode") for the Steam bottle: persist the preference, then
+    /// write the coupled `RetinaMode` + `LogPixels` (DPI companion) registry keys into the bottle's prefix.
+    /// Takes effect on the next game launch.
     public func setSteamBottleRetina(_ on: Bool) async {
         guard let wine = wineBinary else { bottleToolsMessage = "Set up Wine first."; return }
         guard !bottleToolsBusy else { return }
@@ -296,8 +238,8 @@ public final class AppEnvironment {
         backendSettings.config.retinaMode = on
         await backendSettings.save()
         do {
-            for graphics in GraphicsBackend.allCases where gameLibrary.steamInstalled(graphics) {
-                try await wineTools.setRetinaMode(on, prefix: paths.steamBottle(graphics), wine: wine)
+            if gameLibrary.steamInstalled {
+                try await wineTools.setRetinaMode(on, prefix: paths.steamBottle, wine: wine)
             }
             bottleToolsMessage = "Retina mode \(on ? "on" : "off") — applies on the next game launch."
         } catch {
@@ -305,23 +247,22 @@ public final class AppEnvironment {
         }
     }
 
-    /// Open a Wine maintenance tool (winecfg / regedit / control) on a backend's Steam bottle so the user
-    /// can fix that prefix by hand. Routes through the shared `runWineTool` (single tool-launch path).
-    public func openWineTool(_ tool: String, for graphics: GraphicsBackend = .gptk) async {
+    /// Open a Wine maintenance tool (winecfg / regedit / control) on the Steam bottle so the user can fix
+    /// the prefix by hand. Routes through the shared `runWineTool` (single tool-launch path).
+    public func openWineTool(_ tool: String) async {
         guard wineBinary != nil else { bottleToolsMessage = "Set up Wine first."; return }
-        await orchestrator.runWineTool(tool, prefix: paths.steamBottle(graphics), backend: backendSettings.config)
+        await orchestrator.runWineTool(tool, prefix: paths.steamBottle, backend: backendSettings.config)
         bottleToolsMessage = "Opened \(tool)."
     }
 
-    /// Build a per-game settings view model with the game's persisted config for a specific bottle. Keyed by
-    /// (appID, backend) so editing the GPTK card's settings doesn't mutate the DXMT card's, and vice versa.
-    public func makeGameSettings(appID: Int, backend: GraphicsBackend = .gptk) async -> GameSettingsViewModel {
+    /// Build a per-game settings view model with the game's persisted config, keyed by appID.
+    public func makeGameSettings(appID: Int) async -> GameSettingsViewModel {
         let state = await configStore.load()
-        return GameSettingsViewModel(config: state.config(for: appID, backend: backend), configStore: configStore)
+        return GameSettingsViewModel(config: state.config(for: appID), configStore: configStore)
     }
 
-    /// A game's launch log (per appID + graphics backend — the GPTK and DXMT copies log separately).
-    public nonisolated func logURL(forAppID appID: Int, backend: GraphicsBackend = .gptk) -> URL {
-        paths.log(forAppID: appID, backend: backend)
+    /// A game's launch log (`<appID>.log`).
+    public nonisolated func logURL(forAppID appID: Int) -> URL {
+        paths.log(forAppID: appID)
     }
 }

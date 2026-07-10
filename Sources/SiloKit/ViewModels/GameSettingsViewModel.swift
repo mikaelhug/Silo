@@ -17,14 +17,14 @@ public final class GameSettingsViewModel {
     @discardableResult
     public func save() async -> Bool {
         // Snapshot the user-editable fields (all Sendable) before the @Sendable mutation closure.
-        let (appID, backend) = (config.appID, config.backend)
+        let appID = config.appID
         let (envFlags, presence) = (config.envFlags, config.presence)
         let (exePath, args) = (config.executableRelativePath, config.customArgs)
         do {
             // Field-merge into the CURRENT record rather than upserting the whole snapshot captured when the
             // sheet opened — otherwise a `lastPlayed` written by launching the same game while the sheet is
             // open (via `updateGame`) is reverted on save. Only the user-editable fields are applied.
-            _ = try await configStore.updateGame(appID: appID, backend: backend) {
+            _ = try await configStore.updateGame(appID: appID) {
                 $0.envFlags = envFlags
                 $0.presence = presence
                 $0.executableRelativePath = exePath

@@ -3,6 +3,34 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🧹 Phase 0 — removed the DXMT Steam bottle; collapsed to a SINGLE "Steam" bottle (2026-07-10, `main`;
+  `swift build` clean + zero warnings, `swift test` green serial + parallel, 351 tests).** First of a
+  multi-phase restructure. The dual-Steam-bottle topology (a GPTK `SteamBottle` + a `SteamBottle-DXMT`, each
+  its own Steam install/login) is gone — there is now ONE shared Steam bottle, GPTK-only for now, with no
+  GPTK/DXMT tags on it. **DXMT the graphics *backend* stays** (manual/non-Steam games still pick it; the
+  DXMT *runtime* is still installed via Settings → DXMT). Removed/collapsed:
+  - `AppPaths.steamBottle(_:)` family → single no-arg `steamBottle`/`…ClientDir`/`…Exe`/`…CEFDir`/`…Log`;
+    `"SteamBottle-DXMT"` dropped from `bottleDirNames`; `log(forAppID:backend:)` → `log(forAppID:)`.
+  - `SteamApp.ID` composite `(appID,backend)` + `SteamApp.backend` → plain `id = appID`; discovery no longer
+    tags a bottle backend. `GameID.steam(appID:backend:)` → `.steam(appID:)`. `GameConfig` un-keyed from
+    backend (appID only; a legacy `backend` JSON key decodes-and-ignores — no data loss).
+  - `AppEnvironment`: the per-backend `BackendServices` dict + `services(for:)` + `dxmtBottleVM`/
+    `dxmtClientSession`/`dxmtSteamReady`/`gptkSteamReady` → one inlined `steamBottleVM`/`steamClientSession`;
+    `steamReady` is the single gate.
+  - `GameLibraryViewModel`: dropped `dxmtSession`, the cross-bottle co-residency guards
+    (`activeSteamBackend`/`stopOtherSteamClients`/`activeBackend`/`runningBackend`), `steamInstalledBackends`
+    set → `steamInstalled: Bool`, dual-bottle discovery + two-cards-per-title. `busyGames: Set<Int>`.
+  - `SteamBottle`/`SteamClientSession`/`SteamBottleViewModel`: dropped the `backend` field, the sibling-seed
+    fast path (`seedFromCompleteBottle`), and the cross-backend `SteamSetupGate` + "other bottle" wiring.
+  - UI: the "Steam bottle (DXMT)" General-settings section, the whole DXMT-bottle onboarding step, and the
+    GPTK/DXMT **backend tag on Steam cards** are gone; "Steam bottle (GPTK)" → just "Steam bottle"; the
+    "Open Steam" toolbar is a plain button again. `DXMTManagerView` (runtime tab) kept. CLI `--setup-steam`
+    is no-arg. A 32-bit Steam game (GPTK is 64-bit-only) now says "not supported yet" instead of steering to
+    the removed DXMT Steam bottle.
+  - Decisions (user): the whole optional DXMT onboarding section removed (runtime still in Settings → DXMT);
+    an existing on-disk `SteamBottle-DXMT` is **left in place** (Silo just stops using it — no auto-delete).
+  - Tests: dual-bottle/cross-bottle/seed/setup-gate cases (which asserted now-removed behavior) deleted;
+    per-backend config + discovery cases rewritten to single-bottle; fallback-message assertions updated.
 - **✨ Library status line is now transient — auto-dismisses (2026-07-08, `main`; shipped in 0.3.2).** The
   bottom status bar set `"Launched X."` once and never cleared it, so it lingered long after the game closed
   (the game card's running indicator cleared correctly via kqueue; only the status *text* was sticky).

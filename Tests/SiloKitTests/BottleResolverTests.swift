@@ -42,11 +42,11 @@ struct BottleResolverTests {
 
     // MARK: - Steam routing
 
-    @Test("Steam GPTK resolves the GPTK bottle on the base runtime, overlaid in place")
+    @Test("Steam resolves the Steam bottle on the base runtime, GPTK overlaid in place")
     func steamGPTK() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (config, paths) = try fixtures(tmp)
-        let ctx = try BottleResolver(paths: paths).steam(.gptk, config: config)
+        let ctx = try BottleResolver(paths: paths).steam(config: config)
 
         #expect(ctx.graphics == .gptk)
         #expect(ctx.prefix.lastPathComponent == "SteamBottle")
@@ -56,36 +56,7 @@ struct BottleResolverTests {
         #expect(try String(contentsOf: overlaid, encoding: .utf8) == "GPTK-PE")
     }
 
-    @Test("Steam DXMT resolves the DXMT bottle on a CLONED, DXMT-overlaid runtime (distinct from GPTK's)")
-    func steamDXMT() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (config, paths) = try fixtures(tmp)
-        let ctx = try BottleResolver(paths: paths).steam(.dxmt, config: config)
-
-        #expect(ctx.graphics == .dxmt)
-        #expect(ctx.prefix.lastPathComponent == "SteamBottle-DXMT")
-        // The DXMT runtime is a clone sibling of the base — NOT the base itself.
-        #expect(ctx.wineBinary != config.wineBinaryPath)
-        #expect(ctx.wineBinary.path.contains("/wine-dxmt/bin/wine64"))
-        // DXMT overlaid into the clone (d3d11 + the winemetal bridge .so).
-        let cloneWin = tmp.url.appendingPathComponent("wine-dxmt/lib/wine/x86_64-windows/d3d11.dll")
-        let cloneSo = tmp.url.appendingPathComponent("wine-dxmt/lib/wine/x86_64-unix/winemetal.so")
-        #expect(try String(contentsOf: cloneWin, encoding: .utf8) == "DXMT:d3d11.dll")
-        #expect(FileManager.default.fileExists(atPath: cloneSo.path))
-    }
-
-    @Test("Determinism: GPTK and DXMT resolve to DISTINCT runtimes — neither can run on the other's tree")
-    func distinctRuntimes() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (config, paths) = try fixtures(tmp)
-        let resolver = BottleResolver(paths: paths)
-        let gptk = try resolver.steam(.gptk, config: config)
-        let dxmt = try resolver.steam(.dxmt, config: config)
-        #expect(gptk.wineBinary != dxmt.wineBinary)
-        #expect(gptk.prefix != dxmt.prefix)
-    }
-
-    // MARK: - Manual routing
+    // MARK: - Manual routing (the DXMT graphics backend now runs only for manual games)
 
     @Test("Manual game resolves its OWN isolated bottle under its chosen backend's runtime")
     func manualDXMT() throws {
@@ -106,16 +77,17 @@ struct BottleResolverTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (_, paths) = try fixtures(tmp)
         #expect(throws: BottleResolver.ResolveError.wineNotConfigured) {
-            try BottleResolver(paths: paths).steam(.gptk, config: BackendConfig())
+            try BottleResolver(paths: paths).steam(config: BackendConfig())
         }
     }
 
-    @Test("Refuses DXMT when its runtime isn't installed — never silently mis-routes onto the base runtime")
+    @Test("Refuses a DXMT manual game when its runtime isn't installed — never mis-routes onto the base runtime")
     func dxmtNotConfigured() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (config, paths) = try fixtures(tmp, dxmt: false)   // wine + GPTK only
+        let game = ManualGame(name: "Old", executablePath: URL(fileURLWithPath: "/g/old.exe"), backend: .dxmt)
         #expect(throws: BottleResolver.ResolveError.backendNotConfigured(.dxmt)) {
-            try BottleResolver(paths: paths).steam(.dxmt, config: config)
+            try BottleResolver(paths: paths).manual(game, config: config)
         }
     }
 
@@ -123,7 +95,7 @@ struct BottleResolverTests {
     func gptkFallsBackToWined3d() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (config, paths) = try fixtures(tmp, gptk: false)   // wine only, no GPTK overlay
-        let ctx = try BottleResolver(paths: paths).steam(.gptk, config: config)
+        let ctx = try BottleResolver(paths: paths).steam(config: config)
         #expect(ctx.graphics == .gptk)
         #expect(ctx.wineBinary == config.wineBinaryPath)   // base runtime, un-overlaid
     }

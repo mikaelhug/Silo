@@ -217,8 +217,8 @@ public struct LaunchOrchestrator: Sendable {
     }
 
     /// Whether launching `app` under `graphics` is a dead end because it's a 32-bit game on GPTK (which is
-    /// 64-bit-only). Lets the UI refuse EARLY — before stopping the other bottle's Steam client or bringing
-    /// this one up — for a game that could never render under GPTK. Fails open (unresolvable exe → false).
+    /// 64-bit-only). Lets the UI refuse EARLY — before bringing the Steam client up — for a game that could
+    /// never render under GPTK. Fails open (unresolvable exe → false).
     public func isBlocked32BitOnGPTK(app: SteamApp, config: GameConfig, graphics: GraphicsBackend) -> Bool {
         guard graphics == .gptk, let exe = try? resolveExecutable(app: app, config: config) else { return false }
         return WindowsExecutable.is32Bit(exe)

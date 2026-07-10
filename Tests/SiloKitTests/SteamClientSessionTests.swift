@@ -105,7 +105,7 @@ struct SteamClientSessionTests {
 
         let launching = Task { await session.ensureRunning() }
         for _ in 0..<500 where fake.invocations.isEmpty { await Task.yield() }   // spawn is now in flight
-        session.stop()             // cross-bottle teardown cancels the in-flight bring-up
+        session.stop()             // teardown cancels the in-flight bring-up
         await gate.open()          // let the spawn return its PID
         let up = await launching.value
 
@@ -185,7 +185,7 @@ struct SteamClientSessionTests {
                 try? fm.createDirectory(at: cef7, withIntermediateDirectories: true)
                 fm.createFile(atPath: client.appendingPathComponent("steamui.dll").path, contents: Data("x".utf8))
                 fm.createFile(atPath: cef7.appendingPathComponent("steamwebhelper.exe").path, contents: Data("x".utf8))
-                let log = paths.steamBottleLog(.gptk)
+                let log = paths.steamBottleLog
                 try? fm.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try? "Downloading update (100 of 100 KB)...\nUpdate complete, launching Steam...\n"
                     .write(to: log, atomically: true, encoding: .utf8)

@@ -12,28 +12,21 @@ public struct SteamBottle: Sendable {
     private let runner: ProcessRunning
     private let session: URLSession
     private let paths: AppPaths
-    /// Which backend's Steam bottle this is — selects the prefix + paths (GPTK or DXMT). Each backend has
-    /// its own Steam install/login, since one Steam client per prefix.
-    public let backend: GraphicsBackend
     // Computed (not stored): FileManager isn't Sendable, but the shared instance is fine to use.
     private var fileManager: FileManager { .default }
 
-    public init(
-        runner: ProcessRunning, session: URLSession = .shared, paths: AppPaths,
-        backend: GraphicsBackend = .gptk
-    ) {
+    public init(runner: ProcessRunning, session: URLSession = .shared, paths: AppPaths) {
         self.runner = runner
         self.session = session
         self.paths = paths
-        self.backend = backend
     }
 
-    // This backend's bottle paths (the one place the backend selects them).
-    private var prefixDir: URL { paths.steamBottle(backend) }
-    private var clientDir: URL { paths.steamBottleClientDir(backend) }
-    private var exe: URL { paths.steamBottleExe(backend) }
-    private var cefDir: URL { paths.steamBottleCEFDir(backend) }
-    private var log: URL { paths.steamBottleLog(backend) }
+    // The bottle's paths.
+    private var prefixDir: URL { paths.steamBottle }
+    private var clientDir: URL { paths.steamBottleClientDir }
+    private var exe: URL { paths.steamBottleExe }
+    private var cefDir: URL { paths.steamBottleCEFDir }
+    private var log: URL { paths.steamBottleLog }
 
     public enum BottleError: Error, Sendable, Equatable {
         case wineNotConfigured
@@ -58,20 +51,18 @@ public struct SteamBottle: Sendable {
     /// done" — the warm-up ALSO waits for `updateState().committed` before shutting Steam down, or the
     /// incomplete update rolls back.
     var isClientFullyDownloaded: Bool {
-        Self.hasWarmedClient(backend, paths: paths, fileManager: fileManager)
+        Self.hasWarmedClient(paths: paths, fileManager: fileManager)
     }
 
-    /// Whether `backend`'s bottle has a WARMED Steam client on disk — steamui.dll AND a CEF
-    /// steamwebhelper.exe — not just the ~2 MB bootstrapper (`steam.exe`). Pure path checks (no
-    /// process/instance state), so the library can probe it OFF-MAIN per backend without constructing a
-    /// `SteamBottle`. A failed/interrupted first-run warm-up leaves only the bootstrapper, which must NOT
-    /// read as "installed/ready" (else onboarding shows the step "Done" over a non-functional bottle).
-    static func hasWarmedClient(
-        _ backend: GraphicsBackend, paths: AppPaths, fileManager: FileManager = .default
-    ) -> Bool {
-        let client = paths.steamBottleClientDir(backend)
+    /// Whether the bottle has a WARMED Steam client on disk — steamui.dll AND a CEF steamwebhelper.exe —
+    /// not just the ~2 MB bootstrapper (`steam.exe`). Pure path checks (no process/instance state), so the
+    /// library can probe it OFF-MAIN without constructing a `SteamBottle`. A failed/interrupted first-run
+    /// warm-up leaves only the bootstrapper, which must NOT read as "installed/ready" (else onboarding shows
+    /// the step "Done" over a non-functional bottle).
+    static func hasWarmedClient(paths: AppPaths, fileManager: FileManager = .default) -> Bool {
+        let client = paths.steamBottleClientDir
         guard fileManager.fileExists(atPath: client.appendingPathComponent("steamui.dll").path) else { return false }
-        let cef = paths.steamBottleCEFDir(backend)
+        let cef = paths.steamBottleCEFDir
         let dirs = (try? fileManager.contentsOfDirectory(at: cef, includingPropertiesForKeys: nil)) ?? []
         return dirs.contains { fileManager.fileExists(atPath: $0.appendingPathComponent("steamwebhelper.exe").path) }
     }
@@ -200,54 +191,6 @@ public struct SteamBottle: Sendable {
                 try? fileManager.copyItem(at: file, to: dest)
             }
             try? fileManager.removeItem(at: exe)
-        }
-    }
-
-    /// Per-instance Steam state that must NEVER be seeded from another bottle — the game library + its
-    /// manifests, the signed-in account, and regenerable caches. Only the CLIENT binaries (steamui.dll,
-    /// CEF, the dlls) are identical across bottles; copying these dirs would give the new bottle the other's
-    /// installed games (which discovery then lists TWICE — once per backend) and its login. Steam recreates
-    /// `config`/`userdata` fresh on first launch, so a truly-fresh bottle needs none of them.
-    static let seedExcludedEntries: Set<String> =
-        ["steamapps", "userdata", "config", "logs", "dumps", "appcache", "depotcache"]
-
-    /// If a SIBLING backend's bottle already has a complete Steam client, seed THIS bottle's CLIENT BINARIES
-    /// from it (+ core fonts) instead of re-downloading ~242 MB and re-running the first-run warm-up — the
-    /// client files are identical across bottles. It copies ONLY the client: the game library, login, and
-    /// caches (`seedExcludedEntries` + `ssfn*`) are skipped, so the new bottle is genuinely fresh — no
-    /// inherited games, no sign-in. Near-instant on APFS (per-entry copy-on-write). Returns whether it
-    /// seeded. Best-effort: any failure returns false so the caller falls back to a normal download install.
-    func seedFromCompleteBottle(wine: URL?) async -> Bool {
-        guard let wine, !isClientFullyDownloaded else { return false }
-        guard let source = GraphicsBackend.allCases.first(where: {
-            $0 != backend && SteamBottle(runner: runner, paths: paths, backend: $0).isClientFullyDownloaded
-        }) else { return false }
-        do {
-            try await provision(wine: wine)   // this bottle still needs its own valid Wine prefix
-            // Seed ONLY the client binaries: clone each top-level entry of the source Steam install EXCEPT
-            // the per-instance state (games/library/login/caches). Per-entry clones (clonefile needs each
-            // destination to not exist) into a freshly-emptied client dir.
-            let srcClient = paths.steamBottleClientDir(source)
-            if fileManager.fileExists(atPath: clientDir.path) { try fileManager.removeItem(at: clientDir) }
-            try fileManager.createDirectory(at: clientDir, withIntermediateDirectories: true)
-            let entries = try fileManager.contentsOfDirectory(at: srcClient, includingPropertiesForKeys: nil)
-            for entry in entries {
-                let name = entry.lastPathComponent
-                if Self.seedExcludedEntries.contains(name.lowercased()) || name.hasPrefix("ssfn") { continue }
-                try Filesystem.clone(from: entry, to: clientDir.appendingPathComponent(name), using: fileManager)
-            }
-            // Clone the core fonts too (skips the per-bottle font extraction) — shared, not account state.
-            let srcFonts = paths.steamBottle(source).appendingPathComponent("drive_c/windows/Fonts")
-            let dstFonts = prefixDir.appendingPathComponent("drive_c/windows/Fonts")
-            if fileManager.fileExists(atPath: srcFonts.appendingPathComponent("Arial.TTF").path) {
-                try? fileManager.createDirectory(
-                    at: dstFonts.deletingLastPathComponent(), withIntermediateDirectories: true)
-                if fileManager.fileExists(atPath: dstFonts.path) { try? fileManager.removeItem(at: dstFonts) }
-                try? Filesystem.clone(from: srcFonts, to: dstFonts, using: fileManager)
-            }
-            return true
-        } catch {
-            return false
         }
     }
 

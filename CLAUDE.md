@@ -55,15 +55,18 @@ Metal-direct).
 - Both backends overlay a **builtin** `d3d11`/`dxgi` into a runtime's `lib/wine` tree, so they can't share
   one runtime. `RuntimeVariants` prepares each: GPTK overlays the base runtime in place (the proven path,
   unchanged); DXMT gets an **APFS clone** of the base + `GraphicsLinker.overlayDXMT`.
-- `BottleResolver` is the ONE place that maps `(game, backend) → {prefix, wineBinary, graphics}`. Every
-  launch/provision/tool path routes through it — never hard-code `paths.steamBottle` or
-  `backend.wineBinaryPath`. A launch emits exactly that backend's `WINEDLLOVERRIDES` builtin set, so it can
-  never cross GPTK↔DXMT or silently land on wined3d (it refuses an unconfigured secondary backend).
-- **Steam game backend = its bottle.** Each backend gets its own shared Steam bottle (`SteamBottle` for
-  GPTK, `SteamBottle-DXMT` for DXMT) — a separate Steam install/login, since one Steam client per prefix.
-  A Steam game's backend is *discovered* from which bottle it's installed in (modern → GPTK, older → DXMT).
+- `BottleResolver` is the ONE place that maps a game → `{prefix, wineBinary, graphics}` (`steam(config:)`
+  for the Steam bottle, `manual(game,config:)` for a manual game). Every launch/provision/tool path routes
+  through it — never hard-code `paths.steamBottle` or `backend.wineBinaryPath`. A launch emits exactly that
+  backend's `WINEDLLOVERRIDES` builtin set, so it can never cross GPTK↔DXMT or silently land on wined3d (it
+  refuses an unconfigured secondary backend).
+- **Steam games run in a SINGLE shared Steam bottle** (`SteamBottle`) under GPTK/D3DMetal. *(Phase 0,
+  2026-07-10: the separate `SteamBottle-DXMT` bottle + all dual-Steam-bottle machinery were removed —
+  collapsed to one bottle. The Steam bottle is GPTK-only for now; a per-launch **automatic** backend (and a
+  manual per-Steam-game override) in the one bottle is planned for a later phase.)*
 - **Manual (non-Steam) games** pick a backend per game (`ManualGame.backend`); each runs in its own
-  isolated bottle under that backend's runtime.
+  isolated bottle under that backend's runtime — **this is where DXMT runs today**. The DXMT runtime is
+  still installed via Settings → DXMT.
 - When a backend isn't configured, GPTK degrades to wine's own wined3d (the baseline); a secondary backend
   refuses rather than mis-route. `GraphicsFallback` is backend-aware (surfaces a silent wined3d fallback).
 

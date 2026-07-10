@@ -29,25 +29,23 @@ public struct AppState: Codable, Sendable, Hashable {
         manualGames = try c.decodeIfPresent([ManualGame].self, forKey: .manualGames) ?? []
     }
 
-    /// Existing config for a title in a given bottle, or a fresh default (carrying that backend) if none is
-    /// stored yet. Keyed by (appID, backend) so the GPTK and DXMT cards of one title stay independent.
-    public func config(for appID: Int, backend: GraphicsBackend = .gptk) -> GameConfig {
-        games.first { $0.appID == appID && $0.backend == backend } ?? GameConfig(appID: appID, backend: backend)
+    /// Existing config for a title, or a fresh default if none is stored yet. Keyed by `appID`.
+    public func config(for appID: Int) -> GameConfig {
+        games.first { $0.appID == appID } ?? GameConfig(appID: appID)
     }
 
-    /// Insert or replace a game's config (matched by its (appID, backend) identity).
+    /// Insert or replace a game's config (matched by `appID`).
     public mutating func upsert(_ config: GameConfig) {
-        if let index = games.firstIndex(where: { $0.appID == config.appID && $0.backend == config.backend }) {
+        if let index = games.firstIndex(where: { $0.appID == config.appID }) {
             games[index] = config
         } else {
             games.append(config)
         }
     }
 
-    /// Drop a title's config for one backend (e.g. on uninstall from that bottle), leaving the other
-    /// bottle's copy untouched.
-    public mutating func removeGame(appID: Int, backend: GraphicsBackend = .gptk) {
-        games.removeAll { $0.appID == appID && $0.backend == backend }
+    /// Drop a title's config (e.g. on uninstall).
+    public mutating func removeGame(appID: Int) {
+        games.removeAll { $0.appID == appID }
     }
 
     // MARK: - Manual (non-Steam) games

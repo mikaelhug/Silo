@@ -186,33 +186,29 @@ struct ConfigStoreTests {
         #expect(g.envFlags.syncMode == .msync)   // Apple-Silicon default
     }
 
-    @Test("a title's GPTK and DXMT configs are independent records, not one shared config")
-    func perGameConfigIsBackendScoped() async throws {
+    @Test("a title's config is one record keyed by appID (re-saving upserts, not duplicates)")
+    func perGameConfigIsAppIDKeyed() async throws {
         let (store, _, tmp) = try makeStore()
         defer { tmp.cleanup() }
-        // Same appID, two backends: set different launch options on each.
-        try await store.saveGame(GameConfig(appID: 1276390, backend: .gptk, customArgs: ["-force-d3d11"]))
-        try await store.saveGame(GameConfig(appID: 1276390, backend: .dxmt, customArgs: ["-force-glcore"]))
+        try await store.saveGame(GameConfig(appID: 1276390, customArgs: ["-force-d3d11"]))
+        try await store.saveGame(GameConfig(appID: 1276390, customArgs: ["-force-glcore"]))
 
         let state = await store.load()
-        #expect(state.games.count == 2)                                        // two records, not one
-        #expect(state.config(for: 1276390, backend: .gptk).customArgs == ["-force-d3d11"])
-        #expect(state.config(for: 1276390, backend: .dxmt).customArgs == ["-force-glcore"])
+        #expect(state.games.count == 1)                                  // upserted, not duplicated
+        #expect(state.config(for: 1276390).customArgs == ["-force-glcore"])
 
-        // Mutating one bottle's copy leaves the other's untouched.
-        try await store.updateGame(appID: 1276390, backend: .dxmt) { $0.customArgs = ["-force-glcore", "-window"] }
+        try await store.updateGame(appID: 1276390) { $0.customArgs = ["-force-glcore", "-window"] }
         let after = await store.load()
-        #expect(after.config(for: 1276390, backend: .gptk).customArgs == ["-force-d3d11"])   // unchanged
-        #expect(after.config(for: 1276390, backend: .dxmt).customArgs == ["-force-glcore", "-window"])
+        #expect(after.config(for: 1276390).customArgs == ["-force-glcore", "-window"])
     }
 
-    @Test("a pre-dual-backend GameConfig (no backend key) migrates onto the GPTK card")
-    func legacyGameConfigDecodesAsGPTK() throws {
-        // An old config.json entry has no `backend` field; it must decode (not drop) and default to GPTK.
-        let legacy = #"{"appID":220,"presence":"steamAppIDFile","customArgs":["-novid"]}"#
+    @Test("a legacy GameConfig carrying an extra `backend` key still decodes (the key is now ignored)")
+    func legacyGameConfigDecodes() throws {
+        // Old config.json entries carried a `backend` field; it's no longer part of GameConfig, but its
+        // presence must NOT make the entry undecodable (which would drop the whole games array on load).
+        let legacy = #"{"appID":220,"backend":"dxmt","presence":"steamAppIDFile","customArgs":["-novid"]}"#
         let cfg = try JSONDecoder().decode(GameConfig.self, from: Data(legacy.utf8))
         #expect(cfg.appID == 220)
-        #expect(cfg.backend == .gptk)
         #expect(cfg.customArgs == ["-novid"])
     }
 

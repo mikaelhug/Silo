@@ -12,7 +12,6 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             steamBottleSection
-            dxmtBottleSection
             bottleToolsSection
             bottlesSection
             updatesSection
@@ -89,28 +88,15 @@ struct GeneralSettingsView: View {
         }
     }
 
-    /// Stand up a shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
-    /// co-resident with a logged-in Steam client. The GPTK (default) bottle — structurally identical to the
-    /// DXMT section below (same `SteamBottleControls`).
+    /// Stand up the shared Steam bottle (real Windows Steam, signed into in-app) so Steamworks/DRM games run
+    /// co-resident with a logged-in Steam client.
     @ViewBuilder private var steamBottleSection: some View {
         Section {
             SteamBottleControls(
-                bottle: env.steamBottleVM, backend: .gptk,
-                logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog(.gptk))
+                bottle: env.steamBottleVM,
+                logWindowTitle: "Steam Bottle — Log", logURL: env.paths.steamBottleLog)
         } header: {
-            Text("Steam bottle (GPTK)")
-        }
-    }
-
-    /// The DXMT Steam bottle — its own Steam install/login (machine tokens are per-prefix), for the older
-    /// DirectX 10/11 titles GPTK can't run. Same controls as the GPTK section (one `SteamBottleControls`).
-    @ViewBuilder private var dxmtBottleSection: some View {
-        Section {
-            SteamBottleControls(
-                bottle: env.dxmtBottleVM, backend: .dxmt,
-                logWindowTitle: "DXMT Steam Bottle — Log", logURL: env.paths.steamBottleLog(.dxmt))
-        } header: {
-            Text("Steam bottle (DXMT)")
+            Text("Steam bottle")
         }
     }
 
@@ -248,17 +234,13 @@ struct GeneralSettingsView: View {
     }
 }
 
-/// The full per-bottle control block a Steam bottle renders in Settings — Set up / Launch / Reset login /
-/// open log / Repair (winecfg·regedit·control) / Reveal in Finder. ONE implementation shared by the GPTK
-/// and DXMT sections so both are structurally IDENTICAL (only the bottle, backend, and labels differ).
+/// The full control block the Steam bottle renders in Settings — Set up / Launch / Reset login / open log /
+/// Repair (winecfg·regedit·control) / Reveal in Finder.
 struct SteamBottleControls: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(AppEnvironment.self) private var env
     let bottle: SteamBottleViewModel
-    /// Which bottle these controls act on (routes Repair + Reveal to the right prefix). The button labels
-    /// are identical for both bottles — the section header ("Steam bottle (GPTK)" / "(DXMT)") disambiguates.
-    let backend: GraphicsBackend
-    /// Title of the log window this bottle opens — kept distinct so two open log windows are identifiable.
+    /// Title of the log window — kept distinct so open log windows are identifiable.
     let logWindowTitle: String
     let logURL: URL
 
@@ -274,14 +256,14 @@ struct SteamBottleControls: View {
         }
         LabeledContent("Repair") {
             HStack(spacing: 8) {
-                Button("Wine Config") { Task { await env.openWineTool("winecfg", for: backend) } }
-                Button("Registry") { Task { await env.openWineTool("regedit", for: backend) } }
-                Button("Control Panel") { Task { await env.openWineTool("control", for: backend) } }
+                Button("Wine Config") { Task { await env.openWineTool("winecfg") } }
+                Button("Registry") { Task { await env.openWineTool("regedit") } }
+                Button("Control Panel") { Task { await env.openWineTool("control") } }
             }
             .disabled(env.wineBinary == nil || !bottle.steamInstalled)
         }
         Button("Reveal Bottle in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([env.paths.steamBottle(backend)])
+            NSWorkspace.shared.activateFileViewerSelecting([env.paths.steamBottle])
         }
         if bottle.warmingUp, let fraction = bottle.warmUpFraction {
             ProgressView(value: fraction)          // real download % from Steam's own progress

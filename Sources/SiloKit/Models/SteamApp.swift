@@ -2,14 +2,7 @@ import Foundation
 
 /// A Steam game discovered from the Steam bottle's `appmanifest_*.acf`.
 public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
-    /// Library identity is (appID, backend), NOT appID alone: the same title installed in BOTH the GPTK
-    /// and DXMT Steam bottles is two distinct library entries (each runs in its own bottle), so they must
-    /// not collide in SwiftUI `ForEach` / `sheet(item:)`. Computed — no effect on `Codable`/persistence.
-    public struct ID: Hashable, Sendable {
-        public let appID: Int
-        public let backend: GraphicsBackend
-    }
-    public var id: ID { ID(appID: appID, backend: backend) }
+    public var id: Int { appID }
 
     public let appID: Int
     public let name: String
@@ -27,9 +20,6 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
     public let lastOwner: Int64?
     /// The library-folder root this app belongs to (derived during discovery, not from the .acf).
     public let libraryPath: URL
-    /// The graphics backend this app runs under — i.e. which Steam bottle it was discovered in
-    /// (GPTK or DXMT). Derived during discovery, not from the .acf; a Steam game's backend IS its bottle.
-    public var backend: GraphicsBackend
 
     public init(
         appID: Int,
@@ -42,8 +32,7 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
         buildID: Int? = nil,
         lastUpdated: Date? = nil,
         lastOwner: Int64? = nil,
-        libraryPath: URL,
-        backend: GraphicsBackend = .gptk
+        libraryPath: URL
     ) {
         self.appID = appID
         self.name = name
@@ -56,7 +45,6 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
         self.lastUpdated = lastUpdated
         self.lastOwner = lastOwner
         self.libraryPath = libraryPath
-        self.backend = backend
     }
 
     public var isFullyInstalled: Bool { stateFlags.isFullyInstalled }

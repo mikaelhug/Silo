@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The "DXMT" tab: the optional older-games backend (DirectX 10/11 titles GPTK can't run). A runtime tab
 /// that mirrors the Wine tab — install the latest build from GitHub, then pick the default from the
-/// installed list. Its Steam bottle lives in Settings → General alongside the GPTK one.
+/// installed list. Enables the DXMT graphics backend for manual (non-Steam) games.
 struct DXMTManagerView: View {
     @Environment(AppEnvironment.self) private var env
 

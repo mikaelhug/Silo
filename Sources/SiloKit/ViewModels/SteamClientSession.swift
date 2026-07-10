@@ -40,8 +40,8 @@ public final class SteamClientSession {
         self.ledger = ledger
     }
 
-    /// The client's stable `ProcessLedger` key (one Steam client per backend bottle).
-    private var ledgerKey: String { "client:\(bottle.backend.rawValue)" }
+    /// The client's stable `ProcessLedger` key.
+    private var ledgerKey: String { "client" }
 
     /// Shadow a warm-up download client into the ledger under the client key, so a crash DURING first-time
     /// setup (there's no tracked `steamPID` then — the warm-up owns the PID locally) is still caught by the
@@ -60,22 +60,18 @@ public final class SteamClientSession {
 
     public func updateWine(_ url: URL?) { wineBinary = url }
 
-    /// Which backend bottle this session's Steam client belongs to (GPTK or DXMT).
-    public var backend: GraphicsBackend { bottle.backend }
-
     /// Whether the bottle's Steam client is live right now (its tracked PID is still alive).
     public var isRunning: Bool {
         guard let pid = steamPID else { return false }
         return orchestrator.isRunning(pid: pid)
     }
 
-    /// Stop this bottle's Steam client (best-effort). Used to keep only ONE client online at a time across
-    /// the two Steam bottles — the same Steam account can't be "in-game" on two clients at once.
+    /// Stop this bottle's Steam client (best-effort) — used at app quit / before a self-update relaunch so
+    /// nothing outlives the launcher as an orphan.
     public func stop() {
-        // Cancel any in-flight bring-up too: `stopOtherSteamClients` relies on `stop` to enforce the
-        // one-account-one-client rule across bottles, but a client caught MID-SPAWN has no `steamPID` yet, so
-        // terminating by PID alone would miss it and leave two clients live. `startSteam` checks
-        // `Task.isCancelled` right after the spawn and self-terminates the process it just launched.
+        // Cancel any in-flight bring-up too: a client caught MID-SPAWN has no `steamPID` yet, so terminating
+        // by PID alone would miss it and leave a client live. `startSteam` checks `Task.isCancelled` right
+        // after the spawn and self-terminates the process it just launched.
         steamLaunch?.cancel()
         // Force-quit the WHOLE Steam tree by image name, independent of the tracked PID. Steam is
         // multi-process (a loader SIGTERM leaves steamwebhelper alive) and re-execs itself (so `steamPID` is

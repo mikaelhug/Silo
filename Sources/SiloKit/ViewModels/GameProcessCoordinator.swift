@@ -1,11 +1,9 @@
 import Foundation
 
 /// Identity of a launched game across both kinds — the single key for the coordinator's tables. A Steam
-/// game is identified by BOTH its appID and its backend: the same title can be installed in both the GPTK
-/// and DXMT Steam bottles (two distinct library entries), and each runs on its own bottle/runtime, so its
-/// live-process state must be tracked per (appID, backend), not per appID.
+/// game is identified by its appID; a manual (non-Steam) game by its stable id.
 enum GameID: Hashable, Sendable {
-    case steam(appID: Int, backend: GraphicsBackend)
+    case steam(appID: Int)
     case manual(UUID)
 }
 
@@ -107,7 +105,7 @@ final class GameProcessCoordinator {
     /// place. (The ledger only needs a unique string per owner; it never decodes this back into a `GameID`.)
     private static func ledgerKey(_ id: GameID) -> String {
         switch id {
-        case let .steam(appID, backend): "steam:\(appID):\(backend.rawValue)"
+        case let .steam(appID): "steam:\(appID)"
         case let .manual(uuid): "manual:\(uuid.uuidString)"
         }
     }

@@ -12,24 +12,21 @@ struct AppEnvironmentUpdateTests {
       {"name":"Silo.app.zip","browser_download_url":"https://example.com/Silo.app.zip","size":1}]}]
     """
 
-    @Test("BackendServices: one bundle per backend, each internally consistent; forwards match")
-    func backendBundles() throws {
+    @Test("the single Steam service is shared: the library + the settings pane see the same bottle")
+    func steamServiceIsShared() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let env = AppEnvironment(
-            paths: AppPaths(supportDir: tmp.url.appendingPathComponent("Silo")),
-            runner: FakeProcessRunner())
-        #expect(env.backends.count == GraphicsBackend.allCases.count)
-        for backend in GraphicsBackend.allCases {
-            let services = env.services(for: backend)
-            #expect(services.backend == backend)
-            #expect(services.bottle.backend == backend)   // the bundle can't cross-wire bottles
-            #expect(services.session.backend == backend)
-        }
-        // The pre-bundle convenience names resolve to the SAME objects as the keyed table.
-        #expect(env.steamBottleVM === env.services(for: .gptk).bottleVM)
-        #expect(env.dxmtBottleVM === env.services(for: .dxmt).bottleVM)
-        #expect(env.steamClientSession === env.services(for: .gptk).session)
-        #expect(env.dxmtClientSession === env.services(for: .dxmt).session)
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        #expect(!env.steamBottleVM.steamInstalled)
+        #expect(!env.gameLibrary.steamInstalled)
+
+        // Warm a client on disk (the one bottle both the library + settings point at), then re-probe both
+        // off-main caches — they must agree, proving they route to the same prefix.
+        paths.createWarmedSteamClient()
+        await env.steamBottleVM.refreshInstalled()
+        await env.gameLibrary.refreshSteamInstalled()
+        #expect(env.steamBottleVM.steamInstalled)
+        #expect(env.gameLibrary.steamInstalled)
     }
 
     @Test("a fresh Steam install flips the library's cached steamReady gate (onSteamInstalled wiring)")
@@ -324,7 +321,7 @@ struct AppEnvironmentUpdateTests {
         // A prior run recorded a live game PID into the durable ledger, then crashed before clearing it.
         let priorRun = ProcessLedger(url: paths.processLedgerFile, runner: runner)
         runner.setAlive(4242, true)
-        priorRun.record("steam:220:gptk", pid: 4242)
+        priorRun.record("steam:220", pid: 4242)
 
         // A fresh AppEnvironment builds its own ledger over the same file.
         let env = AppEnvironment(paths: paths, runner: runner)
@@ -338,13 +335,13 @@ struct AppEnvironmentUpdateTests {
         #expect(!env.bottles.isBlocked())
     }
 
-    @Test("terminateAllOnQuit stops every backend's Steam client and clears its ledger record")
+    @Test("terminateAllOnQuit stops the Steam client and clears its ledger record")
     func quitTearsDownClientsAndLedger() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let runner = FakeProcessRunner()
         let env = AppEnvironment(paths: paths, runner: runner)
-        // Bring up the GPTK Steam client — it records a live PID into the durable ledger.
+        // Bring up the Steam client — it records a live PID into the durable ledger.
         env.steamClientSession.updateWine(URL(fileURLWithPath: "/w/wine64"))
         env.steamClientSession.readinessTimeout = 0        // no readiness wait against the fake
         await env.steamClientSession.ensureRunning()
@@ -363,8 +360,8 @@ struct AppEnvironmentUpdateTests {
         let runner = FakeProcessRunner()
         let priorRun = ProcessLedger(url: paths.processLedgerFile, runner: runner)
         runner.setAlive(4242, true)
-        priorRun.record("steam:220:gptk", pid: 4242)
-        priorRun.remove("steam:220:gptk")      // clean quit cleared it
+        priorRun.record("steam:220", pid: 4242)
+        priorRun.remove("steam:220")      // clean quit cleared it
 
         let env = AppEnvironment(paths: paths, runner: runner)
         #expect(!env.blockedForBottleWork())

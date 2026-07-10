@@ -11,8 +11,8 @@ struct LibraryGridView: View {
     @State private var detailTarget: SteamApp?
     @State private var showAddGame = false
     /// The user has dismissed the first-run onboarding. Kept SEPARATE from `setupComplete` so finishing the
-    /// required steps doesn't yank the user straight into the library — they stay on onboarding (with a
-    /// "Done" button) to optionally set up the DXMT bottle first. Persisted so it doesn't reappear.
+    /// required steps doesn't yank the user straight into the library — they click "Done" when ready.
+    /// Persisted so it doesn't reappear.
     @AppStorage("onboardingDone") private var onboardingDone = false
 
     var body: some View {
@@ -39,7 +39,7 @@ struct LibraryGridView: View {
                     .help("Add a non-Steam .exe game")
                 Button { Task { await lib.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
             } else if env.setupComplete {
-                // Required steps done — let the user finish on their terms (after optional DXMT setup).
+                // Required steps done — let the user finish on their terms.
                 Button { onboardingDone = true } label: { Label("Done", systemImage: "checkmark.circle.fill") }
                     .buttonStyle(.borderedProminent).tint(.green)
                     .help("Finish setup and go to your library")
@@ -69,20 +69,11 @@ struct LibraryGridView: View {
         "\(count) \(count == 1 ? "game" : "games")"
     }
 
-    /// "Open Steam" — a plain button that opens the GPTK bottle, or a menu (GPTK + DXMT) once the DXMT
-    /// Steam bottle is also set up. Each bottle has its own Steam install/login, so a dual-bottle user picks
-    /// which one to browse/install in; a single-bottle user still gets a one-click button.
+    /// "Open Steam" — opens the bottle's Steam client so the user can browse + install games.
     @ViewBuilder
     private func openSteamControl<L: View>(
         _ lib: GameLibraryViewModel, @ViewBuilder label: () -> L) -> some View {
-        if lib.steamInstalled(.dxmt) {
-            Menu {
-                Button("\(GraphicsBackend.gptk.displayName) bottle") { Task { await lib.openSteam(.gptk) } }
-                Button("\(GraphicsBackend.dxmt.displayName) bottle") { Task { await lib.openSteam(.dxmt) } }
-            } label: { label() }
-        } else {
-            Button { Task { await lib.openSteam(.gptk) } } label: { label() }
-        }
+        Button { Task { await lib.openSteam() } } label: { label() }
     }
 
     private let columns = [GridItem(.adaptive(minimum: 250), spacing: 16)]
