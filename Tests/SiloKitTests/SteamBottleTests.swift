@@ -311,7 +311,7 @@ struct SteamBottleTests {
         let session = FakeURLProtocol.makeSession()
         let (bottle, fake, paths, _) = make(tmp, session: session)
         // Pre-mark the first pack as already installed.
-        let markers = paths.steamBottle.appendingPathComponent(".silo-fonts-installed")
+        let markers = paths.steamBottle.appendingPathComponent(".silo-installed")
         try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: markers.appendingPathComponent(Silo.sourceHanSansPacks[0]).path, contents: Data())
         for pack in Silo.sourceHanSansPacks.dropFirst() {
@@ -343,7 +343,8 @@ struct SteamBottleTests {
             let member = String(memberArg.dropFirst(3))
             let dir = inv.arguments.contains("C:\\windows\\system32") ? sys32 : syswow
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            FileManager.default.createFile(atPath: dir.appendingPathComponent(member).path, contents: Data("DLL".utf8))
+            // The REAL d3dcompiler_47.dll is multi-MB; write a large-enough dummy to pass the size gate.
+            FileManager.default.createFile(atPath: dir.appendingPathComponent(member).path, contents: Data(count: 600_000))
         }
 
         try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"))
@@ -366,29 +367,53 @@ struct SteamBottleTests {
         #expect(fake.invocations.count == runsBefore)
     }
 
-    @Test("installVCRedist runs the redist USER-GUIDED (no /quiet) and marks it via msvcp140.dll")
+    @Test("installVCRedist runs the redist USER-GUIDED (no /quiet) and marks it done on success")
     func installVCRedist() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
-        let (bottle, fake, paths, _) = make(tmp, session: session)
+        let (bottle, fake, _, _) = make(tmp, session: session)
         FakeURLProtocol.stub(Silo.vcRedistX64URL.absoluteString, data: Data("EXE".utf8), session: session)
-        let sys32 = paths.steamBottle.appendingPathComponent("drive_c/windows/system32")
-        fake.onRun = { inv in
-            guard inv.arguments.first?.hasSuffix("vc_redist.x64.exe") == true else { return }
-            try? FileManager.default.createDirectory(at: sys32, withIntermediateDirectories: true)
-            FileManager.default.createFile(atPath: sys32.appendingPathComponent("msvcp140.dll").path, contents: Data("DLL".utf8))
-        }
+        // The installer run returns the fake's default exit 0 → a success → the Silo marker is written.
 
         try await bottle.installVCRedist(x86: false, wine: URL(fileURLWithPath: "/w/wine64"))
 
         let run = try #require(fake.invocations.last { $0.arguments.first?.hasSuffix("vc_redist.x64.exe") == true })
         #expect(run.arguments.count == 1)                    // just the installer path — no /install /quiet
         #expect(!run.arguments.contains("/quiet"))           // user-guided (license shown)
-        #expect(bottle.isVCRedistInstalled(x86: false))
+        #expect(bottle.isVCRedistInstalled(x86: false))      // marked done (exit 0), NOT via msvcp140.dll
         // Idempotent.
         let runsBefore = fake.invocations.count
         try await bottle.installVCRedist(x86: false, wine: URL(fileURLWithPath: "/w/wine64"))
         #expect(fake.invocations.count == runsBefore)
+    }
+
+    @Test("a user cancel (exit 1602) leaves MSVC UNMARKED so setup re-prompts")
+    func vcRedistCancelReprompts() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, _, _) = make(tmp, session: session)
+        FakeURLProtocol.stub(Silo.vcRedistX86URL.absoluteString, data: Data("EXE".utf8), session: session)
+        fake.queueResult(ProcessResult(exitCode: 1602))   // user cancelled the bootstrapper
+
+        try await bottle.installVCRedist(x86: true, wine: URL(fileURLWithPath: "/w/wine64"))
+
+        #expect(!bottle.isVCRedistInstalled(x86: true))   // NOT marked → the next setup runs it again
+    }
+
+    @Test("a Wine fakedll stub does NOT mark d3dcompiler_47 / MSVC installed (they still run)")
+    func fakeDllStubsDoNotSatisfyComponents() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (bottle, _, paths) = make(tmp)
+        // Wine's wineboot drops tiny placeholder ("fake") DLLs for its builtins into system32/syswow64.
+        for dir in ["windows/system32", "windows/syswow64"] {
+            let d = paths.steamBottle.appendingPathComponent("drive_c/\(dir)")
+            try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: d.appendingPathComponent("d3dcompiler_47.dll").path, contents: Data(count: 8_000))
+            FileManager.default.createFile(atPath: d.appendingPathComponent("msvcp140.dll").path, contents: Data(count: 120_000))
+        }
+        #expect(!bottle.hasD3DCompiler47)                  // tiny stub ≠ the real multi-MB DLL
+        #expect(!bottle.isVCRedistInstalled(x86: true))    // no Silo marker → not installed
+        #expect(!bottle.isVCRedistInstalled(x86: false))
     }
 
     @Test("runSteamInstaller user-guided omits /S (the interactive GUI installer)")

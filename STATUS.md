@@ -24,8 +24,15 @@
     Wine's builtin **`wine expand`** (no cabextract), 64-bit→`system32` / 32-bit→`syswow64`, then a native DLL
     override. **⚠️ R2 (highest on-device risk):** whether `wine expand -F:<member>` pulls the named member on
     a real Mac — fallback is re-hosting the two redistributable DLLs as Silo release assets.
-  - **MSVC redist** (new `installVCRedist`): x86 then x64, **user-guided** (no `/quiet` → license shown);
-    marker `msvcp140.dll`. **msync** is a no-op (env-only, always satisfied → skipped).
+  - **MSVC redist** (new `installVCRedist`): x86 then x64, **user-guided** (no `/quiet` → license shown).
+    **msync** is a no-op (env-only, always satisfied → skipped).
+  - **🐛 On-device fix (2026-07-10): MSVC never showed its user-guided installer.** Root cause: `wineboot`
+    pre-populates system32/syswow64 with tiny **fakedll** stubs for Wine's builtins (incl. `msvcp140.dll`),
+    so the "is `msvcp140.dll` present?" marker read true on a fresh prefix and **skipped the redist entirely**
+    — same latent bug for `d3dcompiler_47`. Fixed: MSVC now tracks a **Silo marker** (`.silo-installed/
+    vcredist-{x86,x64}`) written only on a success exit code (0/3010/1638; a cancel 1602 re-prompts), and
+    d3dcompiler is **size-gated** (real DLL is multi-MB vs the ~KB stub). +2 tests pin it (a fakedll stub no
+    longer satisfies either; a cancel re-prompts). 362 tests green.
   - **Steam** install is now **user-guided** (`runSteamInstaller(userGuided:)` drops `/S`); `installSteam`
     (silent) kept for the CLI/tests. `downloadSteamInstaller` is a separate early step (fails fast on network;
     now creates the prefix since it runs before `wineboot`).

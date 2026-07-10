@@ -30,16 +30,19 @@ extension AppPaths {
         let fonts = driveC.appendingPathComponent("windows/Fonts")
         try? fm.createDirectory(at: fonts, withIntermediateDirectories: true)
         fm.createFile(atPath: fonts.appendingPathComponent("Arial.TTF").path, contents: Data())   // coreFonts
-        let markers = steamBottle.appendingPathComponent(".silo-fonts-installed")
+        let markers = steamBottle.appendingPathComponent(".silo-installed")
         try? fm.createDirectory(at: markers, withIntermediateDirectories: true)
         for pack in Silo.sourceHanSansPacks {
             fm.createFile(atPath: markers.appendingPathComponent(pack).path, contents: Data())      // sourceHanSans
         }
+        for arch in ["x86", "x64"] {
+            fm.createFile(atPath: markers.appendingPathComponent("vcredist-\(arch)").path, contents: Data())  // vcRedist
+        }
+        // d3dcompiler_47 is size-gated (the real DLL is multi-MB) — write a large-enough dummy to satisfy it.
         for dir in ["windows/system32", "windows/syswow64"] {
             let d = driveC.appendingPathComponent(dir)
             try? fm.createDirectory(at: d, withIntermediateDirectories: true)
-            fm.createFile(atPath: d.appendingPathComponent("d3dcompiler_47.dll").path, contents: Data())  // d3dcompiler
-            fm.createFile(atPath: d.appendingPathComponent("msvcp140.dll").path, contents: Data())        // vcRedist
+            fm.createFile(atPath: d.appendingPathComponent("d3dcompiler_47.dll").path, contents: Data(count: 600_000))
         }
     }
 }

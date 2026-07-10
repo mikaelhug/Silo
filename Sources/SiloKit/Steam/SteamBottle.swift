@@ -217,14 +217,24 @@ public struct SteamBottle: Sendable {
 
     // MARK: - CrossOver-parity components (Asian fonts, d3dcompiler_47, MSVC redist)
 
-    /// Silo-owned marker dir (sibling of `drive_c`, ignored by Wine) recording which large font packs are
-    /// installed — so a ~360 MB Source Han Sans download resumes per-pack after an interruption.
-    private var fontMarkerDir: URL { prefixDir.appendingPathComponent(".silo-fonts-installed", isDirectory: true) }
+    /// Silo-owned marker dir (sibling of `drive_c`, ignored by Wine) recording which components are
+    /// installed. Used where a filesystem check is unreliable — Wine's `wineboot` drops a builtin/fakedll
+    /// `msvcp140.dll` stub, so the real MSVC redist can't be detected by the DLL's presence — and where
+    /// resumability matters (the ~360 MB Source Han Sans packs).
+    private var markerDir: URL { prefixDir.appendingPathComponent(".silo-installed", isDirectory: true) }
+
+    /// A DLL is the REAL Microsoft one (not a tiny Wine fakedll stub) if it's at least `minBytes`. `wineboot`
+    /// pre-populates system32/syswow64 with placeholder DLLs for every builtin (incl. d3dcompiler_47), so a
+    /// plain existence check would wrongly report the component installed and skip the real install.
+    private func isRealDLL(_ path: URL, minBytes: Int) -> Bool {
+        guard let size = (try? fileManager.attributesOfItem(atPath: path.path)[.size]) as? Int else { return false }
+        return size >= minBytes
+    }
 
     /// Whether all four Adobe Source Han Sans language packs are installed (per-pack markers present).
     var hasSourceHanSans: Bool {
         Silo.sourceHanSansPacks.allSatisfy {
-            fileManager.fileExists(atPath: fontMarkerDir.appendingPathComponent($0).path)
+            fileManager.fileExists(atPath: markerDir.appendingPathComponent($0).path)
         }
     }
 
@@ -237,10 +247,10 @@ public struct SteamBottle: Sendable {
         let driveC = prefixDir.appendingPathComponent("drive_c")
         let fontsDir = driveC.appendingPathComponent("windows/Fonts")
         try fileManager.createDirectory(at: fontsDir, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: fontMarkerDir, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
 
         let pending = Silo.sourceHanSansPacks.filter {
-            !fileManager.fileExists(atPath: fontMarkerDir.appendingPathComponent($0).path)
+            !fileManager.fileExists(atPath: markerDir.appendingPathComponent($0).path)
         }
         // Download the pending packs concurrently (each ~90 MB, independent).
         let session = self.session
@@ -285,15 +295,17 @@ public struct SteamBottle: Sendable {
                 try? fileManager.removeItem(at: dest)
                 try? fileManager.copyItem(at: src, to: dest)
             }
-            fileManager.createFile(atPath: fontMarkerDir.appendingPathComponent(pack).path, contents: Data())
+            fileManager.createFile(atPath: markerDir.appendingPathComponent(pack).path, contents: Data())
         }
     }
 
-    /// Whether the native `d3dcompiler_47.dll` is present in BOTH `system32` (64-bit) and `syswow64` (32-bit).
+    /// Whether the REAL native `d3dcompiler_47.dll` is present in BOTH `system32` (64-bit) and `syswow64`
+    /// (32-bit). Size-gated: a fresh prefix has Wine's ~KB fakedll stub there; the real Microsoft DLL is
+    /// multi-MB — so a plain existence check would wrongly skip the install.
     var hasD3DCompiler47: Bool {
         let driveC = prefixDir.appendingPathComponent("drive_c")
-        return fileManager.fileExists(atPath: driveC.appendingPathComponent("windows/system32/d3dcompiler_47.dll").path)
-            && fileManager.fileExists(atPath: driveC.appendingPathComponent("windows/syswow64/d3dcompiler_47.dll").path)
+        return isRealDLL(driveC.appendingPathComponent("windows/system32/d3dcompiler_47.dll"), minBytes: 500_000)
+            && isRealDLL(driveC.appendingPathComponent("windows/syswow64/d3dcompiler_47.dll"), minBytes: 500_000)
     }
 
     /// Install the native `d3dcompiler_47.dll` (HLSL shader compiler) for both ABIs (idempotent, no EULA).
@@ -335,18 +347,25 @@ public struct SteamBottle: Sendable {
         try? await setDllOverride(wine: wine, dll: "d3dcompiler_47", value: "native")
     }
 
-    /// Whether the MSVC redistributable for `x86` (else x64) is installed — its `msvcp140.dll` is present in
-    /// `syswow64` (x86) / `system32` (x64).
+    /// Marker file recording a completed MSVC-redist install for `x86` (else x64).
+    private func vcRedistMarker(x86: Bool) -> URL {
+        markerDir.appendingPathComponent("vcredist-\(x86 ? "x86" : "x64")")
+    }
+
+    /// Whether the MSVC redistributable for `x86` (else x64) is installed — tracked by a **Silo marker**
+    /// written after a successful install. NOT keyed on `msvcp140.dll` presence: Wine ships a builtin/fakedll
+    /// `msvcp140.dll`, so a fresh prefix looks "installed" and the real user-guided redist would never run
+    /// (the on-device symptom that motivated this).
     func isVCRedistInstalled(x86: Bool) -> Bool {
-        let dir = x86 ? "windows/syswow64" : "windows/system32"
-        return fileManager.fileExists(atPath:
-            prefixDir.appendingPathComponent("drive_c/\(dir)/msvcp140.dll").path)
+        fileManager.fileExists(atPath: vcRedistMarker(x86: x86).path)
     }
 
     /// Install the Microsoft Visual C++ 2015–2022 Redistributable (`x86` else x64) into the bottle,
     /// **user-guided** (idempotent). Downloads the official `aka.ms` bootstrapper and runs it with NO
     /// `/quiet` flag, so it shows its license (the user accepts) and installs — `ProcessRunning.run` BLOCKS
-    /// until the window closes. Best-effort. Marker: `msvcp140.dll` in the arch's system dir.
+    /// until the window closes. Marks it done only on a success exit code (0 = ok, 3010 = ok + reboot,
+    /// 1638 = a newer version already present); a user cancel (1602) or error leaves it UNMARKED so the next
+    /// setup re-prompts. Best-effort otherwise.
     func installVCRedist(x86: Bool, wine: URL?) async throws {
         guard let wine else { throw BottleError.wineNotConfigured }
         if isVCRedistInstalled(x86: x86) { return }
@@ -360,11 +379,15 @@ public struct SteamBottle: Sendable {
         try? fileManager.removeItem(at: installer)
         guard (try? fileManager.moveItem(at: tempFile, to: installer)) != nil else { return }
         // User-guided: no `/install /quiet /norestart` → the bootstrapper shows the license + Install button.
-        _ = try? await runner.run(
+        let result = try? await runner.run(
             executable: wine, arguments: [installer.path],
             environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
             currentDirectory: prefixDir)
         try? fileManager.removeItem(at: installer)
+        if let code = result?.exitCode, [0, 3010, 1638].contains(code) {
+            try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
+            fileManager.createFile(atPath: vcRedistMarker(x86: x86).path, contents: Data())
+        }
     }
 
     /// Write a Wine DLL override (`HKCU\Software\Wine\DllOverrides\<dll> = <value>`) via `wine reg add`.
