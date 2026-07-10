@@ -159,7 +159,7 @@ struct GameLibraryViewModelTests {
             (LaunchOrchestrator.LaunchError.wineNotConfigured, "No Wine configured."),
             (WinePrefixProvisioner.ProvisionError.wineNotConfigured, "No Wine configured."),
             (LaunchOrchestrator.LaunchError.executableNotFound(URL(fileURLWithPath: "/g/Game")), "/g/Game"),
-            (WinePrefixProvisioner.ProvisionError.winebootFailed(1), "wineboot exited 1"),
+            (WinePrefixProvisioner.ProvisionError.winebootFailed(1), "initialize the game's Wine bottle"),
             (RuntimeVariants.VariantError.cloneFailed(URL(fileURLWithPath: "/rt-dxmt"), 28), "disk space"),
             (GraphicsLinker.LinkError.sourceMissing(URL(fileURLWithPath: "/dxmt/lib")), "re-download"),
         ]
@@ -570,7 +570,7 @@ struct GameLibraryViewModelTests {
         #expect(gptkManualNotReady.contains("Set up DXMT in Settings → DXMT first"))
         // DXMT backend (manual only) → names DXMT, admits the wined3d fallback likely failed, points at Settings.
         let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, isSteamGame: false, dxmtAvailable: true)
-        #expect(dxmt.contains("DXMT didn't engage") && dxmt.contains("Settings → DXMT"))
+        #expect(dxmt.contains("DXMT couldn't drive this game's graphics") && dxmt.contains("Settings → DXMT"))
         // None of them pretends graphics are "running on fallback graphics".
         for m in [gptkSteam, gptkManualReady, gptkManualNotReady, dxmt] {
             #expect(m.hasPrefix("OC2: "))

@@ -34,7 +34,7 @@ struct LibraryGridView: View {
         .toolbar {
             if showLibrary {
                 openSteamControl(lib) { Label("Open Steam", systemImage: "cart") }
-                    .help("Open a Steam bottle to browse + install games")
+                    .help("Open a Steam bottle to browse and install games")
                 Button { showAddGame = true } label: { Label("Add Game", systemImage: "plus") }
                     .help("Add a non-Steam .exe game")
                 Button { Task { await lib.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }

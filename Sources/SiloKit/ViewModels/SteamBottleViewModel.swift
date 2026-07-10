@@ -149,8 +149,8 @@ public final class SteamBottleViewModel {
         // launch afterwards reuses it instead of spawning a second client).
         let ok = await session.ensureRunning()
         status = ok
-            ? "Launched Steam. Give it a moment to paint, then check the bottle log."
-            : "Launch failed: \(session.launchError ?? "couldn't start Steam")"
+            ? "Steam launched — it may take a moment to appear."
+            : "Couldn't start Steam: \(session.launchError ?? "unknown error")."
     }
 
     private func message(_ error: Error) -> String { (error as NSError).localizedDescription }

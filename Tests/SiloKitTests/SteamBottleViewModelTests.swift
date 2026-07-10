@@ -130,7 +130,7 @@ struct SteamBottleViewModelTests {
         #expect(call.arguments.first == "explorer")
         #expect(call.arguments.contains("-cef-in-process-gpu"))
         #expect(call.environment["STEAM_CEF_COMMAND_LINE"]?.contains("--use-gl=swiftshader") == true)
-        #expect(vm.status.contains("Launched Steam"))
+        #expect(vm.status.contains("Steam launched"))
         #expect(!vm.busy)
     }
 

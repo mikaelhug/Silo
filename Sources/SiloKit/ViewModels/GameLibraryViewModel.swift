@@ -302,7 +302,7 @@ public final class GameLibraryViewModel {
     /// Delete a draft bottle that was provisioned but never added to the library (Add sheet cancel).
     public func discardManualBottle(_ id: UUID) async {
         if await !deleteBottle(id) {
-            setStatus("Couldn't delete the draft bottle — remove it in Finder: \(paths.manualBottle(id).path)")
+            setStatus("Couldn't remove the game's bottle — you can delete it manually in Finder: \(paths.manualBottle(id).path)")
         }
     }
 
@@ -425,17 +425,17 @@ public final class GameLibraryViewModel {
              WinePrefixProvisioner.ProvisionError.wineNotConfigured:
             "No Wine configured."
         case LaunchOrchestrator.LaunchError.executableNotFound(let url):
-            "couldn't find the game's .exe (looked in \(url.path)) — pick one in the game's settings."
+            "couldn't find the game's program in \(url.path) — choose the correct .exe in the game's settings."
         case LaunchOrchestrator.LaunchError.unsupported32BitOnGPTK:
             // Backstop: the UI refuses 32-bit-on-GPTK earlier with a richer, DXMT-steering message
             // (unsupported32BitMessage); this covers any launch path that reaches the orchestrator directly.
             "this is a 32-bit game — GPTK / D3DMetal is 64-bit-only. Use DXMT (Settings → DXMT)."
-        case WinePrefixProvisioner.ProvisionError.winebootFailed(let code):
-            "the game's bottle failed to initialize (wineboot exited \(code)) — check Wine in Settings."
-        case RuntimeVariants.VariantError.cloneFailed(let url, let errno):
-            "couldn't prepare the DXMT runtime copy at \(url.path) (errno \(errno)) — check free disk space."
-        case GraphicsLinker.LinkError.sourceMissing(let url):
-            "the graphics runtime's modules are missing (\(url.path)) — re-download it in Settings."
+        case WinePrefixProvisioner.ProvisionError.winebootFailed:
+            "couldn't initialize the game's Wine bottle — check your Wine setup in Settings."
+        case RuntimeVariants.VariantError.cloneFailed:
+            "couldn't prepare the DXMT runtime — you may be low on disk space."
+        case GraphicsLinker.LinkError.sourceMissing:
+            "the graphics runtime is incomplete — re-download it in Settings."
         default:
             (error as NSError).localizedDescription
         }
@@ -499,7 +499,7 @@ public final class GameLibraryViewModel {
             return "\(name): GPTK / D3DMetal couldn't drive this game's graphics — this class of older "
                 + "DirectX 10/11 titles needs DXMT. " + dxmtSteer(dxmtAvailable: dxmtAvailable)
         case .dxmt:
-            return "\(name): DXMT didn't engage — the game fell back to wined3d and likely failed. "
+            return "\(name): DXMT couldn't drive this game's graphics. "
                 + "Check the DXMT runtime in Settings → DXMT."
         }
     }
