@@ -21,14 +21,14 @@ struct OnboardingView: View {
                 VStack(spacing: 12) {
                     StepRow(
                         number: 1, title: "Import Game Porting Toolkit",
-                        subtitle: "Apple's GPTK .dmg.",
+                        subtitle: "Apple's GPTK4 .dmg",
                         done: env.gptkReady, busy: gptk.isImporting,
                         actionLabel: "Choose .dmg",
                         action: { if let dmg = chooseDiskImage() { Task { await env.gptkManager.importGPTK(from: dmg) } } })
 
                     StepRow(
                         number: 2, title: "Set up",
-                        subtitle: "Accept a license or two when prompted.",
+                        subtitle: "Download and configure the Steam client",
                         done: env.steamReady, busy: env.setupBusy, locked: !env.gptkReady,
                         actionLabel: "Set up",
                         action: { Task { await env.runFullSetup() } })
