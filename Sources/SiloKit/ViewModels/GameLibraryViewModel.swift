@@ -441,48 +441,6 @@ public final class GameLibraryViewModel {
         }
     }
 
-    /// Generate a Game-Mode-tagged `.app` in `directory` (default: the Desktop) that launches the game
-    /// directly under ITS backend — startable from Spotlight/Dock without Silo. Routes through
-    /// `BottleResolver` exactly like `playManual`, so the snapshotted env carries the game's variant
-    /// runtime + dll overrides (a DXMT game's shortcut launches on the DXMT runtime, never the base).
-    /// Returns the bundle URL, or nil with the failure surfaced in the status bar. Manual games only —
-    /// they don't need the co-resident Steam client.
-    @discardableResult
-    public func makeShortcut(for game: ManualGame, into directory: URL? = nil) async -> URL? {
-        if launchBlockedByBottles() { return nil }   // prepareGraphics seeds the prefix — not during a move
-        // A 32-bit game on GPTK can't render (GPTK / D3DMetal is 64-bit-only), so the shortcut would launch
-        // to a wined3d-fallback failure with no in-app steer. Refuse here exactly like `playManual` does.
-        if game.backend == .gptk, WindowsExecutable.is32Bit(game.executablePath) {
-            setStatus(Self.unsupported32BitMessage(
-                name: game.name, isSteamGame: false, dxmtAvailable: backend.libDir(for: .dxmt) != nil))
-            return nil
-        }
-        guard let dir = directory
-            ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first else { return nil }
-        let cfg = backend
-        do {
-            // Resolve + prepare graphics + build the plan off-main: the clone/overlay is slow, and a DXMT
-            // game also needs its prefix loader (winemetal.dll) seeded — the shortcut execs wine directly
-            // with no launch pipeline, so `linkGraphics` never runs for it otherwise.
-            let plan = try await Task.detached { [paths, orchestrator] in
-                let context = try BottleResolver(paths: paths).manual(game, config: cfg)
-                try orchestrator.prepareGraphics(
-                    backendConfig: cfg, graphics: context.graphics,
-                    wine: context.wineBinary, prefix: context.prefix)
-                return try LaunchOrchestrator.makePlan(
-                    config: game.gameConfig, backend: cfg, graphics: context.graphics,
-                    wine: context.wineBinary, gameExe: game.executablePath,
-                    prefix: context.prefix, logURL: paths.manualLog(game.id))
-            }.value
-            let app = try GameAppShortcut(name: game.name, plan: plan).write(into: dir)
-            setStatus("Created a shortcut for \(game.name).")
-            return app
-        } catch {
-            setStatus("Couldn't create the shortcut: \(Self.resolveMessage(error))")
-            return nil
-        }
-    }
-
     /// Open `winecfg` for a manual game's OWN bottle (Windows version, libraries — isolated per game).
     public func openManualWinecfg(_ game: ManualGame) async {
         guard backend.isWineConfigured else { setStatus("No Wine configured."); return }

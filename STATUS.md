@@ -58,7 +58,11 @@
   - **On-device (Wine absent here):** confirm the Steam window's PID reports `<Name>` via
     `lsappinfo info -only name <pid>` and that a single primary tile appears (a stray `steamwebhelper` tile
     would be a child-coalescing follow-up — CrossOver solves that with a proprietary helper Silo doesn't have).
-    Known follow-up: `GameAppShortcut` (Desktop shortcuts) still `exec`s wine, so ITS tile reads "wine".
+- **🧹 Post-Phase-4 — removed the "Create Desktop Shortcut" feature (2026-07-10, `main`; 344 tests green).**
+  Per the user, the Desktop-shortcut feature is gone entirely (`GameAppShortcut`, `GameLibraryViewModel.makeShortcut`,
+  `LaunchOrchestrator.prepareGraphics`, the tile menu item, and their tests) — which also moots the Phase 3
+  follow-up (that standalone `.app` `exec`'d wine, so its tile read "wine"). Manual games launch from Silo
+  (correctly named tile) or their own `winecfg`; no standalone launcher `.app`.
 - **🔧 Phase 2 — default Wine config for the Steam bottle (2026-07-10, `main`; `swift build` clean +
   zero warnings, 364 tests green serial + parallel).** A vanilla `wineboot` prefix carries no
   `HKCU\Software\Wine\DllOverrides`, but games expect the standard Windows-compatibility set. Silo now applies

@@ -192,18 +192,6 @@ public struct LaunchOrchestrator: Sendable {
         return try await spawn(plan)
     }
 
-    /// Prepare a bottle's graphics WITHOUT launching: overlay the backend's translated d3d into the runtime
-    /// and (for DXMT) seed `winemetal.dll` into the game `prefix`. Used by the Desktop-shortcut builder,
-    /// whose standalone `.app` execs wine directly with no launch pipeline — so the prefix must already
-    /// carry the DXMT loader (a normal first launch seeds it via `launch…` → `linkGraphics`; a shortcut made
-    /// before any launch would otherwise leave the prefix without it → DXMT falls back to wined3d and fails).
-    /// No-op for GPTK (needs no prefix loader) and for an unconfigured backend.
-    public func prepareGraphics(
-        backendConfig: BackendConfig, graphics: GraphicsBackend, wine: URL, prefix: URL
-    ) throws {
-        try linkGraphics(backendConfig: backendConfig, graphics: graphics, wine: wine, prefix: prefix)
-    }
-
     private func spawn(_ plan: LaunchPlan) async throws -> Int32 {
         writeLogHeader(for: plan)
         return try await runner.spawnDetached(

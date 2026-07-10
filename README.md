@@ -36,8 +36,7 @@ imports Apple's Game Porting Toolkit from your `.dmg`, and self-updates from Git
   bottle; **DXMT** (a direct D3D10/11 → Metal layer) is the optional fallback for older titles GPTK
   can't run — selectable per manual game, each in its own isolated bottle.
 - **Non-Steam games too.** Add any `.exe` (or run its installer); each manual game lives in its
-  **own isolated Wine prefix** with per-game backend, env flags, and launch options — plus a
-  Game-Mode-tagged Desktop shortcut that launches without opening Silo.
+  **own isolated Wine prefix** with per-game backend, env flags, and launch options.
 - **Self-contained.** No Homebrew, no external dependencies: Wine comes from Silo's Releases
   (SHA-256 verified, fail-closed), GPTK from your Apple-downloaded `.dmg`, updates in-app.
 - **Native and event-driven.** SwiftUI + Swift 6 strict concurrency; zero polling — game exits,
