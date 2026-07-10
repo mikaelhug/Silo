@@ -28,20 +28,29 @@ struct OnboardingView: View {
 
                     StepRow(
                         number: 2, title: "Set up",
-                        subtitle: "Downloads Wine + Steam, then installs fonts, runtimes, and Steam. "
-                            + "You'll accept a license or two along the way.",
+                        subtitle: "Accept a license or two when prompted.",
                         done: env.steamReady, busy: env.setupBusy, locked: !env.gptkReady,
                         actionLabel: "Set up",
                         action: { Task { await env.runFullSetup() } })
                 }
                 .frame(maxWidth: 540)
 
-                let message = steam.status.isEmpty
-                    ? (runtime.statusMessage ?? env.dxmtRuntime.statusMessage
-                        ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
-                if let message {
-                    Text(message).font(.callout).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center).frame(maxWidth: 540)
+                if env.setupBusy {
+                    // A blue progress bar instead of the changing per-step text — determinate during the
+                    // Steam client download (a real %), an animated indeterminate bar for the other steps.
+                    ProgressView(value: env.steamBottleVM.warmUpFraction)
+                        .progressViewStyle(.linear)
+                        .tint(.blue)
+                        .frame(maxWidth: 540)
+                } else {
+                    // Idle: surface the final/error status (setup done, or a Wine/GPTK failure).
+                    let message = steam.status.isEmpty
+                        ? (runtime.statusMessage ?? env.dxmtRuntime.statusMessage
+                            ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
+                    if let message {
+                        Text(message).font(.callout).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).frame(maxWidth: 540)
+                    }
                 }
 
                 // Only until GPTK is imported — once the user has pointed Silo at the .dmg (step 2 "Done"),
