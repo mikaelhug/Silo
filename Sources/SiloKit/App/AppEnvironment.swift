@@ -265,11 +265,12 @@ public final class AppEnvironment {
     }
 
     /// Open a Wine maintenance tool (winecfg / regedit / control) on the Steam bottle so the user can fix
-    /// the prefix by hand. Routes through the shared `runWineTool` (single tool-launch path).
+    /// the prefix by hand. Routes through the shared `runWineTool` (single tool-launch path). The tool's own
+    /// window IS the feedback — it deliberately posts NO status (the UI's status line lives in a different,
+    /// Retina-preferences section, where an "Opened winecfg" toast just reads as misplaced).
     public func openWineTool(_ tool: String) async {
-        guard wineBinary != nil else { bottleToolsMessage = "Set up Wine first."; return }
+        guard wineBinary != nil else { return }
         await orchestrator.runWineTool(tool, prefix: paths.steamBottle, backend: backendSettings.config)
-        bottleToolsMessage = "Opened \(tool)."
     }
 
     /// Build a per-game settings view model with the game's persisted config, keyed by appID.

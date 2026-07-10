@@ -49,7 +49,7 @@ public final class BottlesRelocationCoordinator {
     private func relocateBottles(to newRoot: URL) async {
         guard !busy else { return }
         guard !isBlocked() else {
-            message = "Stop running games and Steam before moving bottles."
+            message = "Quit any running game and Steam before moving bottles."
             return
         }
         // The move reads FROM the current bottles root. If that's a relocated drive that's currently

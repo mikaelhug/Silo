@@ -48,7 +48,7 @@ public final class UpdateCoordinator {
     public func installUpdate() async {
         guard let check = updateCheck, check.isNewer else { return }
         guard !isBlocked() else {
-            updateState = .failed("Stop running games first — installing an update relaunches Silo.")
+            updateState = .failed("Quit any running game first — installing an update relaunches Silo.")
             return
         }
         guard let appBundle = updater.appBundleToReplace() else {

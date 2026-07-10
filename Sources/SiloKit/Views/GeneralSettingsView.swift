@@ -78,7 +78,7 @@ struct GeneralSettingsView: View {
                     }
                 }
                 if env.anythingRunning {
-                    Text("Stop games and Steam first.").font(.caption).foregroundStyle(.secondary)
+                    Text("Quit any running game and Steam first.").font(.caption).foregroundStyle(.secondary)
                 } else if let message = env.bottles.message {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
