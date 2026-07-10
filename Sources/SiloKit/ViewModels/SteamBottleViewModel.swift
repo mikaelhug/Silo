@@ -141,16 +141,15 @@ public final class SteamBottleViewModel {
         }
     }
 
-    /// Launch the bottle's Steam client.
+    /// Launch the bottle's Steam client. Fire-and-forget: Steam's own window is the feedback, so this shows
+    /// NO spinner and NO status on success — only a failure surfaces a message. Routes through the shared
+    /// session so a game launched afterwards reuses this client instead of starting a second one.
     public func launchSteam() async {
-        guard !busy else { return }
-        busy = true; defer { busy = false }
-        // Route through the shared session so the live client has ONE owner + tracked PID (a game
-        // launch afterwards reuses it instead of spawning a second client).
-        let ok = await session.ensureRunning()
-        status = ok
-            ? "Steam launched — it may take a moment to appear."
-            : "Couldn't start Steam: \(session.launchError ?? "unknown error")."
+        guard !busy else { return }        // don't launch over an in-progress setup / warm-up
+        status = ""                        // launching is silent; also clears any lingering setup status
+        if await session.ensureRunning() == false {
+            status = "Couldn't start Steam: \(session.launchError ?? "unknown error")."
+        }
     }
 
     private func message(_ error: Error) -> String { (error as NSError).localizedDescription }
