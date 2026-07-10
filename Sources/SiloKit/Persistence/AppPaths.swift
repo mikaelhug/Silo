@@ -32,10 +32,6 @@ public struct AppPaths: Sendable, Hashable {
     /// tile (see `DockAppBundle`). Under `supportDir` — NOT `bottlesRoot` — so a launch never depends on the
     /// bottles drive being mounted to find its launcher wrapper.
     public var dockAppsDir: URL { supportDir.appendingPathComponent("DockApps", isDirectory: true) }
-    /// The crash-durable process ledger (`ProcessLedger`). Lives under `supportDir` — NOT `bottlesRoot` —
-    /// so it's always reachable even when the bottles drive is unplugged (that's exactly when a relaunched
-    /// Silo needs it to know a prior run's process is still alive).
-    public var processLedgerFile: URL { supportDir.appendingPathComponent("running-processes.json") }
 
     // MARK: - Bottles location
 

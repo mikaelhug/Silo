@@ -28,10 +28,6 @@ public final class AppEnvironment {
     public let steamStore = SteamStoreClient()
 
     private let updater: Updater
-    /// Crash-durable record of the processes Silo has launched into a bottle — the relocation/update gate
-    /// consults it (`blockedForBottleWork`) so a relaunched Silo (after a hard crash) still refuses while a
-    /// prior run's game/client is alive. See `ProcessLedger`.
-    private let processLedger: ProcessLedger
     /// The inline self-update flow (check / download / relaunch) — Settings → General → Updates.
     public let updates: UpdateCoordinator
     /// The bottles-location move flow (Settings → General → Bottles).
@@ -51,8 +47,6 @@ public final class AppEnvironment {
         self.updater = updater
         self.updates = UpdateCoordinator(updater: updater, updatesDir: paths.updatesDir)
         self.bottles = BottlesRelocationCoordinator(paths: paths, updater: updater)
-        let processLedger = ProcessLedger(url: paths.processLedgerFile, runner: runner)
-        self.processLedger = processLedger
 
         let configStore = ConfigStore(paths: paths)
         let linker = GraphicsLinker()
@@ -80,8 +74,7 @@ public final class AppEnvironment {
         // The single Steam bottle + its live client session + settings VM. The client runs on the base wine
         // (CEF needs no d3d; a co-resident game picks the variant runtime — shared wineserver).
         let steamBottle = SteamBottle(runner: runner, paths: paths)
-        let steamClientSession = SteamClientSession(
-            bottle: steamBottle, orchestrator: orchestrator, ledger: processLedger)
+        let steamClientSession = SteamClientSession(bottle: steamBottle, orchestrator: orchestrator)
         let steamBottleVM = SteamBottleViewModel(bottle: steamBottle, session: steamClientSession)
         self.steamClientSession = steamClientSession
         self.steamBottleVM = steamBottleVM
@@ -90,7 +83,7 @@ public final class AppEnvironment {
             bottle: steamBottle, discovery: discovery, orchestrator: orchestrator,
             configStore: configStore, paths: paths, backend: initialBackend,
             session: steamClientSession,
-            provisioner: WinePrefixProvisioner(runner: runner), ledger: processLedger)
+            provisioner: WinePrefixProvisioner(runner: runner))
         self.gameLibrary = gameLibrary
 
         backendSettings.onChange = { [weak self] in self?.applyBackend($0) }
@@ -115,8 +108,9 @@ public final class AppEnvironment {
         // A fresh Steam install must flip the library's cached `steamReady` gate (it drives onboarding);
         // load() re-probes the cache off-main. Without this, onboarding would stall until a relaunch.
         steamBottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
-        // Relocation must refuse while anything runs in a bottle (see `anythingRunning`). Both gates
-        // re-probe the crash-orphan ledger at the decision point (a button press — not a hot path).
+        // Relocation must refuse while anything runs in a bottle (see `anythingRunning`). Both gates probe
+        // the wineserver socket at the decision point (a button press — not a hot path), so an orphan left by
+        // a prior run's hard crash still blocks a move/update over its live prefix.
         bottles.isBlocked = { [weak self] in self?.blockedForBottleWork() ?? true }
         // A self-update relaunches Silo (tearing everything down), so refuse it while a game/client is live.
         updates.isBlocked = { [weak self] in self?.blockedForBottleWork() ?? true }
@@ -168,36 +162,25 @@ public final class AppEnvironment {
 
     // MARK: - Bottles location
 
-    /// True while any game OR the Steam client is live — relocation is refused then (we'd be moving prefixes
-    /// out from under running wineservers).
-    /// Live, in-memory "is anything running in a bottle right now" — cheap and never stale, so it's safe to
-    /// read in a SwiftUI body (it drives the Move/Update button's disabled state). It does NOT probe the
-    /// crash-durable ledger; that (a file read + per-PID syscalls) belongs only at the action gate, see
-    /// `blockedForBottleWork`. Includes a bottle mid-setup/warm-up — that owns a live wineserver actively
-    /// writing into the prefix, so a move/update over it would corrupt the download.
+    /// "Is anything running in a bottle right now" — a launch in flight, a bottle mid-setup, or ANY bottle
+    /// with a live `wineserver` (a running game/Steam, detected PID-free by `WineServerProbe`, even one
+    /// orphaned by a prior crash). Relocation/update refuse then (moving a prefix out from under its live
+    /// server corrupts it). It reads a `stat` per bottle — cheap enough for the Move/Update button's disabled
+    /// state, though it won't reactively re-render when a server appears/disappears; the action gate
+    /// (`blockedForBottleWork`) re-checks at the moment the user acts, so correctness never depends on the
+    /// body being current.
     public var anythingRunning: Bool {
-        gameLibrary.isAnythingRunning || steamClientSession.isRunning || steamBottleVM.busy
+        gameLibrary.launchInFlight
+            || steamBottleVM.busy
+            || WineServerProbe.isAnyBottleLive(paths: paths)
     }
 
-    /// The relocation/update gate — evaluated at the moment the user acts (a button press, never a hot
-    /// path), so it can afford the durable check. Refuse while: anything runs in a bottle now (incl. an
-    /// in-flight launch or a bottle mid-setup); a process orphaned by a PRIOR run's hard crash is still
-    /// alive (moving/updating a bottle out from under its live wineserver would corrupt it); or the OTHER
-    /// relaunching operation is already in flight (a move and a self-update must not overlap — both end in a
-    /// relaunch/exit).
+    /// The relocation/update gate — evaluated at the moment the user acts (a button press, never a hot path).
+    /// Refuse while: anything runs in a bottle now (incl. an in-flight launch, a bottle mid-setup, or a live
+    /// wineserver — even a crash orphan); or the OTHER relaunching operation is already in flight (a move and
+    /// a self-update must not overlap — both end in a relaunch/exit).
     func blockedForBottleWork() -> Bool {
-        anythingRunning
-            || processLedger.hasLiveSurvivor()
-            || bottles.busy
-            || updates.isInstalling
-    }
-
-    /// Best-effort synchronous teardown on app quit (and before a self-update relaunch): SIGTERM every game
-    /// Silo launched AND stop every backend's Steam client, so nothing outlives the launcher as an orphan.
-    /// Keeps the in-memory liveness the relocation/update gates rely on accurate across restarts.
-    public func terminateAllOnQuit() {
-        gameLibrary.terminateAllSync()
-        steamClientSession.stop()
+        anythingRunning || bottles.busy || updates.isInstalling
     }
 
     // MARK: - Setup readiness (drives the Library onboarding)

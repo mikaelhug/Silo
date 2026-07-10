@@ -89,33 +89,8 @@ struct SteamClientSessionTests {
         #expect(clock.now - start >= .seconds(0.25))   // it actually waited the failsafe, not an instant return
     }
 
-    @Test("stop() cancels a client caught MID-SPAWN — it self-terminates instead of becoming a 2nd client")
-    func stopCancelsMidSpawnBringUp() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let fake = FakeProcessRunner()
-        let session = SteamClientSession(
-            bottle: SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths),
-            orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
-        session.updateWine(URL(fileURLWithPath: "/w/wine64"))
-        session.readinessTimeout = 0
-        // Hold the spawn in flight so we can `stop()` before the session adopts the PID.
-        let gate = OneShotGate()
-        fake.onSpawnAwait = { await gate.wait() }
-
-        let launching = Task { await session.ensureRunning() }
-        for _ in 0..<500 where fake.invocations.isEmpty { await Task.yield() }   // spawn is now in flight
-        session.stop()             // teardown cancels the in-flight bring-up
-        await gate.open()          // let the spawn return its PID
-        let up = await launching.value
-
-        #expect(!up)               // the bring-up did NOT adopt the client…
-        #expect(!session.isRunning)
-        #expect(!fake.terminatedPIDs.isEmpty)   // …it terminated the process it had spawned (no 2nd client)
-    }
-
-    @Test("stop() force-quits the whole Steam tree by image name (a loader SIGTERM alone leaves it running)")
-    func stopForceQuitsSteamTree() async throws {
+    @Test("quitting leaves the running client alone — the session has no stop/kill path")
+    func quitLeavesClientRunning() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
@@ -125,30 +100,10 @@ struct SteamClientSessionTests {
         session.updateWine(URL(fileURLWithPath: "/w/wine64"))
         session.readinessTimeout = 0
         await session.ensureRunning()
-        #expect(session.isRunning)
 
-        session.stop()
-
-        // Killed BOTH Steam images (steamwebhelper — the CEF tree a loader SIGTERM leaves alive — then
-        // steam.exe, incl. any re-exec'd copy), regardless of the tracked loader PID.
-        for image in ["steamwebhelper.exe", "steam.exe"] {
-            #expect(fake.invocations.contains { $0.arguments == ["taskkill", "/F", "/IM", image] })
-        }
-        #expect(!session.isRunning)
-    }
-
-    @Test("stop() does NOT force-quit a bottle whose client it never started (no phantom taskkill)")
-    func stopSkipsUntouchedBottle() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let fake = FakeProcessRunner()
-        let session = SteamClientSession(
-            bottle: SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths),
-            orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()))
-        session.updateWine(URL(fileURLWithPath: "/w/wine64"))
-
-        session.stop()   // never started a client this session
-
+        // There is no stop()/force-quit: Silo launches the client detached and leaves it running when it
+        // quits (like CrossOver). Nothing is ever SIGTERM'd or taskkilled.
+        #expect(fake.terminatedPIDs.isEmpty)
         #expect(!fake.invocations.contains { $0.arguments.first == "taskkill" })
     }
 
@@ -226,31 +181,6 @@ struct SteamClientSessionTests {
         #expect(phases.contains(.finishing))
     }
 
-    @Test("warmUpUpdate shadows its download client into the ledger (crash-during-setup safety)")
-    func warmUpRecordsClientToLedger() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let fake = FakeProcessRunner()
-        let ledger = ProcessLedger(url: paths.processLedgerFile, runner: fake)
-        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
-        let session = SteamClientSession(
-            bottle: bottle, orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()),
-            ledger: ledger)
-        session.updateWine(URL(fileURLWithPath: "/w/wine64"))
-        session.warmUpPollInterval = 0.005
-        session.warmUpTimeout = 0.05        // never commits → exits via the failsafe quickly
-        session.warmUpMaxRelaunches = 0
-        session.warmUpForceQuitSettle = 0
-        try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
-
-        // The download client is alive AND recorded during the warm-up — observed via onProgress, before the
-        // failsafe shutdown tears it down. A crash in this window would otherwise orphan an untracked client.
-        let sawSurvivor = LockedBox(false)
-        await session.warmUpUpdate { _ in if ledger.hasLiveSurvivor() { sawSurvivor.set(true) } }
-        #expect(sawSurvivor.value)
-    }
-
     @Test("warmUpUpdate is a no-op when the client is already fully downloaded")
     func warmUpNoOpWhenPresent() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -264,23 +194,5 @@ struct SteamClientSessionTests {
         await session.warmUpUpdate { _ in }
 
         #expect(!fake.invocations.contains { $0.detached })   // never launched Steam — nothing to download
-    }
-}
-
-/// A one-shot async barrier for tests: `wait()` suspends until `open()` (returns immediately if already
-/// opened). Used to hold a fake spawn "in flight" while the test drives a mid-spawn race.
-actor OneShotGate {
-    private var continuation: CheckedContinuation<Void, Never>?
-    private var opened = false
-
-    func wait() async {
-        if opened { return }
-        await withCheckedContinuation { continuation = $0 }
-    }
-
-    func open() {
-        guard !opened else { return }
-        opened = true
-        continuation?.resume(); continuation = nil
     }
 }

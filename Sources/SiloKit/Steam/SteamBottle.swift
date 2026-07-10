@@ -619,20 +619,6 @@ public struct SteamBottle: Sendable {
     /// loader-SIGTERM leaves alive; `steam.exe` is the client (and any re-exec'd copy the updater spawned).
     static let steamProcessImages = ["steamwebhelper.exe", "steam.exe"]
 
-    /// Synchronous, fire-and-forget force-quit for the **app-quit** path — `taskkill /F /IM` each Steam
-    /// image via `spawnDetachedForget`, so the kills survive Silo's own `exit(0)` and take down the whole
-    /// Steam tree even though `stop()`'s loader SIGTERM can't (Steam is multi-process and re-execs itself).
-    /// Mirrors `forceQuit` but never awaits; caller gates on having actually started a client so this never
-    /// touches an untouched prefix.
-    func forceQuitSync(wine: URL?) {
-        guard let wine else { return }
-        for image in Self.steamProcessImages {
-            runner.spawnDetachedForget(
-                executable: wine, arguments: ["taskkill", "/F", "/IM", image],
-                environment: steamEnvironment(wine: wine), currentDirectory: clientDir, logURL: log)
-        }
-    }
-
     /// Ask the running bottle Steam to quit gracefully (`steam.exe -shutdown` — lets it flush its config).
     /// Runs to completion (the transient forwarder exits quickly); the caller then waits for the client
     /// process itself to die before proceeding.

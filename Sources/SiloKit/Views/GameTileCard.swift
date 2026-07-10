@@ -1,17 +1,17 @@
 import SwiftUI
 
 /// The shared library-tile chrome both game kinds render: the artwork band, title + subtitle row, the
-/// three-state primary button (Play / Launching… / Stop), the overflow menu, and the hover / shadow /
-/// rounded-corner treatment. Type-specific pieces — artwork, subtitle row, menu items, tap action, and
-/// any confirmation dialogs — are injected by `SteamGameTileView` / `ManualGameTileView`.
+/// two-state primary button (Play / Launching…), the overflow menu, and the hover / shadow / rounded-corner
+/// treatment. There is no Stop button — Silo launches games detached and lets them (and Steam) run
+/// independently of the app, like CrossOver; a game is quit from inside the game or Steam. Type-specific
+/// pieces — artwork, subtitle row, menu items, tap action, and any confirmation dialogs — are injected by
+/// `SteamGameTileView` / `ManualGameTileView`.
 struct GameTileCard<Artwork: View, Subtitle: View, MenuItems: View>: View {
     let title: String
-    let isRunning: Bool
     let isBusy: Bool
     let canLaunch: Bool
     let helpText: String
     let onPlay: () -> Void
-    let onStop: () -> Void
     let onTap: () -> Void
     @ViewBuilder let artwork: () -> Artwork
     @ViewBuilder let subtitle: () -> Subtitle
@@ -50,10 +50,7 @@ struct GameTileCard<Artwork: View, Subtitle: View, MenuItems: View>: View {
     }
 
     @ViewBuilder private var primaryButton: some View {
-        if isRunning {
-            Button(role: .destructive, action: onStop) { Label("Stop", systemImage: "stop.fill") }
-                .buttonStyle(.borderedProminent).tint(.red)
-        } else if isBusy {
+        if isBusy {
             Button {} label: {
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Launching…") }
             }.buttonStyle(.borderedProminent).disabled(true)

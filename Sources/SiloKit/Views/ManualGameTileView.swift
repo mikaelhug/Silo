@@ -14,10 +14,9 @@ struct ManualGameTileView: View {
         let lib = env.gameLibrary
         GameTileCard(
             title: game.name,
-            isRunning: lib.isRunning(game), isBusy: lib.isBusy(game), canLaunch: lib.canLaunch,
+            isBusy: lib.isBusy(game), canLaunch: lib.canLaunch,
             helpText: "Edit settings",
             onPlay: { Task { await lib.playManual(game) } },
-            onStop: { Task { await lib.stopManual(game) } },
             onTap: onSettings
         ) {
             ManualGameArtwork(exe: game.executablePath)

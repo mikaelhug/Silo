@@ -311,59 +311,35 @@ struct AppEnvironmentUpdateTests {
         #expect(env.dxmtRuntime.defaultName == "dxmt-v0.72-cx26.2.0")
     }
 
-    // MARK: - Crash-orphan gate (ProcessLedger)
+    // MARK: - Bottle-liveness gate (WineServerProbe — PID-free)
 
-    @Test("a process orphaned by a prior run's crash blocks the relocation/update gate, then clears when it exits")
-    func crashOrphanBlocksBottleGate() throws {
+    @Test("a live wineserver on a bottle blocks the relocation/update gate, then clears when it exits")
+    func liveBottleBlocksGate() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let runner = FakeProcessRunner()
-        // A prior run recorded a live game PID into the durable ledger, then crashed before clearing it.
-        let priorRun = ProcessLedger(url: paths.processLedgerFile, runner: runner)
-        runner.setAlive(4242, true)
-        priorRun.record("steam:220", pid: 4242)
+        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        #expect(!env.blockedForBottleWork())   // nothing live → gate open
 
-        // A fresh AppEnvironment builds its own ledger over the same file.
-        let env = AppEnvironment(paths: paths, runner: runner)
-        #expect(!env.anythingRunning)          // nothing running in THIS session (in-memory is empty)…
-        #expect(env.blockedForBottleWork())    // …but the durable gate sees the still-alive orphan
+        // A running game/Steam (or a crash orphan) leaves a wineserver socket on the Steam bottle — detected
+        // PID-free, so a relaunched Silo still refuses to move/update over it.
+        let removeSocket = try makeWineServerSocket(for: paths.steamBottle)
+        #expect(env.anythingRunning)
+        #expect(env.blockedForBottleWork())
         #expect(env.bottles.isBlocked())       // wired: relocation refuses
         #expect(env.updates.isBlocked())       // wired: self-update refuses
 
-        runner.setAlive(4242, false)           // the orphan finally exits
-        #expect(!env.blockedForBottleWork())   // gate reopens (and prunes the dead entry)
+        removeSocket()                         // the server exits (socket gone)
+        #expect(!env.blockedForBottleWork())   // gate reopens
         #expect(!env.bottles.isBlocked())
     }
 
-    @Test("terminateAllOnQuit stops the Steam client and clears its ledger record")
-    func quitTearsDownClientsAndLedger() async throws {
+    @Test("a live manual bottle also blocks the gate (relocation moves every bottle together)")
+    func liveManualBottleBlocksGate() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let runner = FakeProcessRunner()
-        let env = AppEnvironment(paths: paths, runner: runner)
-        // Bring up the Steam client — it records a live PID into the durable ledger.
-        env.steamClientSession.updateWine(URL(fileURLWithPath: "/w/wine64"))
-        env.steamClientSession.readinessTimeout = 0        // no readiness wait against the fake
-        await env.steamClientSession.ensureRunning()
-        #expect(env.steamClientSession.isRunning)
-        #expect(env.blockedForBottleWork())                // the live client holds the gate closed
-
-        env.terminateAllOnQuit()
-        #expect(!env.steamClientSession.isRunning)          // client stopped…
-        #expect(!env.blockedForBottleWork())                // …and its ledger record cleared (no orphan left)
-    }
-
-    @Test("a cleanly-shut prior run leaves no ledger survivor (gate open on restart)")
-    func cleanPriorRunLeavesNoOrphan() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let runner = FakeProcessRunner()
-        let priorRun = ProcessLedger(url: paths.processLedgerFile, runner: runner)
-        runner.setAlive(4242, true)
-        priorRun.record("steam:220", pid: 4242)
-        priorRun.remove("steam:220")      // clean quit cleared it
-
-        let env = AppEnvironment(paths: paths, runner: runner)
-        #expect(!env.blockedForBottleWork())
+        let env = AppEnvironment(paths: paths, runner: FakeProcessRunner())
+        let removeSocket = try makeWineServerSocket(for: paths.manualBottle(UUID()))
+        defer { removeSocket() }
+        #expect(env.blockedForBottleWork())
     }
 }

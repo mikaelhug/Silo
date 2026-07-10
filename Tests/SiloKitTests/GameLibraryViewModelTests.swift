@@ -37,6 +37,16 @@ struct GameLibraryViewModelTests {
         fm.createFile(atPath: cef.appendingPathComponent("steamwebhelper.exe").path, contents: Data())
     }
 
+    /// Simulate the bottle Steam's readiness by writing (or clearing) its `ActiveProcess` pid in `user.reg` —
+    /// the exact signal `SteamClientSession.isRunning` now reads (Silo no longer tracks a client PID).
+    private func setSteamReady(_ paths: AppPaths, _ ready: Bool) throws {
+        try FileManager.default.createDirectory(at: paths.steamBottle, withIntermediateDirectories: true)
+        let pid = ready ? "00001092" : "00000000"
+        let text = #"[Software\\Valve\\Steam\\ActiveProcess]"# + "\n\"pid\"=dword:\(pid)\n"
+        try text.write(to: SteamReadiness.userReg(prefix: paths.steamBottle),
+                       atomically: true, encoding: .utf8)
+    }
+
     /// Write a game manifest into the bottle's Steam library.
     private func writeManifest(_ paths: AppPaths, _ acf: String, appID: Int) throws {
         let steamapps = paths.steamBottleClientDir.appendingPathComponent("steamapps")
@@ -232,20 +242,6 @@ struct GameLibraryViewModelTests {
         }
     }
 
-    @Test("play is a no-op for a game that's already running (no relaunch)")
-    func playNoOpWhenAlreadyRunning() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, paths) = make(tmp)
-        try installSteam(paths)
-        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-        await vm.play(game)
-        #expect(vm.isRunning(game))
-        let detachedBefore = fake.invocations.filter(\.detached).count
-
-        await vm.play(game)                                                   // already running → no-op
-        #expect(fake.invocations.filter(\.detached).count == detachedBefore)  // no new spawn
-    }
-
     @Test("launches are refused while a bottles move is in progress")
     func launchRefusedWhileRelocating() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -254,7 +250,6 @@ struct GameLibraryViewModelTests {
         let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
         vm.isRelocating = { true }                        // a bottles move is underway
         await vm.play(game)
-        #expect(!vm.isRunning(game))
         #expect(vm.statusMessage?.contains("moving your bottles") == true)
         #expect(!fake.invocations.contains { $0.detached })   // nothing spawned into a prefix being moved
     }
@@ -289,25 +284,15 @@ struct GameLibraryViewModelTests {
         let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
 
         await vm.play(game)
-        #expect(vm.isRunning(game))
-        // Steam cold-starts first (PID 4242), so the game loader is the next spawn (4243).
-        let loaderPID = try #require(vm.pid(for: game))
-        #expect(loaderPID == 4243)
         // The game was launched detached with WINEPREFIX forced to the shared bottle.
         #expect(fake.invocations.contains {
             $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
                 && ($0.arguments.first?.hasSuffix("HL2.exe") ?? false)
         })
-
-        await vm.stop(game)
-        #expect(!vm.isRunning(game))
-        // Stop SIGTERMs the launched loader (not just taskkill) — proving both halves of the contract.
-        #expect(fake.terminatedPIDs.contains(loaderPID))
-        // Stop also taskkills the game's image (in the bottle's msync wineserver) so a child/relauncher
-        // isn't orphaned — without clobbering the co-resident Steam.
-        #expect(fake.invocations.contains {
-            $0.arguments == ["taskkill", "/F", "/IM", "HL2.exe"] && $0.environment["WINEMSYNC"] == "1"
-        })
+        // Silo does NOT track or SIGTERM the launched game — it runs detached and outlives the app (like
+        // CrossOver). No stop path, no taskkill.
+        #expect(fake.terminatedPIDs.isEmpty)
+        #expect(!fake.invocations.contains { $0.arguments.first == "taskkill" })
     }
 
     @Test("the status line self-clears after its visible window (a stale 'Launched …' doesn't linger)")
@@ -344,47 +329,6 @@ struct GameLibraryViewModelTests {
         #expect(vm.statusMessage == second)
     }
 
-    /// Manifest + install dir for a Steam game with a specific exe basename (so two games can be made to
-    /// share one — the `taskkill /IM` collision case).
-    private func writeInstalledGame(
-        _ paths: AppPaths, appID: Int, name: String, dir: String, exe: String) throws {
-        try writeManifest(paths, #""AppState" { "appid" "\#(appID)" "name" "\#(name)" "StateFlags" "4" "installdir" "\#(dir)" "LastOwner" "76561197960287930" "SizeOnDisk" "12000000" }"#, appID: appID)
-        let common = paths.steamBottleClientDir.appendingPathComponent("steamapps/common/\(dir)")
-        try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
-        FileManager.default.createFile(
-            atPath: common.appendingPathComponent(exe).path, contents: Data("MZ".utf8))
-    }
-
-    @Test("stop skips taskkill /IM when a co-resident sibling shares the exe basename, but fires it otherwise")
-    func stopAvoidsSiblingImageCollision() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, paths) = make(tmp)
-        try installSteam(paths)
-        // Two DIFFERENT Steam games in the SAME (GPTK) bottle whose exes share a basename.
-        // Basenames differ only in CASE — wine's taskkill /IM matches case-insensitively, so this must
-        // still be treated as a collision.
-        try writeInstalledGame(paths, appID: 220, name: "A", dir: "GameA", exe: "Launcher.exe")
-        try writeInstalledGame(paths, appID: 400, name: "B", dir: "GameB", exe: "launcher.exe")
-        await vm.load()
-        let a = try #require(vm.games.first { $0.appID == 220 })
-        let b = try #require(vm.games.first { $0.appID == 400 })
-        await vm.play(a)
-        await vm.play(b)
-        #expect(vm.isRunning(a) && vm.isRunning(b))
-        let loaderA = try #require(vm.pid(for: a))
-
-        // Stop A ("Launcher.exe") while B ("launcher.exe") is live: /IM matches case-insensitively and would
-        // take B down too, so NO taskkill is issued at all (SIGTERM the loader only).
-        await vm.stop(a)
-        #expect(!vm.isRunning(a))
-        #expect(fake.terminatedPIDs.contains(loaderA))                       // SIGTERM the loader still happens
-        #expect(!fake.invocations.contains { $0.arguments.first == "taskkill" })   // but NO bystander-killing /IM
-
-        // With A gone, B has no co-resident sharing its image — /IM is safe and fires.
-        await vm.stop(b)
-        #expect(fake.invocations.contains { $0.arguments == ["taskkill", "/F", "/IM", "launcher.exe"] })
-    }
-
     @Test("play is refused while a self-update is installing (it relaunches Silo — a game would be orphaned)")
     func playRefusedDuringUpdate() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -395,24 +339,8 @@ struct GameLibraryViewModelTests {
 
         await vm.play(game)
 
-        #expect(!vm.isRunning(game))
         #expect(vm.statusMessage?.lowercased().contains("update") == true)
         #expect(!fake.invocations.contains { $0.detached })   // nothing spawned (not even Steam)
-    }
-
-    @Test("a game exiting on its own clears the running state")
-    func gameExitClearsState() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, paths) = make(tmp)
-        try installSteam(paths)
-        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-        await vm.play(game)
-        #expect(vm.isRunning(game))
-
-        let pid = try #require(vm.pid(for: game))
-        fake.setAlive(pid, false)   // simulate the game process exiting
-        for _ in 0..<20 where vm.isRunning(game) { await Task.yield() }   // let the @MainActor handler run
-        #expect(!vm.isRunning(game))
     }
 
     @Test("manual games: add provisions an isolated bottle, play runs in it, remove deletes it")
@@ -432,8 +360,6 @@ struct GameLibraryViewModelTests {
         #expect(fake.invocations.contains { $0.arguments == ["wineboot", "--init"] })
 
         await vm.playManual(game)
-        #expect(vm.isRunning(game))
-        let pid = try #require(vm.pid(for: game))
         let ownBottle = paths.manualBottle(game.id).path
         #expect(ownBottle != paths.steamBottle.path)     // isolated, NOT the shared bottle
         // Spawned detached into its OWN bottle prefix, with the absolute exe — and NO Steam cold-start.
@@ -442,11 +368,9 @@ struct GameLibraryViewModelTests {
                 && $0.arguments.first == exe.path
         })
         #expect(!fake.invocations.contains { $0.arguments.first?.hasSuffix("steam.exe") ?? false })
+        #expect(fake.terminatedPIDs.isEmpty)             // detached — Silo never SIGTERMs a launched game
 
-        await vm.stopManual(game)
-        #expect(!vm.isRunning(game))
-        #expect(fake.terminatedPIDs.contains(pid))
-
+        // The game's bottle isn't live in this test (no real wineserver socket), so remove proceeds.
         await vm.removeManual(game)
         #expect(vm.manualGames.isEmpty)
         #expect(vm.loadState == .empty)                  // empty again once both lists are empty
@@ -565,11 +489,11 @@ struct GameLibraryViewModelTests {
         try installSteam(paths)
         let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
 
-        await settings.launchSteam()   // the formerly-untracked spawn path
-        await library.play(game)       // previously this cold-started a SECOND Steam client
+        await settings.launchSteam()   // brings Steam up (via the shared session)
+        try setSteamReady(paths, true) // Steam registered → play reuses it, not a SECOND client
+        await library.play(game)
 
-        #expect(steamCEFLaunches(fake) == 1)   // ONE client — shared + tracked across both view models
-        #expect(library.isRunning(game))
+        #expect(steamCEFLaunches(fake) == 1)   // ONE client — shared across both view models
     }
 
     @Test("play is a no-op without a configured Wine backend")
@@ -579,7 +503,6 @@ struct GameLibraryViewModelTests {
         try installSteam(paths)
         let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
         await vm.play(game)
-        #expect(!vm.isRunning(game))
         #expect(!fake.invocations.contains { $0.detached })   // nothing launched
     }
 
@@ -591,23 +514,6 @@ struct GameLibraryViewModelTests {
         await vm.uninstall(game)
         let call = try #require(fake.lastInvocation)
         #expect(call.arguments.contains("steam://uninstall/220"))
-    }
-
-    @Test("uninstall is a no-op while the game is running")
-    func uninstallNoOpWhileRunning() async throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, paths) = make(tmp)
-        try installSteam(paths)
-        let game = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
-
-        await vm.play(game)                          // launches the game → tracked as running
-        #expect(vm.isRunning(game))
-
-        await vm.uninstall(game)                      // guard !isRunning must short-circuit
-
-        // No steam://uninstall URL was ever sent for a running game.
-        #expect(!fake.invocations.contains { $0.arguments.contains("steam://uninstall/220") })
-        #expect(vm.isRunning(game))                  // still running, untouched
     }
 
     /// Count the bottle-Steam (CEF) launches recorded by the runner.
@@ -625,8 +531,10 @@ struct GameLibraryViewModelTests {
         let a = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
         let b = try installedGame(paths, appID: 570, name: "Dota", dir: "Dota")
 
-        await vm.play(a)   // cold-starts Steam (first spawn, alive) + launches A
-        await vm.play(b)   // Steam already up → isRunning short-circuit, NOT a relaunch
+        await vm.play(a)                 // cold-starts Steam (first spawn) + launches A
+        #expect(steamCEFLaunches(fake) == 1)
+        try setSteamReady(paths, true)   // Steam registered its ActiveProcess pid → isRunning == true
+        await vm.play(b)                 // Steam ready → reused, NOT relaunched
         #expect(steamCEFLaunches(fake) == 1)
     }
 
@@ -639,16 +547,11 @@ struct GameLibraryViewModelTests {
         let b = try installedGame(paths, appID: 570, name: "Dota", dir: "Dota")
 
         await vm.play(a)
+        try setSteamReady(paths, true)              // Steam came up (registered ActiveProcess)
         #expect(steamCEFLaunches(fake) == 1)
 
-        // ensureSteamRunning() runs before the game launch, so Steam is the FIRST detached spawn (PID 4242).
-        // Kill it → the steamObserver nulls steamPID.
-        #expect(fake.invocations.first { $0.detached }?.arguments.contains("-cef-in-process-gpu") == true)
-        fake.setAlive(4242, false)
-        // Let the @MainActor exit observer run (it nulls steamPID).
-        for _ in 0..<50 { await Task.yield() }
-
-        await vm.play(b)                            // steamPID nil now → cold-starts Steam again
+        try setSteamReady(paths, false)             // Steam exited → its ActiveProcess pid is cleared
+        await vm.play(b)                            // not ready → cold-starts Steam again
         #expect(steamCEFLaunches(fake) == 2)
     }
 
@@ -664,9 +567,7 @@ struct GameLibraryViewModelTests {
 
         await vm.play(game)
 
-        #expect(!vm.isRunning(game))                  // never tracked a PID
         #expect(!vm.isBusy(game))                     // defer cleared busyGames
-        #expect(vm.pid(for: game) == nil)
         #expect(vm.statusMessage?.contains("HL2") == true)   // the catch surfaced "<name>: <error>"
         // The game itself was never spawned detached (resolution failed before spawn).
         #expect(!fake.invocations.contains {
@@ -695,8 +596,6 @@ struct GameLibraryViewModelTests {
 
         await vm.play(game)
 
-        #expect(!vm.isRunning(game))
-        #expect(vm.pid(for: game) == nil)
         #expect(vm.statusMessage?.contains("Steam") == true)         // surfaced WHY, not a misleading "Launched"
         #expect(!fake.invocations.contains { $0.detached })          // nothing spawned — not even the game
     }
@@ -752,8 +651,8 @@ struct GameLibraryViewModelTests {
         }
     }
 
-    @Test("terminateAllSync SIGTERMs every launched game, leaving the co-resident Steam client alive")
-    func terminateAllOnQuit() async throws {
+    @Test("quitting does NOT kill launched games or Steam (they run detached)")
+    func launchesAreNeverKilled() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, fake, paths) = make(tmp)
         try installSteam(paths)
@@ -761,12 +660,10 @@ struct GameLibraryViewModelTests {
         let tf2 = try installedGame(paths, appID: 440, name: "TF2", dir: "TF2")
         await vm.play(hl2)
         await vm.play(tf2)
-        let gamePIDs = Set([hl2, tf2].compactMap { vm.pid(for: $0) })
-        try #require(gamePIDs.count == 2)                            // both games launched
 
-        vm.terminateAllSync()
-
-        // Exactly the two game PIDs were SIGTERM'd — Steam's PID (spawned by ensureRunning) is not in the set.
-        #expect(Set(fake.terminatedPIDs) == gamePIDs)
+        // There is no app-quit teardown and no stop path: nothing Silo launched is ever SIGTERM'd or
+        // taskkilled — games (and Steam) outlive the launcher, exactly like CrossOver.
+        #expect(fake.terminatedPIDs.isEmpty)
+        #expect(!fake.invocations.contains { $0.arguments.first == "taskkill" })
     }
 }

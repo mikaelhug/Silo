@@ -54,16 +54,6 @@ public struct SystemProcessRunner: ProcessRunning {
         }
     }
 
-    public func spawnDetachedForget(
-        executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, logURL: URL) {
-        // Synchronous fork+exec, no wait — the child is a separate process that survives our own exit(0).
-        // Best-effort: at app-quit there's no one to surface an error to.
-        _ = try? Self.spawnSync(
-            executable: executable, arguments: arguments,
-            environment: environment, currentDirectory: currentDirectory, logURL: logURL)
-    }
-
     public func isRunning(pid: Int32) -> Bool {
         guard pid > 0 else { return false }
         // kill(pid, 0): 0 → alive & signalable; EPERM → alive but not ours; ESRCH → gone.
@@ -71,33 +61,9 @@ public struct SystemProcessRunner: ProcessRunning {
         return errno == EPERM
     }
 
-    public func startTime(pid: Int32) -> Date? {
-        guard pid > 0 else { return nil }
-        // KERN_PROC_PID fills a `kinfo_proc` for one PID. A missing PID returns rc 0 but leaves `size` 0
-        // (the record isn't written), so the size check — not just rc — is what distinguishes dead/unknown.
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        let rc = sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
-        guard rc == 0, size > 0 else { return nil }
-        let tv = info.kp_proc.p_starttime
-        guard tv.tv_sec != 0 || tv.tv_usec != 0 else { return nil }
-        return Date(timeIntervalSince1970: Double(tv.tv_sec) + Double(tv.tv_usec) / 1_000_000)
-    }
-
     public func terminate(pid: Int32) {
         guard pid > 0 else { return }
         kill(pid, SIGTERM)
-    }
-
-    public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
-        guard pid > 0 else { return NoopObservation() }
-        let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
-        source.setEventHandler(handler: onExit)
-        // No cancel handler (unlike FileWatch): a process source owns no descriptor we opened, so
-        // cancelling/deallocating the DispatchObservation tears it down completely — nothing to close.
-        source.resume()
-        return DispatchObservation(source)
     }
 
     // MARK: - Synchronous workers (run on a background queue)
@@ -180,13 +146,4 @@ public struct SystemProcessRunner: ProcessRunning {
         try process.run()
         return process.processIdentifier
     }
-}
-
-/// Owns a `DispatchSource` (process-exit or file-write) and tears it down on `cancel()`/deinit.
-/// Held on the actor that created it; the wrapped source is internally thread-safe.
-private final class DispatchObservation: ProcessObservation {
-    private let source: any DispatchSourceProtocol
-    init(_ source: any DispatchSourceProtocol) { self.source = source }
-    func cancel() { source.cancel() }   // also runs the cancel handler (closes the file fd)
-    deinit { source.cancel() }
 }

@@ -15,10 +15,9 @@ struct SteamGameTileView: View {
         let lib = env.gameLibrary
         GameTileCard(
             title: game.name,
-            isRunning: lib.isRunning(game), isBusy: lib.isBusy(game), canLaunch: lib.canLaunch,
+            isBusy: lib.isBusy(game), canLaunch: lib.canLaunch,
             helpText: "Show details",
             onPlay: { Task { await lib.play(game) } },
-            onStop: { Task { await lib.stop(game) } },
             onTap: onDetails
         ) {
             AsyncImage(url: game.headerArtURL) { phase in

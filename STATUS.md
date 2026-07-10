@@ -3,6 +3,35 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🚪 Phase 4 — quit leaves Steam + games running; PID-free bottle liveness (2026-07-10, `main`; `swift build`
+  clean + zero warnings, 350 tests green).** Like CrossOver, Silo now LAUNCHES detached and never owns a
+  launched process's lifecycle: quitting Silo no longer kills Steam or games, and there is no per-game Stop
+  button, PID tracking, or exit observer.
+  - **Removed:** the app-quit teardown (`AppEnvironment.terminateAllOnQuit` + the `RootView` willTerminate
+    hook); `GameProcessCoordinator` (the PID/observer table); the per-game Stop button + running badge (tiles
+    are just Play / Launching…); `SteamClientSession.stop`/force-quit + `SteamBottle.forceQuitSync`;
+    `LaunchOrchestrator.stopGame`/`observeExit`/`resolvedExecutableName`; and the `ProcessLedger` PID shadow
+    (+ the now-dead `observeExit`/`spawnDetachedForget`/`startTime`/`ProcessObservation` primitives). KEPT
+    `isRunning`/`terminate` + `SteamBottle.forceQuit`/`shutdownSteam` for the first-run WARM-UP only (setup
+    plumbing that owns a transient client PID locally to drive its download/relaunch loop).
+  - **New `WineServerProbe`** (`Sources/SiloKit/Process/WineServerProbe.swift`): PID-free bottle liveness via
+    the wineserver socket (`<tmp>/.wine-<uid>/server-<dev>-<inode>/socket`, keyed by the prefix's dev+inode —
+    the identity wine itself uses). Replaces the ledger as the corruption guard: `blockedForBottleWork` /
+    `anythingRunning` refuse a bottle move / self-update while ANY bottle's wineserver is live — INCLUDING a
+    crash orphan (its socket persists), so the crash-orphan protection survives PID-free. `removeManual`
+    refuses while the game's own bottle is live.
+  - **`SteamClientSession` off PIDs**: `isRunning` = `SteamReadiness.isReady` (Steam's own registered
+    `ActiveProcess` pid, not a PID Silo tracks); `ensureRunning` coalesces concurrent callers, skips a
+    redundant relaunch when already ready (Steam single-instances anyway), and reports launch success.
+  - **What the "wine" processes taught us** (winedevice.exe ×2, wineserver, wineloader when only Steam runs):
+    the wineserver is the detached per-prefix daemon that outlives the launcher — so bottle liveness belongs
+    to the SOCKET, not a PID Silo holds. That's the basis for both halves of this phase.
+  - Tests: deleted the coordinator/ledger suites + every stop/kill/track test; added `WineServerProbeTests` +
+    a fake-socket fixture; the gate tests drive a fake wineserver socket and the Steam tests drive readiness
+    via `user.reg`. New: "quitting does NOT kill launched games or Steam."
+  - **On-device (Wine absent here):** confirm the exact temp root wine uses for its socket (`/tmp` vs
+    `$TMPDIR` vs `$XDG_RUNTIME_DIR` — all three are probed; verify the one this runtime uses) so the guard
+    actually fires; confirm quitting Silo leaves Steam + a running game alive.
 - **🪟 Phase 3 — correctly NAMED Dock tiles for Silo-launched Steam + games (2026-07-10, `main`; `swift build`
   clean + zero warnings, 371 tests green).** A bare `wine steam.exe` launch shows a Dock tile named "wine".
   macOS names a GUI process's tile from `[NSBundle mainBundle].CFBundleName`, resolved from the executable

@@ -19,6 +19,13 @@ wrapper's `CFBundleName` (`[NSBundle mainBundle]` resolves from the *unresolved*
 "wine". The loader still self-locates its runtime because it `realpath`s the symlink; `Silo.pinWineLoader`
 sets `WINELOADER`/`WINESERVER` to the real runtime for child processes. Wrappers live in `paths.dockAppsDir`.
 
+**Process lifecycle (Phase 4):** Silo launches games + the Steam client **detached** and never owns their
+lifecycle — quitting Silo leaves them running (like CrossOver); there is NO per-game Stop button, PID
+tracking, exit observation, or kill-on-quit. Bottle liveness (the move/self-update corruption guard) is
+PID-free via `WineServerProbe` (the wineserver socket, keyed by the prefix's dev+inode — catches crash
+orphans too). "Steam is up" = `SteamReadiness.isReady`. Only the first-run warm-up still uses
+`isRunning`/`terminate` on a transient local PID (setup plumbing).
+
 ## Hard constraints (non-negotiable)
 1. **SwiftPM only — never call `xcodebuild`.** This machine has Command Line Tools only (no Xcode).
    Build with `swift build`; the `.app` is assembled by `Scripts/build-app.sh`.

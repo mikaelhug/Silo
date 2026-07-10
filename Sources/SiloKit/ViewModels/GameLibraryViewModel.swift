@@ -1,5 +1,12 @@
 import Foundation
 
+/// Identity of a launched game across both kinds — the key for the per-launch graphics-fallback monitors.
+/// A Steam game is identified by its appID; a manual (non-Steam) game by its stable id.
+enum GameID: Hashable, Sendable {
+    case steam(appID: Int)
+    case manual(UUID)
+}
+
 /// The library: Steam games installed in the shared **Steam bottle** (a Wine prefix running a logged-in
 /// Windows Steam client) — discovered from the bottle's `appmanifest_*.acf` and launched **co-resident**
 /// with the Steam client (so Steamworks/DRM works) under GPTK/D3DMetal — plus user-added **manual**
@@ -38,13 +45,15 @@ public final class GameLibraryViewModel {
     private let configStore: ConfigStore
     private let paths: AppPaths
     private var backend: BackendConfig
-    /// Owns the live-process state (PIDs, exit observers, graphics-fallback monitors) for every launched
-    /// game, keyed by `GameID` — see `GameProcessCoordinator`.
-    private let processes: GameProcessCoordinator
     /// The owner of the Steam bottle's live client (shared with the settings pane).
     private let session: SteamClientSession
     /// Boots the per-game isolated bottles that manual (non-Steam) games run in.
     private let provisioner: WinePrefixProvisioner
+    /// Per-launch watchers that surface a silent backend→wined3d graphics fallback, keyed by `GameID`. Silo
+    /// does NOT track launched games' PIDs (it launches them detached and lets them — and Steam — outlive the
+    /// app, like CrossOver); this is the only per-launch state it keeps, and each monitor self-drops after it
+    /// fires (or is superseded by a relaunch of the same game).
+    private var monitors: [GameID: GraphicsFallbackMonitor] = [:]
 
     public init(
         bottle: SteamBottle,
@@ -54,8 +63,7 @@ public final class GameLibraryViewModel {
         paths: AppPaths,
         backend: BackendConfig,
         session: SteamClientSession,
-        provisioner: WinePrefixProvisioner,
-        ledger: ProcessLedger? = nil
+        provisioner: WinePrefixProvisioner
     ) {
         self.bottle = bottle
         self.discovery = discovery
@@ -65,8 +73,11 @@ public final class GameLibraryViewModel {
         self.backend = backend
         self.session = session
         self.provisioner = provisioner
-        self.processes = GameProcessCoordinator(orchestrator: orchestrator, ledger: ledger)
     }
+
+    /// Cancel any live graphics monitors so they can't outlive the VM (a process-lifetime singleton, so this
+    /// normally never fires). `isolated` to touch `@MainActor` state.
+    isolated deinit { monitors.values.forEach { $0.stop() } }
 
     public func updateBackend(_ backend: BackendConfig) { self.backend = backend }
 
@@ -98,12 +109,11 @@ public final class GameLibraryViewModel {
         return false
     }
 
-    /// Whether any game (Steam or manual) is running OR mid-launch. Includes the busy sets so a launch that
-    /// has claimed a bottle but not yet spawned its process is still visible to the relocation/update gate —
-    /// otherwise a move started in that window would copy/delete the prefix out from under the arriving game.
-    public var isAnythingRunning: Bool {
-        processes.anythingRunning || !busyGames.isEmpty || !manualBusyIDs.isEmpty
-    }
+    /// Whether a launch is currently in flight — a Play that has claimed a bottle but not yet spawned. Feeds
+    /// the relocation/update gate so a move started in that window can't copy/delete the prefix out from under
+    /// an arriving game. Games that are actually RUNNING are detected PID-free by `WineServerProbe` (a live
+    /// wineserver on the bottle), NOT tracked here — Silo launches detached and lets them outlive the app.
+    public var launchInFlight: Bool { !busyGames.isEmpty || !manualBusyIDs.isEmpty }
 
     public var canLaunch: Bool { backend.isWineConfigured }
     /// The Steam bottle has its Steam client installed.
@@ -135,23 +145,11 @@ public final class GameLibraryViewModel {
             : manualGames.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
-    public func isRunning(_ game: SteamApp) -> Bool { pid(for: game) != nil }
     public func isBusy(_ game: SteamApp) -> Bool { busyGames.contains(game.appID) }
-
-    /// The tracked wine-loader PID for a launched game (nil if not running) — the PID-returning sibling of
-    /// `isRunning`. The UI only needs `isRunning`; this exists for tests driving exit/terminate scenarios.
-    func pid(for game: SteamApp) -> Int32? { processes.pid(for: gameID(game)) }
-
-    /// The coordinator key for a Steam game.
-    private func gameID(_ game: SteamApp) -> GameID { .steam(appID: game.appID) }
-
-    /// Whether a title is currently RUNNING (its wine-loader PID is tracked).
-    private func isRunning(appID: Int) -> Bool { processes.pid(for: .steam(appID: appID)) != nil }
-
-    public func isRunning(_ game: ManualGame) -> Bool { pid(for: game) != nil }
     public func isBusy(_ game: ManualGame) -> Bool { manualBusyIDs.contains(game.id) }
-    /// The tracked PID for a launched manual game (nil if not running) — see `pid(for:)` above.
-    func pid(for game: ManualGame) -> Int32? { processes.pid(for: .manual(game.id)) }
+
+    /// The graphics-monitor key for a Steam game.
+    private func gameID(_ game: SteamApp) -> GameID { .steam(appID: game.appID) }
 
     public func sizeString(_ game: SteamApp) -> String? {
         guard game.sizeOnDisk > 0 else { return nil }
@@ -217,9 +215,9 @@ public final class GameLibraryViewModel {
         await session.ensureRunning()
     }
 
-    /// Ask the bottle's Steam to uninstall the game, then refresh. Refused while the title is running.
+    /// Ask the bottle's Steam to uninstall the game, then refresh. (Steam itself declines to uninstall a
+    /// title that's running, so no separate guard is needed now that Silo doesn't track game PIDs.)
     public func uninstall(_ game: SteamApp) async {
-        guard !isRunning(appID: game.appID) else { return }
         do {
             try await session.sendURL("steam://uninstall/\(game.appID)")
             setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
@@ -232,8 +230,7 @@ public final class GameLibraryViewModel {
     /// prefix + runtime through `BottleResolver`.
     public func play(_ game: SteamApp) async {
         // No-op if it's already mid-launch (its button spins) or already running.
-        guard backend.isWineConfigured, !busyGames.contains(game.appID),
-              !isRunning(appID: game.appID) else { return }
+        guard backend.isWineConfigured, !busyGames.contains(game.appID) else { return }
         if launchBlockedByBottles() { return }
         busyGames.insert(game.appID); defer { busyGames.remove(game.appID) }
         let config = await configStore.load().config(for: game.appID)
@@ -256,12 +253,11 @@ public final class GameLibraryViewModel {
                 setStatus("\(game.name) needs the Steam client, but it couldn't start\(why).")
                 return
             }
-            let pid = try await orchestrator.launchInBottle(
+            try await orchestrator.launchInBottle(
                 app: game, config: config, backend: backend, graphics: .gptk,
                 wine: context.wineBinary, prefix: context.prefix,
                 logURL: paths.log(forAppID: game.appID),
                 dock: .init(name: game.name, folder: "app-\(game.appID)", containerDir: paths.dockAppsDir))
-            processes.track(gameID(game), pid: pid)
             do {
                 _ = try await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
                 setStatus("Launched \(game.name).")
@@ -278,47 +274,6 @@ public final class GameLibraryViewModel {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
         }
     }
-
-    /// Stop a running game. Terminates just the game (the shared bottle keeps Steam alive — a
-    /// `wineserver -k` would kill the co-resident Steam client too). See `LaunchOrchestrator.stopGame`.
-    public func stop(_ game: SteamApp) async {
-        guard let pid = processes.pid(for: gameID(game)) else { return }
-        let state = await configStore.load()
-        let config = state.config(for: game.appID)
-        let exeName = orchestrator.resolvedExecutableName(app: game, config: config)
-        // `taskkill /IM <image>` matches by image name across the WHOLE wineserver (one per bottle). Two
-        // DIFFERENT Steam games co-resident in the shared bottle CAN run at once, so if another one happens
-        // to share this exe's basename, /IM would take it down too. Drop to a SIGTERM-only stop (the loader
-        // PID) in that rare case rather than risk a bystander. Manual games each get their own isolated
-        // bottle, so they never share this wineserver.
-        // Case-insensitive: wine's `taskkill /IM` matches image names case-insensitively, so `Game.exe`
-        // and `game.exe` collide.
-        let siblings = coResidentImageNames(excluding: game, in: state)
-        let safeExeName = exeName.flatMap { siblings.contains($0.lowercased()) ? nil : $0 }
-        await orchestrator.stopGame(
-            pid: pid, exeName: safeExeName, prefix: paths.steamBottle, backend: backend)
-        processes.clear(gameID(game), ifPID: pid)
-    }
-
-    /// Exe basenames of OTHER Steam games currently running in the shared Steam bottle (they share one
-    /// wineserver, so a `taskkill /IM` would hit them). Excludes `game` itself. Used by `stop` to avoid a
-    /// basename collision.
-    private func coResidentImageNames(excluding game: SteamApp, in state: AppState) -> Set<String> {
-        var names: Set<String> = []
-        for other in games
-        where other.appID != game.appID && processes.pid(for: gameID(other)) != nil {
-            if let name = orchestrator.resolvedExecutableName(
-                app: other, config: state.config(for: other.appID)) {
-                names.insert(name.lowercased())   // case-folded — see `stop`'s case-insensitive match
-            }
-        }
-        return names
-    }
-
-    /// SIGTERM every game Silo launched (Steam + manual), synchronously. Used at app quit (where there's no
-    /// time for the async `taskkill`/`wineserver -k` cleanup): wine turns SIGTERM into terminating the hosted
-    /// game, and we only signal the PIDs Silo spawned — the co-resident Steam client is never touched.
-    public func terminateAllSync() { processes.terminateAllSync() }
 
     /// Open `winecfg` for the Steam bottle prefix (prefix-wide, so not per-game).
     public func openWinecfg() async {
@@ -395,9 +350,13 @@ public final class GameLibraryViewModel {
     }
 
     /// Remove a manual game from the library AND delete its isolated bottle. A portable game's original
-    /// files on disk (outside the bottle) are left untouched. Refuses while running.
+    /// files on disk (outside the bottle) are left untouched. Refuses while the game's bottle is live (a live
+    /// wineserver ⇒ the game is running; deleting the prefix under it would corrupt/orphan it).
     public func removeManual(_ game: ManualGame) async {
-        guard processes.pid(for: .manual(game.id)) == nil else { return }
+        guard !WineServerProbe.isLive(prefix: paths.manualBottle(game.id)) else {
+            setStatus("\(game.name) is still running — quit it before removing it.")
+            return
+        }
         _ = try? await configStore.removeManualGame(id: game.id)
         manualGames.removeAll { $0.id == game.id }
         let deleted = await deleteBottle(game.id)
@@ -411,8 +370,7 @@ public final class GameLibraryViewModel {
     /// Boots the bottle first, then routes through `BottleResolver` so the game runs on the right runtime —
     /// GPTK in place, or DXMT's cloned+overlaid variant. The clone/overlay runs off the main actor.
     public func playManual(_ game: ManualGame) async {
-        guard backend.isWineConfigured, !manualBusyIDs.contains(game.id),
-              processes.pid(for: .manual(game.id)) == nil else { return }
+        guard backend.isWineConfigured, !manualBusyIDs.contains(game.id) else { return }
         if launchBlockedByBottles() { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
         // A 32-bit game on GPTK can't render (GPTK / D3DMetal is 64-bit-only) — refuse before provisioning
@@ -435,12 +393,11 @@ public final class GameLibraryViewModel {
         }
         do {
             // The resolved runtime is the backend's variant; feed it to the orchestrator as the launch wine.
-            let pid = try await orchestrator.launchManualGame(
+            try await orchestrator.launchManualGame(
                 game, backend: backend, graphics: context.graphics,
                 wine: context.wineBinary, prefix: context.prefix, logURL: paths.manualLog(game.id),
                 dock: .init(name: game.name, folder: "manual-\(game.id.uuidString)",
                             containerDir: paths.dockAppsDir))
-            processes.track(.manual(game.id), pid: pid)
             do {
                 _ = try await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
                 setStatus("Launched \(game.name).")
@@ -482,15 +439,6 @@ public final class GameLibraryViewModel {
         default:
             (error as NSError).localizedDescription
         }
-    }
-
-    /// Stop a running manual game (taskkill its exe in its own bottle).
-    public func stopManual(_ game: ManualGame) async {
-        guard let pid = processes.pid(for: .manual(game.id)) else { return }
-        await orchestrator.stopGame(
-            pid: pid, exeName: game.executablePath.lastPathComponent,
-            prefix: paths.manualBottle(game.id), backend: backend)
-        processes.clear(.manual(game.id), ifPID: pid)
     }
 
     /// Generate a Game-Mode-tagged `.app` in `directory` (default: the Desktop) that launches the game
@@ -564,8 +512,12 @@ public final class GameLibraryViewModel {
     /// reflects the state at detection time.
     private func watchGraphics(_ id: GameID, log: URL, name: String, backend graphics: GraphicsBackend) {
         let isSteamGame: Bool = if case .steam = id { true } else { false }
-        processes.watchGraphics(id, log: log, backend: graphics) { [weak self] in
+        monitors[id]?.stop()   // supersede any prior launch's monitor for the same game
+        let monitor = GraphicsFallbackMonitor()
+        monitors[id] = monitor
+        monitor.start(url: log, backend: graphics) { [weak self] in
             guard let self else { return }
+            self.monitors[id] = nil          // fires at most once, then drops itself
             // Only manual games can steer to DXMT (a Steam game has no DXMT bottle to move to yet).
             let dxmtAvailable = isSteamGame ? false : (self.backend.libDir(for: .dxmt) != nil)
             self.setStatus(Self.graphicsFallbackMessage(

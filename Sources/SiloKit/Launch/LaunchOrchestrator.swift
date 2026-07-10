@@ -220,33 +220,15 @@ public struct LaunchOrchestrator: Sendable {
         try? Data(plan.logHeader(at: Date()).utf8).write(to: plan.logURL)
     }
 
+    /// Whether a launched process is still alive (best-effort). Used only by the first-run Steam WARM-UP,
+    /// which owns its transient client PID locally to drive the download/relaunch loop; Silo does NOT track
+    /// user-launched games or the running Steam client this way (it launches them detached and lets them
+    /// outlive the app — see `WineServerProbe` for PID-free bottle liveness).
     public func isRunning(pid: Int32) -> Bool { runner.isRunning(pid: pid) }
 
-    /// SIGTERM a launched process (synchronous, best-effort). Used to stop games at app quit, where there's
-    /// no time for the async `taskkill` cleanup `stopGame` does. Wine translates SIGTERM into terminating
-    /// the hosted Windows process, so this stops a Silo-launched game; the co-resident Steam client (a
-    /// different PID we never SIGTERM) is untouched.
+    /// SIGTERM a process (best-effort) — used only by the warm-up to shut its transient download client down
+    /// so setup can wrap the steamwebhelper. Not a user-facing "stop": Silo doesn't stop running games.
     public func terminate(pid: Int32) { runner.terminate(pid: pid) }
-
-    /// Stop a game running in the shared Steam bottle. SIGTERMs the launched process AND asks Wine to
-    /// `taskkill /IM <game exe>` — the launched PID is only Wine's loader, so a game that re-execs or
-    /// spawns children would otherwise be orphaned (SIGTERM hits the loader, not the wineserver-hosted
-    /// process). We can't `wineserver -k` (it'd kill the co-resident Steam), but `/IM` targets only the
-    /// game's own image name, so Steam (steam.exe / steamwebhelper.exe) is untouched. `WINEMSYNC=1` so the
-    /// taskkill joins the SAME wineserver as the game (Steam + games all run msync). Best-effort.
-    public func stopGame(pid: Int32, exeName: String?, prefix: URL, backend: BackendConfig) async {
-        runner.terminate(pid: pid)
-        guard let exeName, let wine = backend.wineBinaryPath else { return }
-        _ = try? await runner.spawnDetached(
-            executable: wine, arguments: ["taskkill", "/F", "/IM", exeName],
-            environment: Silo.msyncWineEnvironment(prefix: prefix, wine: wine), currentDirectory: nil,
-            logURL: prefix.appendingPathComponent("winetool.log"))
-    }
-
-    /// The basename of the executable a game would launch (for `taskkill`), or nil if unresolvable.
-    public func resolvedExecutableName(app: SteamApp, config: GameConfig) -> String? {
-        (try? resolveExecutable(app: app, config: config))?.lastPathComponent
-    }
 
     /// Whether launching `app` under `graphics` is a dead end because it's a 32-bit game on GPTK (which is
     /// 64-bit-only). Lets the UI refuse EARLY — before bringing the Steam client up — for a game that could
@@ -254,11 +236,6 @@ public struct LaunchOrchestrator: Sendable {
     public func isBlocked32BitOnGPTK(app: SteamApp, config: GameConfig, graphics: GraphicsBackend) -> Bool {
         guard graphics == .gptk, let exe = try? resolveExecutable(app: app, config: config) else { return false }
         return WindowsExecutable.is32Bit(exe)
-    }
-
-    /// Observe a launched game's exit **without polling** (kqueue). Retain the token to keep observing.
-    public func observeExit(pid: Int32, onExit: @escaping @Sendable () -> Void) -> any ProcessObservation {
-        runner.observeExit(pid: pid, onExit: onExit)
     }
 
     /// Run a built-in wine tool (e.g. `winecfg`) against `prefix`, detached. Msync env so the tool shares

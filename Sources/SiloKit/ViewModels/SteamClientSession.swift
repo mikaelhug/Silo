@@ -11,22 +11,10 @@ import Foundation
 public final class SteamClientSession {
     private let bottle: SteamBottle
     private let orchestrator: LaunchOrchestrator
-    /// Crash-durable shadow of the live client PID (see `ProcessLedger`) — an orphaned Steam client is as
-    /// much a live wineserver on a bottle as a game, so relocation/update must refuse for it too after a
-    /// hard crash. nil in tests that don't exercise it.
-    private let ledger: ProcessLedger?
     private var wineBinary: URL?
 
-    /// The running client's PID (set only after the launch `await`, so concurrent callers coalesce).
-    private var steamPID: Int32?
-    private var steamObserver: (any ProcessObservation)?
-    /// The in-flight launch, so concurrent callers coalesce onto ONE instead of each starting Steam.
+    /// The in-flight bring-up, so concurrent callers coalesce onto ONE launch instead of each starting Steam.
     private var steamLaunch: Task<Void, Never>?
-    /// Whether this session ever brought a client up in its bottle (incl. the warm-up). `stop()` force-quits
-    /// by image name only when true — Steam is multi-process AND re-execs itself, so the tracked `steamPID`
-    /// isn't enough (and goes nil after a re-exec); this gate also keeps a force-quit from touching a bottle
-    /// whose prefix we never provisioned. Stays true for the session once set (a repeat kill is a safe no-op).
-    private var didStartClient = false
     /// Last-resort failsafe (seconds) for the readiness wait so a missing signal can't hang a launch — NOT
     /// a fixed wait: a cold start resolves the instant Steam registers its `ActiveProcess` (event-driven,
     /// see `awaitSteamReady`). 0 disables the wait entirely (tests).
@@ -34,59 +22,22 @@ public final class SteamClientSession {
     /// The last launch failure message (for the UI), cleared on a successful launch.
     public private(set) var launchError: String?
 
-    public init(bottle: SteamBottle, orchestrator: LaunchOrchestrator, ledger: ProcessLedger? = nil) {
+    public init(bottle: SteamBottle, orchestrator: LaunchOrchestrator) {
         self.bottle = bottle
         self.orchestrator = orchestrator
-        self.ledger = ledger
     }
 
-    /// The client's stable `ProcessLedger` key.
-    private var ledgerKey: String { "client" }
-
-    /// Shadow a warm-up download client into the ledger under the client key, so a crash DURING first-time
-    /// setup (there's no tracked `steamPID` then — the warm-up owns the PID locally) is still caught by the
-    /// next launch's relocation/update gate. Upsert by key (a relaunch replaces the prior pid); self-pruned
-    /// once it dies (the warm-up force-quits it at the end, so normally it's gone by the next gate read).
-    private func recordWarmUp(_ pid: Int32?) {
-        guard let pid else { return }
-        didStartClient = true          // a quit during warm-up must still force-quit this bottle's Steam
-        ledger?.record(ledgerKey, pid: pid)
-    }
-
-    /// Defensive teardown: the live VMs are process-lifetime singletons, so this normally never fires, but
-    /// it ensures the exit observation + any in-flight launch don't outlive the session if that ever changes.
-    /// `isolated` so it can touch the `@MainActor` state it's cleaning up.
-    isolated deinit { steamObserver?.cancel(); steamLaunch?.cancel() }
+    /// Defensive teardown: cancel any in-flight launch so it can't outlive the session (a process-lifetime
+    /// singleton, so this normally never fires). It deliberately does NOT stop Steam — Silo leaves the client
+    /// running when it quits, like CrossOver. `isolated` so it can touch `@MainActor` state.
+    isolated deinit { steamLaunch?.cancel() }
 
     public func updateWine(_ url: URL?) { wineBinary = url }
 
-    /// Whether the bottle's Steam client is live right now (its tracked PID is still alive).
-    public var isRunning: Bool {
-        guard let pid = steamPID else { return false }
-        return orchestrator.isRunning(pid: pid)
-    }
-
-    /// Stop this bottle's Steam client (best-effort) — used at app quit / before a self-update relaunch so
-    /// nothing outlives the launcher as an orphan.
-    public func stop() {
-        // Cancel any in-flight bring-up too: a client caught MID-SPAWN has no `steamPID` yet, so terminating
-        // by PID alone would miss it and leave a client live. `startSteam` checks `Task.isCancelled` right
-        // after the spawn and self-terminates the process it just launched.
-        steamLaunch?.cancel()
-        // Force-quit the WHOLE Steam tree by image name, independent of the tracked PID. Steam is
-        // multi-process (a loader SIGTERM leaves steamwebhelper alive) and re-execs itself (so `steamPID` is
-        // often nil here) — the loader SIGTERM below alone leaves Steam running, which is exactly the "Steam
-        // stays open after quit / after switching bottles" bug. Fire-and-forget so it also works from
-        // `applicationWillTerminate`, where an async kill wouldn't finish before `exit(0)`.
-        if didStartClient { bottle.forceQuitSync(wine: wineBinary) }
-        guard let pid = steamPID else { return }
-        orchestrator.terminate(pid: pid)
-        steamPID = nil
-        // Leave the ledger entry: like a game stop, the client may still be dying — dropping it now would let
-        // a relocation/update proceed over a live wineserver. `hasLiveSurvivor` self-prunes it once the PID is
-        // actually gone (the exit observer would too, but we cancel it here).
-        steamObserver?.cancel(); steamObserver = nil
-    }
+    /// Whether the bottle's Steam client is up right now — detected PID-free from its Steamworks readiness
+    /// signal (the live `ActiveProcess` pid Steam itself registers in the prefix), NOT a PID Silo tracks.
+    /// Silo no longer owns the client's lifecycle: it launches Steam detached and lets it outlive the app.
+    public var isRunning: Bool { SteamReadiness.isReady(prefix: bottle.prefix) }
 
     /// Bring the bottle's Steam client up (idempotent + coalesced): a no-op if it's already running, joins
     /// an in-flight launch, else launches it (re-applying the steamwebhelper wrapper) and tracks the PID.
@@ -94,13 +45,14 @@ public final class SteamClientSession {
     /// Play + "Launch Steam") coalesce onto ONE launch via `steamLaunch`.
     @discardableResult
     func ensureRunning() async -> Bool {
-        // Join an in-flight launch FIRST — it owns the cold-start readiness wait (`startSteam` sets
-        // `steamPID` before it `await`s `awaitSteamReady`). Checking the `steamPID` fast path before this
-        // would let a caller racing the readiness window (Steam up, but its `ActiveProcess` pid not yet in
-        // `user.reg`) return "ready" early and launch a game whose `SteamAPI_Init` then loses to Steam's own
-        // init — the exact failure the readiness gate exists to prevent.
-        if let inFlight = steamLaunch { await inFlight.value; return steamPID != nil }
-        if let pid = steamPID, orchestrator.isRunning(pid: pid) { return true }
+        // Join an in-flight launch FIRST — it owns the cold-start readiness wait (`startSteam` awaits
+        // `awaitSteamReady`). Checking readiness before this would let a caller racing the readiness window
+        // (Steam up, but its `ActiveProcess` pid not yet in `user.reg`) return early and launch a game whose
+        // `SteamAPI_Init` then loses to Steam's own init — the failure the readiness gate exists to prevent.
+        // A launch was CONFIRMED READY only if Steam is already registered (`isRunning`) — otherwise we skip a
+        // redundant relaunch (Steam single-instances anyway) but still report whether the client came up.
+        if let inFlight = steamLaunch { await inFlight.value; return launchError == nil }
+        if isRunning { return true }
         let task = Task { @MainActor in await startSteam() }
         steamLaunch = task
         await task.value
@@ -108,7 +60,10 @@ public final class SteamClientSession {
         // `if let inFlight` branch above instead of starting a new launch, so no newer launch can have
         // replaced this slot by the time we resume here.
         steamLaunch = nil
-        return steamPID != nil
+        // The client is "up" if the launch didn't error (`startSteam` clears `launchError` on a successful
+        // spawn) — not "readiness confirmed", which the failsafe timeout may pre-empt. The readiness WAIT
+        // still happened inside `startSteam`, so a game launched next has given Steam its window to register.
+        return launchError == nil
     }
 
     /// Route a `steam://…` URL to the running client, bringing it up first. Throws if the client can't be
@@ -150,7 +105,6 @@ public final class SteamClientSession {
         bottle.resetLog()   // so `committed` reflects THIS run, not a stale marker from a prior setup
         var elapsed = 0.0
         var pid = try? await bottle.launchForUpdate(wine: wine)
-        recordWarmUp(pid)
         var relaunches = 0
         while elapsed < warmUpTimeout {
             try? await Task.sleep(for: .seconds(warmUpPollInterval))
@@ -184,7 +138,6 @@ public final class SteamClientSession {
                 relaunches += 1
                 try? await Task.sleep(for: .seconds(3))
                 pid = try? await bottle.launchForUpdate(wine: wine)
-                recordWarmUp(pid)
             }
         }
         // Failsafe / exhausted — best-effort. Shut down whatever's running; a partial download resumes on the
@@ -234,21 +187,8 @@ public final class SteamClientSession {
     }
 
     private func startSteam() async {
-        guard let pid = await launchSteamProcess() else { return }
-        // A cross-bottle `stop()` cancelled this bring-up while the spawn was in flight (see `stop`). Don't
-        // adopt the process — terminate it, so we never end up with two Steam clients for one account.
-        guard !Task.isCancelled else { orchestrator.terminate(pid: pid); return }
-        steamPID = pid
-        didStartClient = true          // so `stop()` force-quits the tree even after Steam re-execs itself
+        guard await launchSteamProcess() != nil else { return }   // spawned detached; we don't track its PID
         launchError = nil
-        ledger?.record(ledgerKey, pid: pid)
-        steamObserver = orchestrator.observeExit(pid: pid) { [weak self] in
-            Task { @MainActor in
-                guard let self, self.steamPID == pid else { return }
-                self.steamPID = nil
-                self.ledger?.remove(self.ledgerKey)
-            }
-        }
         await awaitSteamReady()
     }
 

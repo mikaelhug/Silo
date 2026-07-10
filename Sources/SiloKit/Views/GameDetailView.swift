@@ -60,13 +60,8 @@ struct GameDetailView: View {
 
     @ViewBuilder private func actions(_ lib: GameLibraryViewModel) -> some View {
         HStack(spacing: 10) {
-            if lib.isRunning(game) {
-                Button(role: .destructive) { Task { await lib.stop(game) } } label: { Label("Stop", systemImage: "stop.fill") }
-                    .buttonStyle(.borderedProminent).tint(.red)
-            } else {
-                Button { Task { await lib.play(game) } } label: { Label("Play", systemImage: "play.fill") }
-                    .buttonStyle(.borderedProminent).disabled(!lib.canLaunch || lib.isBusy(game))
-            }
+            Button { Task { await lib.play(game) } } label: { Label("Play", systemImage: "play.fill") }
+                .buttonStyle(.borderedProminent).disabled(!lib.canLaunch || lib.isBusy(game))
             Button("Settings…", action: onSettings)
             Button("Log") {
                 openWindow(id: LogTarget.windowID,
