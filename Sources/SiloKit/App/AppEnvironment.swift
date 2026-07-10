@@ -215,8 +215,8 @@ public final class AppEnvironment {
 
     // MARK: - DXMT (graphics backend for manual games)
 
-    /// The DXMT runtime (its module dir, built from CrossOver source) is configured — enables the DXMT
-    /// graphics backend for manual (non-Steam) games.
+    /// The DXMT runtime (its module dir) is configured — enables the DXMT graphics backend for manual
+    /// (non-Steam) games.
     public var dxmtReady: Bool { backendSettings.config.dxmtLibDirPath != nil }
 
     // MARK: - Guided setup (the onboarding "Set up" chain)
@@ -229,7 +229,7 @@ public final class AppEnvironment {
 
     /// The full ordered onboarding setup, chained from a single "Set up" click: download the latest Wine
     /// runtime (if missing) → download the latest DXMT runtime (if missing) → set up the Steam bottle
-    /// (download Steam → create the bottle → install the CrossOver-parity component set, user-guided where a
+    /// (download Steam → create the bottle → install the game-dependency component set, user-guided where a
     /// license is shown → warm up the client). GPTK is imported separately (its own onboarding step).
     public func runFullSetup() async {
         // 1. Wine — then wait for the new default to persist AND reach the bottle VM. `installLatest` applies

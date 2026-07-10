@@ -215,7 +215,7 @@ public struct SteamBottle: Sendable {
         }
     }
 
-    // MARK: - CrossOver-parity components (Asian fonts, d3dcompiler_47, MSVC redist)
+    // MARK: - Game-dependency components (Asian fonts, d3dcompiler_47, MSVC redist)
 
     /// Silo-owned marker dir (sibling of `drive_c`, ignored by Wine) recording which components are
     /// installed. Used where a filesystem check is unreliable — Wine's `wineboot` drops a builtin/fakedll
@@ -310,8 +310,10 @@ public struct SteamBottle: Sendable {
 
     /// Install the native `d3dcompiler_47.dll` (HLSL shader compiler) for both ABIs (idempotent, no EULA).
     /// Extracts the DLL from Microsoft's own Windows-SDK cabinet files via Wine's builtin `expand` (no
-    /// cabextract dependency): 64-bit → `system32`, 32-bit → `syswow64`. No DLL override is set — matching
-    /// CrossOver's Steam bottle (the native file is present, no override). Best-effort per ABI.
+    /// cabextract dependency): 64-bit → `system32`, 32-bit → `syswow64`. No DLL override is set — Wine's
+    /// builtin (vkd3d-shader-backed) drives shader compilation for the vast majority of titles; the native
+    /// file is kept for the odd app that loads it by explicit path and for dependency detection. Best-effort
+    /// per ABI.
     func installD3DCompiler47(wine: URL?) async throws {
         guard let wine else { throw BottleError.wineNotConfigured }
         if hasD3DCompiler47 { return }
@@ -343,8 +345,8 @@ public struct SteamBottle: Sendable {
             try? fileManager.moveItem(at: extracted, to: finalDLL)
             try? fileManager.removeItem(at: cab)
         }
-        // No DLL override — matching CrossOver's Steam bottle, which keeps the native d3dcompiler_47.dll in
-        // system32/syswow64 but sets no override (relies on the file + Wine's load order, same as Silo's Wine).
+        // No DLL override: the native file is kept in system32/syswow64, but Wine's builtin d3dcompiler_47
+        // (vkd3d-shader) drives shader compilation at runtime — the reliable, Wine-integrated choice.
     }
 
     /// Marker file recording a completed MSVC-redist install for `x86` (else x64).
@@ -390,25 +392,25 @@ public struct SteamBottle: Sendable {
         }
     }
 
-    // MARK: - CrossOver-parity Wine defaults (DllOverrides)
+    // MARK: - Default Wine DLL overrides
 
-    /// Silo marker recording that CrossOver's default DLL overrides were applied to the bottle.
+    /// Silo marker recording that the default DLL overrides were applied to the bottle.
     private var wineDefaultsMarker: URL { markerDir.appendingPathComponent("wine-defaults") }
 
-    /// Whether CrossOver's default `DllOverrides` set has been applied to the bottle.
+    /// Whether Silo's default `DllOverrides` set has been applied to the bottle.
     var hasWineDefaults: Bool { fileManager.fileExists(atPath: wineDefaultsMarker.path) }
 
-    /// Apply CrossOver's default `HKCU\Software\Wine\DllOverrides` set to the bottle (idempotent, best-effort)
-    /// so its Libraries configuration matches a CrossOver bottle and games behave the same. Emits a single
-    /// `.reg` file and imports it with ONE `wine regedit /S` call (far cheaper than ~58 `reg add`s). Marks
-    /// success so it's a no-op on re-run.
+    /// Apply Silo's default `HKCU\Software\Wine\DllOverrides` set (`Silo.defaultDllOverrides` — the standard
+    /// Windows-compatibility overrides a bare `wineboot` prefix omits) to the bottle (idempotent, best-effort)
+    /// so games behave as they would on a real Windows install. Emits a single `.reg` file and imports it with
+    /// ONE `wine regedit /S` call (far cheaper than ~58 `reg add`s). Marks success so it's a no-op on re-run.
     func applyWineDefaults(wine: URL?) async {
         guard let wine, !hasWineDefaults else { return }
         let driveC = prefixDir.appendingPathComponent("drive_c")
         try? fileManager.createDirectory(at: driveC, withIntermediateDirectories: true)
         // REGEDIT4 (ANSI) — the override names/modes contain no backslashes, so no escaping is needed.
         var reg = "REGEDIT4\r\n\r\n[HKEY_CURRENT_USER\\Software\\Wine\\DllOverrides]\r\n"
-        for (name, mode) in Silo.crossOverDllOverrides {
+        for (name, mode) in Silo.defaultDllOverrides {
             reg += "\"\(name)\"=\"\(mode)\"\r\n"
         }
         let regFile = driveC.appendingPathComponent("silo-overrides.reg")
@@ -451,7 +453,7 @@ public struct SteamBottle: Sendable {
         }
     }
 
-    /// Install the CrossOver-parity component set into the (already-booted) bottle, in `BottleComponent`'s
+    /// Install the game-dependency component set into the (already-booted) bottle, in `BottleComponent`'s
     /// fixed declared order: Core Fonts → Source Han Sans → d3dcompiler_47 → MSVC x86 → MSVC x64 → msync →
     /// Steam. Satisfied components are skipped (resumable). `onPhase` fires before each component installs
     /// (so the UI can narrate the user-guided steps). Best-effort per component — a failed font/redist is
@@ -549,15 +551,15 @@ public struct SteamBottle: Sendable {
         "-cef-disable-sandbox", "-no-cef-sandbox", "-noverifyfiles", "-norepairfiles",
     ]
 
-    /// Wine virtual-desktop geometry for the Steam client. On CrossOver's `winemac.drv`, the virtual-desktop
-    /// ROOT window presents reliably, whereas a rootless CEF surface (SwiftShader-rendered but composited as
-    /// a layered/child window) does NOT paint — it stays black even though rendering succeeds. So Steam is
+    /// Wine virtual-desktop geometry for the Steam client. On Silo's `winemac.drv`, the virtual-desktop ROOT
+    /// window presents reliably, whereas a rootless CEF surface (SwiftShader-rendered but composited as a
+    /// layered/child window) does NOT paint — it stays black even though rendering succeeds. So Steam is
     /// launched inside `explorer /desktop=` to get a presentable window. (Vineport runs rootless because
-    /// Gcenx's winemac.drv handles it; CrossOver's doesn't.) Games still launch rootless under GPTK.
+    /// Gcenx's winemac.drv handles it; ours doesn't.) Games still launch rootless under GPTK.
     public static let desktopGeometry = "1440x900"
 
-    /// Launch the bottle's Steam client detached, inside a Wine virtual desktop (so CEF presents on
-    /// CrossOver — see `desktopGeometry`), with the verified software-GL CEF flags + env.
+    /// Launch the bottle's Steam client detached, inside a Wine virtual desktop (so CEF presents on our
+    /// `winemac.drv` — see `desktopGeometry`), with the verified software-GL CEF flags + env.
     @discardableResult
     public func launchSteam(wine: URL?) async throws -> Int32 {
         guard let wine else { throw BottleError.wineNotConfigured }

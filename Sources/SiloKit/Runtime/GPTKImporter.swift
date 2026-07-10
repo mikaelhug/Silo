@@ -5,7 +5,7 @@ import Foundation
 /// GPTK ships the D3D→Metal translation layer (D3DMetal.framework + d3d10/11/12.dll, dxgi.dll, …),
 /// NOT a wine binary — so this populates `gptkLibDirPath`; the modules are later overlaid into the
 /// wine runtime's `lib/wine` tree by `GraphicsLinker.overlayGPTK`. The wine binary itself comes from
-/// CrossOver or a downloaded wine-crossover build.
+/// Silo's own Wine runtime (installed separately).
 ///
 /// GPTK 4.x nests the runtime in an inner "Evaluation environment…dmg"; older versions put `redist`
 /// at the top level. Both are handled. `hdiutil` runs through the `ProcessRunning` seam.

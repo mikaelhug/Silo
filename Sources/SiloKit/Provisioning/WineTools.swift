@@ -25,14 +25,14 @@ public struct WineTools: Sendable {
         guard result.succeeded else { throw ToolsError.registryWriteFailed(result.exitCode) }
     }
 
-    /// macOS Retina/HiDPI mode for `prefix` — CrossOver's "High Resolution Mode", written as a **pair** so
-    /// the two halves can never drift:
+    /// macOS Retina/HiDPI ("High Resolution") mode for `prefix`, written as a **pair** so the two halves can
+    /// never drift:
     /// - `HKCU\Software\Wine\Mac Driver\RetinaMode` = `y`/`n` — on = Wine renders at the real Retina
     ///   (backing-pixel) resolution, so output is crisp instead of pixel-doubled.
     /// - `HKCU\Control Panel\Desktop\LogPixels` = `192`/`96` — the DPI companion. RetinaMode alone doubles
     ///   the pixel count, which makes in-game/UI text render tiny; 192 DPI (200%) tells Windows apps to scale
-    ///   UI up to match, keeping it legible. This is exactly what CrossOver reports (192 DPI) alongside its
-    ///   High Resolution Mode. LogPixels is meaningless without RetinaMode — 192 DPI on a non-Retina bottle
+    ///   UI up to match, keeping it legible. 192 DPI (200%) is the standard Retina pairing. LogPixels is
+    ///   meaningless without RetinaMode — 192 DPI on a non-Retina bottle
     ///   would just bloat the UI — so it is ONLY ever written here, coupled to RetinaMode's state, reverting
     ///   to Wine's default 96 (100%) when off.
     /// The standard fix for wrong-sized game windows on Retina Macs; takes effect on the next launch.

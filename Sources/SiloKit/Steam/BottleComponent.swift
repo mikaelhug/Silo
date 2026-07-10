@@ -1,6 +1,6 @@
 import Foundation
 
-/// The component set Silo installs into the Steam bottle, in the fixed CrossOver-parity **install order**
+/// The component set Silo installs into the Steam bottle, in the fixed **install order**
 /// (the `allCases` declaration order is the single source of truth for ordering). `SteamBottle` owns the
 /// per-component predicate + install method (`isSatisfied`/`install`); the driver `provisionComponents`
 /// walks these in order. Wine/DXMT runtime downloads, the Steam *download*, and `wineboot` are

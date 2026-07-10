@@ -10,7 +10,7 @@ Game Porting Toolkit (GPTK / D3DMetal). Topology = **Single Downloader, Multi-Ru
 - Each game is **launched in its own isolated Wine prefix** with its own graphics backend + env.
 
 Pipeline: **Discovery** (parse `appmanifest_*.acf`) → **Provision** (seed per-game prefix) →
-**Graphics Linker** (inject GPTK/D3DMetal, CrossOver fallback) → **Launch Orchestrator** (detached
+**Graphics Linker** (inject GPTK/D3DMetal, wined3d fallback) → **Launch Orchestrator** (detached
 process with `WINEPREFIX` overridden to the isolated prefix).
 
 ## Hard constraints (non-negotiable)
@@ -85,26 +85,24 @@ Per game (`SteamPresenceStrategy`, default `.steamAppIDFile`):
 features ("no online" = dealbreaker), so `.emulatorStub` was dropped. Constraint #7 still stands — never
 bundle/auto-download an emulator.
 
-## Steam-bottle setup (CrossOver-parity, Phase 1 — 2026-07-10)
+## Steam-bottle setup (Phase 1 — 2026-07-10)
 Onboarding is **2 steps**: (1) import GPTK `.dmg`, (2) **"Set up"** → `AppEnvironment.runFullSetup()` chains
 download Wine → download DXMT runtime → download Steam → `wineboot` → the ordered **component set** → warm-up.
 The component set + order is `BottleComponent.allCases` (single source of truth), installed by
 `SteamBottle.provisionComponents(wine:onPhase:)` (each component has an `isSatisfied` predicate → skipped when
 present, so setup is resumable/idempotent): **Core Fonts** (first font user-guided for its EULA, rest silent)
 → **Source Han Sans** (4 CJK packs, OFL, file-copy) → **d3dcompiler_47** (both ABIs via `wine expand` of the
-MS-SDK CABs, native override) → **MSVC redist x86 → x64** (user-guided) → **msync** (no-op — `WINEMSYNC=1` is
+MS-SDK CABs, native files, no override) → **MSVC redist x86 → x64** (user-guided) → **msync** (no-op — `WINEMSYNC=1` is
 launch-time env) → **Steam** (user-guided, no `/S`). License-bearing installers run via `ProcessRunning.run`
 (blocks until the user closes the window). New download URLs live in `Silo.swift` (no `versions.env` entry, per
 the corefonts precedent). On-device-unverified risks (see STATUS): `wine expand` member extraction, the
 user-guided SteamSetup black-window/auto-launch (mitigated by `forceQuit` before warm-up).
 
-**Phase 2 (2026-07-10):** after `wineboot`, `SteamBottle.applyWineDefaults` imports CrossOver's default
-`HKCU\Software\Wine\DllOverrides` set (`Silo.crossOverDllOverrides` — the 58 entries read verbatim from the real
-CrossOver Steam bottle, `Sources/SiloKit/Steam/CrossOverDefaults.swift`) via one `wine regedit /S`, so the
-bottle's winecfg Libraries config matches CrossOver's. `d3dcompiler_47`/`msvcp140`/`vcruntime140` are installed
-as native files but **NOT** overridden (matching CrossOver — same Wine build, so same load behavior; the
-`d3dcompiler_47=native` override was removed). The Applications-tab per-app profiles are CrossOver-proprietary
-tooling (`cx*`/`winewrapper`), documented in `CrossOverDefaults.swift` for a later parity phase.
+**Phase 2 (2026-07-10):** after `wineboot`, `SteamBottle.applyWineDefaults` imports Silo's default
+`HKCU\Software\Wine\DllOverrides` set (`Silo.defaultDllOverrides` — the 58-entry standard Windows-compatibility
+override set, `Sources/SiloKit/Steam/BottleDefaults.swift`) via one `wine regedit /S`. `d3dcompiler_47`/`msvcp140`/
+`vcruntime140` are installed as native files but **NOT** overridden — Wine's load order picks up the real files
+once present, so no registry override is needed (the earlier `d3dcompiler_47=native` override was removed).
 
 ## Concurrency model (apply consistently)
 - **Pure & synchronous** (trivially `Sendable`): `ACFTokenizer`, `KeyValuesParser`, `KVNode`,

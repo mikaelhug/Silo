@@ -15,10 +15,9 @@ public enum Silo {
     /// GitHub repo (`owner/name`) the in-app updater checks for new app releases.
     public static let updateRepo = Versions.githubRepo
 
-    /// Repo whose releases host Silo's own CrossOver-based Wine builds (the base D3DMetal runs on).
-    /// Self-reliant by design: built from CrossOver's open (LGPL) sources in our own CI and published
-    /// to our Releases, so we never depend on a third-party prebuilt that may go stale. See WINE-BUILD.md.
-    /// (Until the first build is published, the Wine tab is empty — install CrossOver, or override here.)
+    /// Repo whose releases host Silo's own Wine builds (the base D3DMetal runs on). Self-reliant by design:
+    /// Silo compiles Wine from published open-source (LGPL) Wine sources in its own CI and hosts the result on
+    /// its Releases, so it never depends on a third-party prebuilt that may go stale. See WINE-BUILD.md.
     public static let wineRepo = Versions.githubRepo
 
     /// Apple's official GPTK page (manual DMG download, requires Apple ID).

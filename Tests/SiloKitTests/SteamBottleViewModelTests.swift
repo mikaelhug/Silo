@@ -64,7 +64,7 @@ struct SteamBottleViewModelTests {
         #expect(vm.canSetUp)
     }
 
-    @Test("setUp provisions the bottle CrossOver-style and reports success (Steam user-guided)")
+    @Test("setUp provisions the bottle and reports success (Steam user-guided)")
     func setUpSuccess() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, fake, paths) = make(tmp)

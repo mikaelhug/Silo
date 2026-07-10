@@ -32,9 +32,9 @@ imports Apple's Game Porting Toolkit from your `.dmg`, and self-updates from Git
 - **Real Steam, real DRM.** Steamworks IPC is prefix-scoped, so Silo runs each game in the same
   bottle as a logged-in Windows Steam client — auth tickets, ownership, and online features intact.
   Sign in once; Steam caches the login.
-- **Two graphics backends, per game.** **GPTK / D3DMetal** (Apple's D3D10/11/12 → Metal layer) is
-  the default; **DXMT** (a direct D3D10/11 → Metal layer, the exact version CrossOver bundles) is
-  the optional fallback for older titles GPTK can't run — each backend gets its own Steam bottle.
+- **Two graphics backends.** **GPTK / D3DMetal** (Apple's D3D10/11/12 → Metal layer) drives the Steam
+  bottle; **DXMT** (a direct D3D10/11 → Metal layer) is the optional fallback for older titles GPTK
+  can't run — selectable per manual game, each in its own isolated bottle.
 - **Non-Steam games too.** Add any `.exe` (or run its installer); each manual game lives in its
   **own isolated Wine prefix** with per-game backend, env flags, and launch options — plus a
   Game-Mode-tagged Desktop shortcut that launches without opening Silo.
@@ -67,7 +67,7 @@ runtime-dependent degrades to a guided setup state, never a crash.
 
 The Library shows a guided setup until the pieces are in place:
 
-1. **Install Wine** — one click; downloads the latest CrossOver-source build (~250 MB) from
+1. **Install Wine** — one click; downloads the latest Wine build (~250 MB) from
    [Releases](https://github.com/mikaelhug/Silo/releases).
 2. **Import GPTK** — pick Apple's Game Porting Toolkit `.dmg`
    ([developer.apple.com/games](https://developer.apple.com/games/game-porting-toolkit/), free
@@ -118,9 +118,9 @@ CI runs build + test on every push; tagging `v*` publishes an ad-hoc-signed `Sil
 
 Silo's Wine is compiled **from CrossOver's open (LGPL) sources in Silo's own CI** and published to
 its Releases — no third-party prebuilt dependency, reproducible from `versions.env`. DXMT is built
-from its upstream (`3Shain/dxmt`), pinned to the exact version CrossOver bundles, against that same
-Wine. Apple's D3DMetal is imported from the user's GPTK `.dmg` (Apple-login-gated, so it is never
-auto-downloaded). See [WINE-BUILD.md](WINE-BUILD.md).
+from its upstream (`3Shain/dxmt`), pinned in `versions.env`, against that same Wine. Apple's D3DMetal
+is imported from the user's GPTK `.dmg` (Apple-login-gated, so it is never auto-downloaded). See
+[WINE-BUILD.md](WINE-BUILD.md).
 
 ## Sandboxing
 

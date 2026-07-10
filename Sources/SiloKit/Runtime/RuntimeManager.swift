@@ -183,7 +183,7 @@ public actor RuntimeManager {
         return dxmt.first
     }
 
-    /// The CrossOver version embedded in a wine runtime name (`wine-cx-26.2.0` → `26.2.0`), or nil.
+    /// The source version embedded in a wine runtime name (`wine-cx-26.2.0` → `26.2.0`), or nil.
     static func wineCXVersion(_ runtimeName: String) -> String? {
         let prefix = "wine-cx-"
         return runtimeName.hasPrefix(prefix) ? String(runtimeName.dropFirst(prefix.count)) : nil

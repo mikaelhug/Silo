@@ -270,7 +270,7 @@ struct SteamBottleTests {
         #expect(fake.invocations.count == runsBefore)
     }
 
-    // MARK: - CrossOver-parity components
+    // MARK: - Game-dependency components
 
     @Test("installSourceHanSans downloads the 4 packs, extracts each, copies .otf into Fonts, per-pack markers")
     func installSourceHanSans() async throws {
@@ -357,7 +357,7 @@ struct SteamBottleTests {
         let expands = fake.invocations.filter { $0.arguments.first == "expand" }
         #expect(expands.contains { $0.arguments.contains("-F:\(Silo.d3dCompiler47X64Member)") && $0.arguments.contains("C:\\windows\\system32") })
         #expect(expands.contains { $0.arguments.contains("-F:\(Silo.d3dCompiler47X86Member)") && $0.arguments.contains("C:\\windows\\syswow64") })
-        // NO DLL override is written (matches CrossOver — the native file is present, no override).
+        // NO DLL override is written — the native file is present, so Wine's load order picks it up.
         #expect(!fake.invocations.contains {
             ($0.arguments.first == "reg" || $0.arguments.first == "regedit") && $0.arguments.contains("d3dcompiler_47")
         })
@@ -431,7 +431,7 @@ struct SteamBottleTests {
 
     // MARK: - Ordered provisioning
 
-    @Test("provisionComponents installs the CrossOver set in the fixed order (msync skipped — a no-op)")
+    @Test("provisionComponents installs the component set in the fixed order (msync skipped — a no-op)")
     func provisionComponentsOrder() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
@@ -490,17 +490,18 @@ struct SteamBottleTests {
         #expect(phases.value.contains(.vcRedistX86))
     }
 
-    // MARK: - CrossOver-parity Wine defaults
+    // MARK: - Default Wine DLL overrides
 
-    @Test("crossOverDllOverrides matches CrossOver's Steam-bottle DllOverrides (parity pin)")
-    func crossOverOverridesParity() {
-        let overrides = Silo.crossOverDllOverrides
+    @Test("defaultDllOverrides is the complete Windows-compatibility override set (pin)")
+    func defaultDllOverridesAreComplete() {
+        let overrides = Silo.defaultDllOverrides
         let byName = Dictionary(uniqueKeysWithValues: overrides.map { ($0.name, $0.mode) })
-        // The exact count read from CrossOver's user.reg.
+        // The exact size of the standard override set.
         #expect(overrides.count == 58)
-        // CrossOver does NOT override the runtime DLLs Silo installs natively — it relies on the files.
+        // The runtime DLLs Silo installs natively are deliberately NOT overridden — Wine's load order
+        // picks up the real files once they're present.
         for absent in ["msvcp140", "vcruntime140", "d3dcompiler_47", "concrt140"] {
-            #expect(byName[absent] == nil, "\(absent) must NOT be overridden (matches CrossOver)")
+            #expect(byName[absent] == nil, "\(absent) must NOT be overridden")
         }
         // Representative entries incl. the edge cases (disabled / native-only / builtin-only / app wildcard).
         #expect(byName["*docbox.api"] == "")                 // disabled
@@ -514,7 +515,7 @@ struct SteamBottleTests {
         #expect(overrides.allSatisfy { !$0.mode.contains(" ") })
     }
 
-    @Test("applyWineDefaults imports CrossOver's DllOverrides via one regedit /S and marks the bottle")
+    @Test("applyWineDefaults imports the default DllOverrides via one regedit /S and marks the bottle")
     func applyWineDefaults() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (bottle, fake, paths) = make(tmp)

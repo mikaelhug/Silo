@@ -49,7 +49,7 @@ public final class SteamBottleViewModel {
     /// Download progress of the warm-up, 0…1 when Steam reports it (real % bar), else nil (indeterminate).
     public private(set) var warmUpFraction: Double?
 
-    /// Provision the bottle CrossOver-style, in the fixed order: download Steam → create the bottle →
+    /// Provision the bottle in the fixed order: download Steam → create the bottle →
     /// install the component set (Core Fonts, Asian fonts, d3dcompiler_47, MSVC x86/x64, msync, then the
     /// user-guided Steam client) → force-quit any Steam the installer auto-launched → WARM UP the first-run
     /// self-update → wrap the steamwebhelper. The license-bearing components (first Core Font, MSVC, Steam)
@@ -72,10 +72,10 @@ public final class SteamBottleViewModel {
             // Step 4: create the bottle.
             status = "Creating the Steam bottle…"
             try await bottle.provision(wine: wine)
-            // Configure the bottle like CrossOver: apply its default DLL overrides (Libraries settings).
+            // Apply Silo's default Wine DLL overrides (the standard Windows-compatibility set).
             status = "Configuring the bottle…"
             await bottle.applyWineDefaults(wine: wine)
-            // Steps 5–11: the CrossOver-parity component set, in order (fonts → d3dcompiler → MSVC → Steam).
+            // Steps 5–11: the game-dependency component set, in order (fonts → d3dcompiler → MSVC → Steam).
             try await bottle.provisionComponents(wine: wine, onPhase: { [weak self] component in
                 self?.applyComponentPhase(component)
             })

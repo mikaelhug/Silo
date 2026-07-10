@@ -3,31 +3,26 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **🔧 Phase 2 — CrossOver-parity Wine config for the Steam bottle (2026-07-10, `main`; `swift build` clean +
-  zero warnings, 364 tests green serial + parallel).** Inspected the REAL CrossOver Steam bottle
-  (`~/Library/Application Support/CrossOver/Bottles/Steam`): its `user.reg` carries **58**
-  `HKCU\Software\Wine\DllOverrides` (the classic Wine default template) that a vanilla `wineboot` prefix lacks.
-  Since Silo runs the SAME CrossOver-FOSS Wine, replicating them reproduces CrossOver's behavior.
-  - New `Silo.crossOverDllOverrides` (`Sources/SiloKit/Steam/CrossOverDefaults.swift` — the exact 58 from
-    CrossOver's `user.reg`) + `SteamBottle.applyWineDefaults`: builds a REGEDIT4 `.reg` and imports it with ONE
-    `wine regedit /S` (cheaper than 58 `reg add`s), idempotent (`.silo-installed/wine-defaults` marker). Called
-    in `setUp` right after `provision` ("Configuring the bottle…").
-  - **Removed Silo's `d3dcompiler_47=native` override** (kept the DLL file) — the CrossOver bottle has the real
-    native DLLs (d3dcompiler_47 4.3 MB, msvcp140 643 KB, vcruntime140 179 KB) present with **NO** overrides.
-    Dropped the now-dead `setDllOverride` helper.
-  - **MSVC unchanged** — Phase 1 already installs the redist without overrides = matches CrossOver. The bottle
-    proved the redist places the real `msvcp140.dll` on this Wine (bug-57518 doesn't bite cx-26.x), so the
-    winetricks force-native workaround (+ risky CAB-extract) is **not** needed.
-  - **Applications tab documented** (in `CrossOverDefaults.swift`) for a later phase: `cxcplinfo`/`cxmklnk`/
-    `cxwget`/`winewrapper` are CrossOver-proprietary (absent from Silo's Wine); only `winemenubuilder` is upstream.
-  - Tests (+2): a parity pin (Silo's list == CrossOver's 58, and NOT msvcp140/vcruntime140/d3dcompiler_47/
-    concrt140), the `regedit` import + idempotency, `installD3DCompiler47` now asserts NO override.
-  - **On-device:** after a fresh setUp, diff Silo's `SteamBottle/user.reg` `[…\DllOverrides]` vs CrossOver's
-    (should match modulo whitespace); confirm winecfg → Libraries matches, `d3dcompiler_47` no longer appears,
-    and `system32/msvcp140.dll` is the real 643 KB file.
-- **📦 Phase 1 — CrossOver-parity bottle provisioning + 2-step onboarding (2026-07-10, `main`; `swift build`
-  clean + zero warnings, `swift test` green serial + parallel, 360 tests).** The Steam bottle now installs the
-  same component set CrossOver does, in a fixed order, with the license-bearing pieces run as **user-guided**
+- **🔧 Phase 2 — default Wine config for the Steam bottle (2026-07-10, `main`; `swift build` clean +
+  zero warnings, 364 tests green serial + parallel).** A vanilla `wineboot` prefix carries no
+  `HKCU\Software\Wine\DllOverrides`, but games expect the standard Windows-compatibility set. Silo now applies
+  its own **58-entry** default override set (the classic Wine default template) to the Steam bottle.
+  - New `Silo.defaultDllOverrides` (`Sources/SiloKit/Steam/BottleDefaults.swift`) + `SteamBottle.applyWineDefaults`:
+    builds a REGEDIT4 `.reg` and imports it with ONE `wine regedit /S` (cheaper than 58 `reg add`s), idempotent
+    (`.silo-installed/wine-defaults` marker). Called in `setUp` right after `provision` ("Configuring the bottle…").
+  - **Removed Silo's `d3dcompiler_47=native` override** (kept the DLL file) — the native DLLs
+    (d3dcompiler_47 4.3 MB, msvcp140 643 KB, vcruntime140 179 KB) are present, so Wine's load order picks them
+    up with **NO** override. Dropped the now-dead `setDllOverride` helper.
+  - **MSVC unchanged** — Phase 1 already installs the redist without overrides. The redist places the real
+    `msvcp140.dll` on this Wine (bug-57518 doesn't bite cx-26.x), so the winetricks force-native workaround
+    (+ risky CAB-extract) is **not** needed.
+  - Tests (+2): a completeness pin (the 58-entry set, and NOT msvcp140/vcruntime140/d3dcompiler_47/concrt140),
+    the `regedit` import + idempotency, `installD3DCompiler47` now asserts NO override.
+  - **On-device:** after a fresh setUp, confirm winecfg → Libraries shows the override set, `d3dcompiler_47`
+    no longer appears, and `system32/msvcp140.dll` is the real 643 KB file.
+- **📦 Phase 1 — bottle provisioning + 2-step onboarding (2026-07-10, `main`; `swift build`
+  clean + zero warnings, `swift test` green serial + parallel, 360 tests).** The Steam bottle now installs its
+  game-dependency component set in a fixed order, with the license-bearing pieces run as **user-guided**
   GUI installers (`ProcessRunning.run` blocks until the user closes the window). Onboarding collapses from 3
   steps to **2**: (1) import GPTK `.dmg`, (2) **"Set up"** → `AppEnvironment.runFullSetup()` chains it all.
   - **Ordered component model.** `BottleComponent` enum (`allCases` = the single source of truth for order) +
@@ -43,9 +38,10 @@
     prompt) — download → bsdtar extract → copy `.otf` into `windows/Fonts`; **per-pack markers** make the big
     download resumable.
   - **d3dcompiler_47** (new `installD3DCompiler47`): both ABIs, extracted from Microsoft's Windows-SDK CABs via
-    Wine's builtin **`wine expand`** (no cabextract), 64-bit→`system32` / 32-bit→`syswow64`, then a native DLL
-    override. **⚠️ R2 (highest on-device risk):** whether `wine expand -F:<member>` pulls the named member on
-    a real Mac — fallback is re-hosting the two redistributable DLLs as Silo release assets.
+    Wine's builtin **`wine expand`** (no cabextract), 64-bit→`system32` / 32-bit→`syswow64` (Phase 1 added a
+    native override here; Phase 2 removed it — the file's presence is enough). **⚠️ R2 (highest on-device risk):**
+    whether `wine expand -F:<member>` pulls the named member on a real Mac — fallback is re-hosting the two
+    redistributable DLLs as Silo release assets.
   - **MSVC redist** (new `installVCRedist`): x86 then x64, **user-guided** (no `/quiet` → license shown).
     **msync** is a no-op (env-only, always satisfied → skipped).
   - **🐛 On-device fix (2026-07-10): MSVC never showed its user-guided installer.** Root cause: `wineboot`
