@@ -79,19 +79,27 @@ extension Silo {
     ]
 }
 
-// MARK: - Applications tab (per-app AppDefaults) — documented for a future parity phase, NOT yet implemented.
+// MARK: - Applications tab (per-app AppDefaults) — investigated 2026-07-10; INTENTIONALLY not replicated.
 //
-// CrossOver's winecfg → Applications tab lists exes with a per-app profile under
-// `HKCU\Software\Wine\AppDefaults\<exe>`. From the Steam bottle's `user.reg`:
+// CrossOver's winecfg → Applications tab lists five exes — each a REAL compiled binary present in the bottle's
+// `system32`/`syswow64` — with a tiny per-app profile under `HKCU\Software\Wine\AppDefaults\<exe>`:
 //
-//   • cxcplinfo.exe   — CrossOver tool: enumerates installed Control Panel applets. (AppDefaults\…\Explorer)
-//   • cxmklnk.exe     — CrossOver tool: creates `.lnk` shortcuts.                   (AppDefaults\…\Explorer)
-//   • cxwget.exe      — CrossOver tool: GUI file downloader. Per-app DllOverride: `wininet=builtin`.
-//   • winewrapper.exe — CrossOver's launcher half. Per-app DllOverrides: `crypt32=builtin`, `rsabase=builtin`,
-//                       `rsaenh=builtin`.                                           (+ AppDefaults\…\Explorer)
-//   • winemenubuilder.exe — UPSTREAM Wine (builds desktop/menu entries).            (AppDefaults\…\Explorer)
+//   • winewrapper.exe (204 KB)     — CrossOver's app-launcher core (its `wine` command = a Perl script + this
+//                                    binary). Profile: DllOverrides crypt32/rsabase/rsaenh=builtin; Desktop=root.
+//   • cxwget.exe      (52 KB)      — CrossOver's GUI downloader (fetches fonts/redists during its bottle setup).
+//                                    Profile: DllOverrides wininet=builtin; Desktop=root.
+//   • cxmklnk.exe     (56 KB)      — CrossOver's `.lnk` handler: records Windows Start-Menu shortcuts so
+//                                    CrossOver can mirror them into macOS menus. Profile: Desktop=root.
+//   • cxcplinfo.exe   (48 KB)      — CrossOver's Control-Panel-applet enumerator (for its UI). Desktop=root.
+//   • winemenubuilder.exe (138 KB) — UPSTREAM Wine: turns Windows shortcuts + file associations into macOS
+//                                    menu entries. Profile: Desktop=root. (`Desktop=root` = run rootless.)
 //
-// Only `winemenubuilder.exe` exists in Silo's from-source Wine; `cxcplinfo`/`cxmklnk`/`cxwget`/`winewrapper`
-// are CodeWeavers-proprietary binaries absent from Silo's runtime, so per-app profiles for them would be dead
-// registry keys nothing consults. Full parity here would require Silo to ship equivalent helper binaries —
-// a later phase. (cxbottle.conf's `WINEMSYNC=1` is already matched by Silo's launch env.)
+// Why they are NOT replicated (decided 2026-07-10): the first four are CodeWeavers-PROPRIETARY product plumbing
+// (launcher / downloader / menu integration / control-panel browser) — closed-source, absent from Silo's
+// CrossOver-FOSS Wine, and depended on by NO game. Silo already does each job natively (URLSession downloads,
+// `LaunchOrchestrator` launches, its own library UI). There are ZERO game-specific per-app profiles on this
+// tab, so nothing here affects game behavior. `winemenubuilder.exe` is the only upstream component (Silo's Wine
+// already has it); CrossOver keeps it ENABLED as a feature (installed Windows apps appear in the macOS menu) —
+// for a game launcher you'd sooner want the opposite (disable it so games don't create stray menu entries / grab
+// file associations), a deliberate DIVERGENCE from CrossOver, not parity. (`cxbottle.conf` `WINEMSYNC=1` is
+// already matched by Silo's launch env.)
