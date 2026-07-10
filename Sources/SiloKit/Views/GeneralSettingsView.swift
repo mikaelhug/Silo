@@ -71,15 +71,13 @@ struct GeneralSettingsView: View {
                             Task { await env.bottles.moveBottles(to: dir) }
                         }
                     }
-                    .disabled(env.anythingRunning)
                     if env.paths.bottlesRelocated {
                         Button("Reset to Default") { Task { await env.bottles.resetBottlesLocation() } }
-                            .disabled(env.anythingRunning)
                     }
                 }
-                if env.anythingRunning {
-                    Text("Quit any running game and Steam first.").font(.caption).foregroundStyle(.secondary)
-                } else if let message = env.bottles.message {
+                // The move action itself refuses (with a message) if a bottle is live — so the button stays
+                // enabled rather than showing a nag that only refreshes on an incidental re-render.
+                if let message = env.bottles.message {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
             }
