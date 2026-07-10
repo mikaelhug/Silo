@@ -72,6 +72,9 @@ public final class SteamBottleViewModel {
             // Step 4: create the bottle.
             status = "Creating the Steam bottle…"
             try await bottle.provision(wine: wine)
+            // Configure the bottle like CrossOver: apply its default DLL overrides (Libraries settings).
+            status = "Configuring the bottle…"
+            await bottle.applyWineDefaults(wine: wine)
             // Steps 5–11: the CrossOver-parity component set, in order (fonts → d3dcompiler → MSVC → Steam).
             try await bottle.provisionComponents(wine: wine, onPhase: { [weak self] component in
                 self?.applyComponentPhase(component)

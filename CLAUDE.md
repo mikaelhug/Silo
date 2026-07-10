@@ -98,6 +98,14 @@ launch-time env) → **Steam** (user-guided, no `/S`). License-bearing installer
 the corefonts precedent). On-device-unverified risks (see STATUS): `wine expand` member extraction, the
 user-guided SteamSetup black-window/auto-launch (mitigated by `forceQuit` before warm-up).
 
+**Phase 2 (2026-07-10):** after `wineboot`, `SteamBottle.applyWineDefaults` imports CrossOver's default
+`HKCU\Software\Wine\DllOverrides` set (`Silo.crossOverDllOverrides` — the 58 entries read verbatim from the real
+CrossOver Steam bottle, `Sources/SiloKit/Steam/CrossOverDefaults.swift`) via one `wine regedit /S`, so the
+bottle's winecfg Libraries config matches CrossOver's. `d3dcompiler_47`/`msvcp140`/`vcruntime140` are installed
+as native files but **NOT** overridden (matching CrossOver — same Wine build, so same load behavior; the
+`d3dcompiler_47=native` override was removed). The Applications-tab per-app profiles are CrossOver-proprietary
+tooling (`cx*`/`winewrapper`), documented in `CrossOverDefaults.swift` for a later parity phase.
+
 ## Concurrency model (apply consistently)
 - **Pure & synchronous** (trivially `Sendable`): `ACFTokenizer`, `KeyValuesParser`, `KVNode`,
   decoders, `LaunchPlan` + `makePlan`, `BackendResolver`, `RuntimeRelease` decoding. Keep these

@@ -357,9 +357,9 @@ struct SteamBottleTests {
         let expands = fake.invocations.filter { $0.arguments.first == "expand" }
         #expect(expands.contains { $0.arguments.contains("-F:\(Silo.d3dCompiler47X64Member)") && $0.arguments.contains("C:\\windows\\system32") })
         #expect(expands.contains { $0.arguments.contains("-F:\(Silo.d3dCompiler47X86Member)") && $0.arguments.contains("C:\\windows\\syswow64") })
-        // A native DLL override was written.
-        #expect(fake.invocations.contains {
-            $0.arguments.first == "reg" && $0.arguments.contains("d3dcompiler_47") && $0.arguments.contains("native")
+        // NO DLL override is written (matches CrossOver — the native file is present, no override).
+        #expect(!fake.invocations.contains {
+            ($0.arguments.first == "reg" || $0.arguments.first == "regedit") && $0.arguments.contains("d3dcompiler_47")
         })
         // Idempotent.
         let runsBefore = fake.invocations.count
@@ -488,6 +488,62 @@ struct SteamBottleTests {
         #expect(!phases.value.contains(.steamClient))  // steam.exe present → skipped
         #expect(phases.value.contains(.sourceHanSans)) // not installed → fired
         #expect(phases.value.contains(.vcRedistX86))
+    }
+
+    // MARK: - CrossOver-parity Wine defaults
+
+    @Test("crossOverDllOverrides matches CrossOver's Steam-bottle DllOverrides (parity pin)")
+    func crossOverOverridesParity() {
+        let overrides = Silo.crossOverDllOverrides
+        let byName = Dictionary(uniqueKeysWithValues: overrides.map { ($0.name, $0.mode) })
+        // The exact count read from CrossOver's user.reg.
+        #expect(overrides.count == 58)
+        // CrossOver does NOT override the runtime DLLs Silo installs natively — it relies on the files.
+        for absent in ["msvcp140", "vcruntime140", "d3dcompiler_47", "concrt140"] {
+            #expect(byName[absent] == nil, "\(absent) must NOT be overridden (matches CrossOver)")
+        }
+        // Representative entries incl. the edge cases (disabled / native-only / builtin-only / app wildcard).
+        #expect(byName["*docbox.api"] == "")                 // disabled
+        #expect(byName["dciman32"] == "native")              // native-only
+        #expect(byName["ole32"] == "builtin")                // builtin-only
+        #expect(byName["*ctfmon.exe"] == "builtin")          // app wildcard, builtin
+        #expect(byName["mshtml"] == "native,builtin")
+        #expect(byName["*user.exe"] == "native,builtin")
+        #expect(byName["wscript.exe"] == "native,builtin")
+        // No stray whitespace in any mode (Wine trims, but keep the constant clean).
+        #expect(overrides.allSatisfy { !$0.mode.contains(" ") })
+    }
+
+    @Test("applyWineDefaults imports CrossOver's DllOverrides via one regedit /S and marks the bottle")
+    func applyWineDefaults() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (bottle, fake, paths) = make(tmp)
+        let regFile = paths.steamBottle.appendingPathComponent("drive_c/silo-overrides.reg")
+        // Capture the .reg content during the run (it's deleted afterward).
+        let captured = LockedBox<String?>(nil)
+        fake.onRun = { inv in
+            if inv.arguments.first == "regedit" { captured.set(try? String(contentsOf: regFile, encoding: .utf8)) }
+        }
+
+        await bottle.applyWineDefaults(wine: URL(fileURLWithPath: "/w/wine64"))
+
+        // ONE silent regedit import.
+        let reg = try #require(fake.invocations.last { $0.arguments.first == "regedit" })
+        #expect(reg.arguments.contains("/S"))
+        #expect(fake.invocations.filter { $0.arguments.first == "regedit" }.count == 1)
+        // The emitted .reg carried the DllOverrides block + representative overrides.
+        let content = try #require(captured.value)
+        #expect(content.contains("[HKEY_CURRENT_USER\\Software\\Wine\\DllOverrides]"))
+        #expect(content.contains("\"mshtml\"=\"native,builtin\""))
+        #expect(content.contains("\"ole32\"=\"builtin\""))
+        #expect(content.contains("\"dciman32\"=\"native\""))
+        #expect(content.contains("\"*docbox.api\"=\"\""))
+        #expect(!content.contains("d3dcompiler_47"))         // not overridden
+        #expect(bottle.hasWineDefaults)
+        // Idempotent: a second call does nothing.
+        let runsBefore = fake.invocations.count
+        await bottle.applyWineDefaults(wine: URL(fileURLWithPath: "/w/wine64"))
+        #expect(fake.invocations.count == runsBefore)
     }
 
 }

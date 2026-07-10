@@ -310,8 +310,8 @@ public struct SteamBottle: Sendable {
 
     /// Install the native `d3dcompiler_47.dll` (HLSL shader compiler) for both ABIs (idempotent, no EULA).
     /// Extracts the DLL from Microsoft's own Windows-SDK cabinet files via Wine's builtin `expand` (no
-    /// cabextract dependency): 64-bit → `system32`, 32-bit → `syswow64`; then sets a native DLL override so
-    /// the extracted DLL wins over Wine's builtin. Best-effort per ABI.
+    /// cabextract dependency): 64-bit → `system32`, 32-bit → `syswow64`. No DLL override is set — matching
+    /// CrossOver's Steam bottle (the native file is present, no override). Best-effort per ABI.
     func installD3DCompiler47(wine: URL?) async throws {
         guard let wine else { throw BottleError.wineNotConfigured }
         if hasD3DCompiler47 { return }
@@ -343,8 +343,8 @@ public struct SteamBottle: Sendable {
             try? fileManager.moveItem(at: extracted, to: finalDLL)
             try? fileManager.removeItem(at: cab)
         }
-        // Native override so the extracted DLL beats Wine's builtin d3dcompiler_47.
-        try? await setDllOverride(wine: wine, dll: "d3dcompiler_47", value: "native")
+        // No DLL override — matching CrossOver's Steam bottle, which keeps the native d3dcompiler_47.dll in
+        // system32/syswow64 but sets no override (relies on the file + Wine's load order, same as Silo's Wine).
     }
 
     /// Marker file recording a completed MSVC-redist install for `x86` (else x64).
@@ -390,14 +390,37 @@ public struct SteamBottle: Sendable {
         }
     }
 
-    /// Write a Wine DLL override (`HKCU\Software\Wine\DllOverrides\<dll> = <value>`) via `wine reg add`.
-    private func setDllOverride(wine: URL, dll: String, value: String) async throws {
-        _ = try await runner.run(
-            executable: wine,
-            arguments: ["reg", "add", "HKCU\\Software\\Wine\\DllOverrides",
-                        "/v", dll, "/t", "REG_SZ", "/d", value, "/f"],
+    // MARK: - CrossOver-parity Wine defaults (DllOverrides)
+
+    /// Silo marker recording that CrossOver's default DLL overrides were applied to the bottle.
+    private var wineDefaultsMarker: URL { markerDir.appendingPathComponent("wine-defaults") }
+
+    /// Whether CrossOver's default `DllOverrides` set has been applied to the bottle.
+    var hasWineDefaults: Bool { fileManager.fileExists(atPath: wineDefaultsMarker.path) }
+
+    /// Apply CrossOver's default `HKCU\Software\Wine\DllOverrides` set to the bottle (idempotent, best-effort)
+    /// so its Libraries configuration matches a CrossOver bottle and games behave the same. Emits a single
+    /// `.reg` file and imports it with ONE `wine regedit /S` call (far cheaper than ~58 `reg add`s). Marks
+    /// success so it's a no-op on re-run.
+    func applyWineDefaults(wine: URL?) async {
+        guard let wine, !hasWineDefaults else { return }
+        let driveC = prefixDir.appendingPathComponent("drive_c")
+        try? fileManager.createDirectory(at: driveC, withIntermediateDirectories: true)
+        // REGEDIT4 (ANSI) — the override names/modes contain no backslashes, so no escaping is needed.
+        var reg = "REGEDIT4\r\n\r\n[HKEY_CURRENT_USER\\Software\\Wine\\DllOverrides]\r\n"
+        for (name, mode) in Silo.crossOverDllOverrides {
+            reg += "\"\(name)\"=\"\(mode)\"\r\n"
+        }
+        let regFile = driveC.appendingPathComponent("silo-overrides.reg")
+        guard (try? reg.write(to: regFile, atomically: true, encoding: .utf8)) != nil else { return }
+        let result = try? await runner.run(
+            executable: wine, arguments: ["regedit", "/S", "C:\\silo-overrides.reg"],
             environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
             currentDirectory: prefixDir)
+        try? fileManager.removeItem(at: regFile)
+        guard result?.succeeded == true else { return }
+        try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
+        fileManager.createFile(atPath: wineDefaultsMarker.path, contents: Data())
     }
 
     // MARK: - Ordered component provisioning

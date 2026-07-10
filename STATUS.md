@@ -3,6 +3,28 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔧 Phase 2 — CrossOver-parity Wine config for the Steam bottle (2026-07-10, `main`; `swift build` clean +
+  zero warnings, 364 tests green serial + parallel).** Inspected the REAL CrossOver Steam bottle
+  (`~/Library/Application Support/CrossOver/Bottles/Steam`): its `user.reg` carries **58**
+  `HKCU\Software\Wine\DllOverrides` (the classic Wine default template) that a vanilla `wineboot` prefix lacks.
+  Since Silo runs the SAME CrossOver-FOSS Wine, replicating them reproduces CrossOver's behavior.
+  - New `Silo.crossOverDllOverrides` (`Sources/SiloKit/Steam/CrossOverDefaults.swift` — the exact 58 from
+    CrossOver's `user.reg`) + `SteamBottle.applyWineDefaults`: builds a REGEDIT4 `.reg` and imports it with ONE
+    `wine regedit /S` (cheaper than 58 `reg add`s), idempotent (`.silo-installed/wine-defaults` marker). Called
+    in `setUp` right after `provision` ("Configuring the bottle…").
+  - **Removed Silo's `d3dcompiler_47=native` override** (kept the DLL file) — the CrossOver bottle has the real
+    native DLLs (d3dcompiler_47 4.3 MB, msvcp140 643 KB, vcruntime140 179 KB) present with **NO** overrides.
+    Dropped the now-dead `setDllOverride` helper.
+  - **MSVC unchanged** — Phase 1 already installs the redist without overrides = matches CrossOver. The bottle
+    proved the redist places the real `msvcp140.dll` on this Wine (bug-57518 doesn't bite cx-26.x), so the
+    winetricks force-native workaround (+ risky CAB-extract) is **not** needed.
+  - **Applications tab documented** (in `CrossOverDefaults.swift`) for a later phase: `cxcplinfo`/`cxmklnk`/
+    `cxwget`/`winewrapper` are CrossOver-proprietary (absent from Silo's Wine); only `winemenubuilder` is upstream.
+  - Tests (+2): a parity pin (Silo's list == CrossOver's 58, and NOT msvcp140/vcruntime140/d3dcompiler_47/
+    concrt140), the `regedit` import + idempotency, `installD3DCompiler47` now asserts NO override.
+  - **On-device:** after a fresh setUp, diff Silo's `SteamBottle/user.reg` `[…\DllOverrides]` vs CrossOver's
+    (should match modulo whitespace); confirm winecfg → Libraries matches, `d3dcompiler_47` no longer appears,
+    and `system32/msvcp140.dll` is the real 643 KB file.
 - **📦 Phase 1 — CrossOver-parity bottle provisioning + 2-step onboarding (2026-07-10, `main`; `swift build`
   clean + zero warnings, `swift test` green serial + parallel, 360 tests).** The Steam bottle now installs the
   same component set CrossOver does, in a fixed order, with the license-bearing pieces run as **user-guided**
