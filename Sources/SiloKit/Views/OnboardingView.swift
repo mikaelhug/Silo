@@ -15,35 +15,30 @@ struct OnboardingView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "wineglass").font(.system(size: 46)).foregroundStyle(.tint)
                     Text("Welcome to Silo").font(.largeTitle.bold())
-                    Text("Three quick steps to get playing.").foregroundStyle(.secondary)
+                    Text("Two quick steps to get playing.").foregroundStyle(.secondary)
                 }
 
                 VStack(spacing: 12) {
                     StepRow(
-                        number: 1, title: "Install Wine",
-                        subtitle: "~250 MB download.",
-                        done: env.wineReady, busy: runtime.isInstalling,
-                        actionLabel: "Install",
-                        action: { Task { await env.runtime.installLatest() } })
-
-                    StepRow(
-                        number: 2, title: "Import Game Porting Toolkit",
+                        number: 1, title: "Import Game Porting Toolkit",
                         subtitle: "Apple's GPTK .dmg.",
                         done: env.gptkReady, busy: gptk.isImporting,
                         actionLabel: "Choose .dmg",
                         action: { if let dmg = chooseDiskImage() { Task { await env.gptkManager.importGPTK(from: dmg) } } })
 
                     StepRow(
-                        number: 3, title: "Set up the Steam bottle",
-                        subtitle: "Sign in once.",
-                        done: env.steamReady, busy: steam.busy, locked: !env.wineReady,
+                        number: 2, title: "Set up",
+                        subtitle: "Downloads Wine + Steam, then installs fonts, runtimes, and Steam. "
+                            + "You'll accept a license or two along the way.",
+                        done: env.steamReady, busy: env.setupBusy, locked: !env.gptkReady,
                         actionLabel: "Set up",
-                        action: { Task { await env.steamBottleVM.setUp() } })
+                        action: { Task { await env.runFullSetup() } })
                 }
                 .frame(maxWidth: 540)
 
                 let message = steam.status.isEmpty
-                    ? (runtime.statusMessage ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
+                    ? (runtime.statusMessage ?? env.dxmtRuntime.statusMessage
+                        ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
                 if let message {
                     Text(message).font(.callout).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).frame(maxWidth: 540)

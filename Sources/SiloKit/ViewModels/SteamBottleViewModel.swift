@@ -49,10 +49,11 @@ public final class SteamBottleViewModel {
     /// Download progress of the warm-up, 0…1 when Steam reports it (real % bar), else nil (indeterminate).
     public private(set) var warmUpFraction: Double?
 
-    /// Install Windows Steam into the bottle (if needed), then WARM IT UP — run Steam's first-run
-    /// self-update to completion during setup so the user's first real launch lands on the login screen
-    /// (instead of the "failed to load steamui.dll" → black-window → login three-launch dance). The
-    /// webhelper wrapper is applied AFTER the warm-up, when the CEF dir it wraps actually exists.
+    /// Provision the bottle CrossOver-style, in the fixed order: download Steam → create the bottle →
+    /// install the component set (Core Fonts, Asian fonts, d3dcompiler_47, MSVC x86/x64, msync, then the
+    /// user-guided Steam client) → force-quit any Steam the installer auto-launched → WARM UP the first-run
+    /// self-update → wrap the steamwebhelper. The license-bearing components (first Core Font, MSVC, Steam)
+    /// show a GUI the user clicks through; the warm-up then lands the first real launch on the login screen.
     public func setUp() async {
         guard !busy else { return }
         // Refuse if the bottles' (relocated) drive is unplugged — provisioning would otherwise create a
@@ -61,23 +62,29 @@ public final class SteamBottleViewModel {
             status = "Your bottles drive isn't connected. Reconnect it, then set up Steam."
             return
         }
+        guard let wine = wineBinary else { status = "Set up Wine first."; return }
         busy = true
         defer { busy = false }
         do {
-            status = "Installing Windows Steam into the bottle… (first time downloads SteamSetup)"
-            try await bottle.installSteam(wine: wineBinary)
-            // Fold Steam's first-run client download into setup. Best-effort — it never throws.
+            // Step 3: download the Steam installer up front so a network failure surfaces before booting.
+            status = "Downloading Steam…"
+            _ = try await bottle.downloadSteamInstaller()
+            // Step 4: create the bottle.
+            status = "Creating the Steam bottle…"
+            try await bottle.provision(wine: wine)
+            // Steps 5–11: the CrossOver-parity component set, in order (fonts → d3dcompiler → MSVC → Steam).
+            try await bottle.provisionComponents(wine: wine, onPhase: { [weak self] component in
+                self?.applyComponentPhase(component)
+            })
+            // The user-guided Steam installer may auto-launch Steam with no CEF wrapper/virtual-desktop env
+            // (→ black window) AND an untracked client. Kill whatever it spawned before the controlled warm-up.
+            await bottle.forceQuit(wine: wine)
+            // Fold Steam's first-run client download into setup (best-effort — never throws), then wrap the
+            // steamwebhelper against the now-settled CEF dir.
             warmingUp = true
             await session.warmUpUpdate { [weak self] phase in self?.applyWarmUp(phase) }
             warmingUp = false; warmUpFraction = nil
-            if let wine = wineBinary {
-                try? bottle.installWebHelperWrapper(wine: wine)
-                // Microsoft core fonts (Wine ships none) so the UI + games render text correctly.
-                if !bottle.hasCoreFonts {
-                    status = "Setting up Steam — installing fonts…"
-                    try? await bottle.installCoreFonts(wine: wine)
-                }
-            }
+            try? bottle.installWebHelperWrapper(wine: wine)
             // Report "ready" only if the client actually WARMED (steamui.dll + webhelper). A failed or
             // interrupted warm-up leaves just the bootstrapper and must not flip the onboarding gate.
             steamInstalled = bottle.isClientFullyDownloaded
@@ -89,6 +96,18 @@ public final class SteamBottleViewModel {
             warmingUp = false; warmUpFraction = nil
             status = "Setup failed: \(message(error))"
         }
+    }
+
+    /// User-facing status for a component-install phase. Pure + testable; user-guided steps ask the user to
+    /// accept the license (the install blocks on the GUI), the rest just narrate progress.
+    static func componentStatus(_ component: BottleComponent) -> String {
+        component.isUserGuided
+            ? "Accept the license for \(component.title), then setup continues…"
+            : "Setting up Steam — installing \(component.title)…"
+    }
+
+    private func applyComponentPhase(_ component: BottleComponent) {
+        status = Self.componentStatus(component)
     }
 
     /// Map a warm-up phase to the UI status text + progress fraction.

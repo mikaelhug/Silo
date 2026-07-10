@@ -64,42 +64,57 @@ struct SteamBottleViewModelTests {
         #expect(vm.canSetUp)
     }
 
-    @Test("setUp installs Steam into the bottle and reports success")
+    @Test("setUp provisions the bottle CrossOver-style and reports success (Steam user-guided)")
     func setUpSuccess() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, fake, paths) = make(tmp)
         FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("installer".utf8))
-        // Simulate the silent install + first-run warm-up producing a WARMED client (steamui.dll + webhelper)
-        // when SteamSetup runs — that's what setUp now keys "ready" on (C1).
+        // Pre-satisfy the non-Steam components so setUp only runs the Steam install (no ~360 MB font network).
+        paths.createComponentMarkers()
+        // Simulate the user-guided Steam install + warm-up producing a WARMED client (steamui.dll + webhelper).
         fake.onRun = { inv in
-            if inv.arguments.contains("/S") { paths.createWarmedSteamClient() }
+            if inv.arguments.first?.hasSuffix("SteamSetup.exe") == true { paths.createWarmedSteamClient() }
         }
         vm.updateWine(URL(fileURLWithPath: "/w/wine64"))
 
         await vm.setUp()
 
         #expect(fake.invocations.contains { $0.arguments == ["wineboot", "--init"] })
-        let install = try #require(fake.invocations.last { $0.arguments.last == "/S" })
-        #expect(install.arguments.last == "/S")
+        // Steam was installed USER-GUIDED (no /S — the interactive GUI).
+        let steamRun = try #require(fake.invocations.last { $0.arguments.first?.hasSuffix("SteamSetup.exe") == true })
+        #expect(!steamRun.arguments.contains("/S"))
+        // The black-window guard force-quit any Steam the installer auto-launched, before the warm-up.
+        #expect(fake.invocations.contains { $0.arguments.first == "taskkill" })
         #expect(vm.status.contains("Steam is ready"))
         #expect(vm.steamInstalled)
         #expect(!vm.busy)
     }
 
-    @Test("setUp surfaces a 'Setup failed' status when the silent install fails")
+    @Test("setUp surfaces a 'Setup failed' status when the Steam install fails")
     func setUpFailure() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let (vm, fake, _) = make(tmp)
+        let (vm, fake, paths) = make(tmp)
         FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("installer".utf8))
         vm.updateWine(URL(fileURLWithPath: "/w/wine64"))
+        paths.createComponentMarkers()   // skip the non-Steam components so the queued results map cleanly
         fake.queueResult(ProcessResult(exitCode: 0))   // wineboot --init succeeds
         fake.queueResult(ProcessResult(exitCode: 0))   // wineserver -k (settle the boot server)
-        fake.queueResult(ProcessResult(exitCode: 1))   // SteamSetup.exe /S fails → steamInstallFailed
+        fake.queueResult(ProcessResult(exitCode: 1))   // SteamSetup (user-guided) fails → steamInstallFailed
 
         await vm.setUp()
 
         #expect(vm.status.hasPrefix("Setup failed"))
         #expect(!vm.busy)
+    }
+
+    @Test("componentStatus asks the user to accept a license only for the user-guided components")
+    func componentStatusText() {
+        #expect(SteamBottleViewModel.componentStatus(.coreFonts).contains("Accept the license"))
+        #expect(SteamBottleViewModel.componentStatus(.vcRedistX86).contains("Accept the license"))
+        #expect(SteamBottleViewModel.componentStatus(.vcRedistX86).contains("Visual C++"))
+        #expect(SteamBottleViewModel.componentStatus(.steamClient).contains("Accept the license"))
+        #expect(!SteamBottleViewModel.componentStatus(.sourceHanSans).contains("Accept the license"))
+        #expect(SteamBottleViewModel.componentStatus(.sourceHanSans).contains("Asian Fonts"))
     }
 
     @Test("launchSteam runs the bottle's Steam with the CEF/software-GL flags + env and reports launch")

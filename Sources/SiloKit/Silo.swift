@@ -37,6 +37,34 @@ public enum Silo {
     public static let coreFontsBaseURL = URL(string: "https://downloads.sourceforge.net/corefonts/")!
     public static let coreFonts = ["andale32", "arial32", "arialb32", "comic32", "courie32", "georgi32",
                                    "impact32", "times32", "trebuc32", "verdan32", "webdings32"]
+    /// Winetricks' current corefonts mirror. SourceForge's `downloads.sourceforge.net` redirector is flaky,
+    /// so each font falls back to this GitHub raw mirror (byte-identical) when the primary download fails.
+    public static let coreFontsFallbackBaseURL = URL(string: "https://github.com/pushcx/corefonts/raw/master/")!
+
+    /// Adobe Source Han Sans — the open-source (SIL OFL 1.1) pan-CJK font family. Silo installs the four
+    /// per-language "Language-specific OTF" packs (Japanese / Korean / Simplified / Traditional Chinese) into
+    /// the Steam bottle so CJK games + Steam's UI render their glyphs. OFL is freely redistributable (no
+    /// EULA), so these are downloaded, unzipped, and their `.otf` files copied into `windows/Fonts` (Wine
+    /// registers dropped fonts automatically). ~90 MB each; pinned to the 2.004R release.
+    public static let sourceHanSansBaseURL =
+        URL(string: "https://github.com/adobe-fonts/source-han-sans/releases/download/2.004R/")!
+    public static let sourceHanSansPacks = ["SourceHanSansJ", "SourceHanSansK", "SourceHanSansSC", "SourceHanSansTC"]
+
+    /// Microsoft Visual C++ 2015–2022 Redistributable — the runtime many Steam games ship against. Installed
+    /// **user-guided** (the bootstrapper shows a license the user must accept), x86 then x64, via Microsoft's
+    /// permanent `aka.ms` URLs (they 302-redirect to `download.visualstudio.microsoft.com`; both https).
+    public static let vcRedistX86URL = URL(string: "https://aka.ms/vs/17/release/vc_redist.x86.exe")!
+    public static let vcRedistX64URL = URL(string: "https://aka.ms/vs/17/release/vc_redist.x64.exe")!
+
+    /// `d3dcompiler_47.dll` (the HLSL shader compiler many D3D games need) — extracted from Microsoft's own
+    /// Windows SDK cabinet files via Wine's builtin `expand` (no cabextract dependency), then set to a native
+    /// DLL override. The member is a GUID-like filename inside each single-purpose cabinet (per winetricks).
+    public static let d3dCompiler47X64CabURL = URL(string:
+        "https://download.microsoft.com/download/B/0/C/B0C80BA3-8AD6-4958-810B-6882485230B5/standalonesdk/Installers/61d57a7a82309cd161a854a6f4619e52.cab")!
+    public static let d3dCompiler47X64Member = "fil3585cb2ea5db13cc0838f8d06b5c9679"
+    public static let d3dCompiler47X86CabURL = URL(string:
+        "https://download.microsoft.com/download/B/0/C/B0C80BA3-8AD6-4958-810B-6882485230B5/standalonesdk/Installers/2630bae9681db6a9f6722366f47d055c.cab")!
+    public static let d3dCompiler47X86Member = "fila319f706acfa16d6707473ebf29bdc7f"
 
     /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.

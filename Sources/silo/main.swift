@@ -8,22 +8,21 @@ if CommandLine.arguments.contains("--smoke")
     || ProcessInfo.processInfo.environment["SILO_SMOKE"] == "1" {
     print("\(Silo.appName) \(Silo.version) — smoke ok")
 } else if CommandLine.arguments.contains("--setup-steam") {
-    // CLI harness (dev/on-device validation): run the Steam bottle's setUp — including the first-run
-    // warm-up self-update — against the real bottle, streaming progress.
-    print("Setting up the Steam bottle…")
+    // CLI harness (dev/on-device validation): run the whole guided setup — Wine + DXMT download, then the
+    // bottle's ordered component installs + first-run warm-up — against the real bottle, streaming progress.
+    print("Running Silo setup (Wine → DXMT → Steam bottle)…")
     let env = AppEnvironment()
     await env.bootstrap()
-    let vm = env.steamBottleVM
-    // Stream status changes while setUp runs (it drives `vm.status` through the warm-up phases).
-    let run = Task { @MainActor in await vm.setUp() }
-    try? await Task.sleep(for: .milliseconds(150))   // let setUp flip busy=true
+    let run = Task { @MainActor in await env.runFullSetup() }
+    try? await Task.sleep(for: .milliseconds(150))   // let it flip setupBusy=true
     var last = ""
-    while vm.busy {
-        if vm.status != last { print("• \(vm.status)"); last = vm.status }
+    while env.setupBusy {
+        let line = env.steamBottleVM.status
+        if line != last, !line.isEmpty { print("• \(line)"); last = line }
         try? await Task.sleep(for: .milliseconds(500))
     }
     await run.value
-    print("Final: \(vm.status)")
+    print("Final: \(env.steamBottleVM.status)")
 } else if let idx = CommandLine.arguments.firstIndex(of: "--import-gptk"),
           idx + 1 < CommandLine.arguments.count {
     // CLI: import GPTK from an Apple .dmg (same code path the GUI uses). Top-level await — no

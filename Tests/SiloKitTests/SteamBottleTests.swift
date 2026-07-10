@@ -225,40 +225,244 @@ struct SteamBottleTests {
         #expect(try String(contentsOf: cef2.appendingPathComponent("steamwebhelper_orig.exe"), encoding: .utf8) == "REAL2")
     }
 
-    @Test("installCoreFonts downloads each font, extracts its .ttf via IExpress, and copies it into Fonts")
+    @Test("installCoreFonts runs the FIRST font user-guided (no /Q) and the rest silently, into Fonts")
     func installCoreFonts() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
         let (bottle, fake, paths, _) = make(tmp, session: session)
-        // Stub every corefont installer download.
         for font in Silo.coreFonts {
             FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString,
                                  data: Data("EXE".utf8), session: session)
         }
         let fontsDir = paths.steamBottle.appendingPathComponent("drive_c/windows/Fonts")
         let extractDir = paths.steamBottle.appendingPathComponent("drive_c/silo-fonts")
-        // Simulate the IExpress extract: drop a .ttf named after the font (Arial.TTF for arial32, the marker).
+        let firstFont = Silo.coreFonts[0]   // andale32 — user-guided (EULA), installs itself into Fonts
+        // Simulate the installers: the FIRST font runs BARE (no /C) → installs its .ttf straight into Fonts;
+        // the rest run `/C` extract-only → drop the .ttf into the extract dir for Silo to copy.
         fake.onRun = { inv in
-            guard inv.arguments.contains("/C"), let exeArg = inv.arguments.first(where: { $0.hasSuffix(".exe") })
-            else { return }
-            // The exe arg is a Windows path (C:\arial32.exe) — split on backslash, not `/`.
+            guard let exeArg = inv.arguments.first(where: { $0.hasSuffix(".exe") }) else { return }
             let font = (exeArg.split(separator: "\\").last.map(String.init) ?? exeArg)
                 .replacingOccurrences(of: ".exe", with: "")
-            try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
-            let ttf = font == "arial32" ? "Arial.TTF" : "\(font).TTF"
-            FileManager.default.createFile(atPath: extractDir.appendingPathComponent(ttf).path, contents: Data("TTF".utf8))
+            if inv.arguments.contains("/C") {
+                try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+                let ttf = font == "arial32" ? "Arial.TTF" : "\(font).TTF"
+                FileManager.default.createFile(atPath: extractDir.appendingPathComponent(ttf).path, contents: Data("TTF".utf8))
+            } else if font == firstFont {
+                try? FileManager.default.createDirectory(at: fontsDir, withIntermediateDirectories: true)
+                FileManager.default.createFile(atPath: fontsDir.appendingPathComponent("\(font).TTF").path, contents: Data("TTF".utf8))
+            }
         }
 
         try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
 
+        // First font ran USER-GUIDED (bare — no /Q); every subsequent font ran silent (/Q).
+        let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
+        #expect(fontRuns.count == Silo.coreFonts.count)
+        #expect(fontRuns.first?.arguments.contains("/Q") == false)                  // first: EULA shown
+        #expect(fontRuns.dropFirst().allSatisfy { $0.arguments.contains("/Q") })    // rest: silent
         let installed = Set((try? FileManager.default.contentsOfDirectory(atPath: fontsDir.path)) ?? [])
         #expect(installed.contains("Arial.TTF"))                 // marker font landed in Fonts
         #expect(installed.count == Silo.coreFonts.count)         // one .ttf per installer
-        #expect(bottle.hasCoreFonts)                             // idempotency marker now true
-        // Idempotent: a second run does no downloads (the marker short-circuits it).
-        let extractRunsBefore = fake.invocations.count
+        #expect(bottle.hasCoreFonts)
+        // Idempotent: a second run does no downloads/runs (the marker short-circuits it).
+        let runsBefore = fake.invocations.count
         try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
-        #expect(fake.invocations.count == extractRunsBefore)
+        #expect(fake.invocations.count == runsBefore)
+    }
+
+    // MARK: - CrossOver-parity components
+
+    @Test("installSourceHanSans downloads the 4 packs, extracts each, copies .otf into Fonts, per-pack markers")
+    func installSourceHanSans() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        for pack in Silo.sourceHanSansPacks {
+            FakeURLProtocol.stub(Silo.sourceHanSansBaseURL.appendingPathComponent("\(pack).zip").absoluteString,
+                                 data: Data("ZIP".utf8), session: session)
+        }
+        let fontsDir = paths.steamBottle.appendingPathComponent("drive_c/windows/Fonts")
+        let extractDir = paths.steamBottle.appendingPathComponent("drive_c/silo-shs")
+        // Simulate bsdtar: each `tar -xf <pack>.zip` drops a Regular .otf into the extract dir.
+        fake.onRun = { inv in
+            guard inv.executable.path == "/usr/bin/tar",
+                  let zipArg = inv.arguments.first(where: { $0.hasSuffix(".zip") }) else { return }
+            let pack = (zipArg as NSString).lastPathComponent.replacingOccurrences(of: ".zip", with: "")
+            try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: extractDir.appendingPathComponent("\(pack)-Regular.otf").path, contents: Data("OTF".utf8))
+        }
+
+        try await bottle.installSourceHanSans()
+
+        let tarRuns = fake.invocations.filter { $0.executable.path == "/usr/bin/tar" && $0.arguments.first == "-xf" }
+        #expect(tarRuns.count == Silo.sourceHanSansPacks.count)   // one extract per pack
+        let installed = Set((try? FileManager.default.contentsOfDirectory(atPath: fontsDir.path)) ?? [])
+        for pack in Silo.sourceHanSansPacks { #expect(installed.contains("\(pack)-Regular.otf")) }
+        #expect(bottle.hasSourceHanSans)
+        // Idempotent: second run does nothing.
+        let runsBefore = fake.invocations.count
+        try await bottle.installSourceHanSans()
+        #expect(fake.invocations.count == runsBefore)
+    }
+
+    @Test("installSourceHanSans resumes — a pack with an existing marker is skipped (no re-download)")
+    func sourceHanSansResumes() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        // Pre-mark the first pack as already installed.
+        let markers = paths.steamBottle.appendingPathComponent(".silo-fonts-installed")
+        try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: markers.appendingPathComponent(Silo.sourceHanSansPacks[0]).path, contents: Data())
+        for pack in Silo.sourceHanSansPacks.dropFirst() {
+            FakeURLProtocol.stub(Silo.sourceHanSansBaseURL.appendingPathComponent("\(pack).zip").absoluteString,
+                                 data: Data("ZIP".utf8), session: session)
+        }
+        fake.onRun = { _ in }
+
+        try await bottle.installSourceHanSans()
+
+        // Only the 3 remaining packs were extracted (the marked one was skipped).
+        let tarRuns = fake.invocations.filter { $0.executable.path == "/usr/bin/tar" }
+        #expect(tarRuns.count == Silo.sourceHanSansPacks.count - 1)
+    }
+
+    @Test("installD3DCompiler47 extracts both ABIs via `wine expand` and sets a native override")
+    func installD3DCompiler47() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        FakeURLProtocol.stub(Silo.d3dCompiler47X64CabURL.absoluteString, data: Data("CAB64".utf8), session: session)
+        FakeURLProtocol.stub(Silo.d3dCompiler47X86CabURL.absoluteString, data: Data("CAB32".utf8), session: session)
+        let sys32 = paths.steamBottle.appendingPathComponent("drive_c/windows/system32")
+        let syswow = paths.steamBottle.appendingPathComponent("drive_c/windows/syswow64")
+        // Simulate `wine expand <cab> -F:<member> C:\windows\<dir>`: drop the member-named file into the dir.
+        fake.onRun = { inv in
+            guard inv.arguments.first == "expand",
+                  let memberArg = inv.arguments.first(where: { $0.hasPrefix("-F:") }) else { return }
+            let member = String(memberArg.dropFirst(3))
+            let dir = inv.arguments.contains("C:\\windows\\system32") ? sys32 : syswow
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: dir.appendingPathComponent(member).path, contents: Data("DLL".utf8))
+        }
+
+        try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"))
+
+        // Both DLLs landed (renamed from the member id → canonical name).
+        #expect(FileManager.default.fileExists(atPath: sys32.appendingPathComponent("d3dcompiler_47.dll").path))
+        #expect(FileManager.default.fileExists(atPath: syswow.appendingPathComponent("d3dcompiler_47.dll").path))
+        #expect(bottle.hasD3DCompiler47)
+        // The expand runs carried the correct member ids + windows dest dirs.
+        let expands = fake.invocations.filter { $0.arguments.first == "expand" }
+        #expect(expands.contains { $0.arguments.contains("-F:\(Silo.d3dCompiler47X64Member)") && $0.arguments.contains("C:\\windows\\system32") })
+        #expect(expands.contains { $0.arguments.contains("-F:\(Silo.d3dCompiler47X86Member)") && $0.arguments.contains("C:\\windows\\syswow64") })
+        // A native DLL override was written.
+        #expect(fake.invocations.contains {
+            $0.arguments.first == "reg" && $0.arguments.contains("d3dcompiler_47") && $0.arguments.contains("native")
+        })
+        // Idempotent.
+        let runsBefore = fake.invocations.count
+        try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"))
+        #expect(fake.invocations.count == runsBefore)
+    }
+
+    @Test("installVCRedist runs the redist USER-GUIDED (no /quiet) and marks it via msvcp140.dll")
+    func installVCRedist() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        FakeURLProtocol.stub(Silo.vcRedistX64URL.absoluteString, data: Data("EXE".utf8), session: session)
+        let sys32 = paths.steamBottle.appendingPathComponent("drive_c/windows/system32")
+        fake.onRun = { inv in
+            guard inv.arguments.first?.hasSuffix("vc_redist.x64.exe") == true else { return }
+            try? FileManager.default.createDirectory(at: sys32, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: sys32.appendingPathComponent("msvcp140.dll").path, contents: Data("DLL".utf8))
+        }
+
+        try await bottle.installVCRedist(x86: false, wine: URL(fileURLWithPath: "/w/wine64"))
+
+        let run = try #require(fake.invocations.last { $0.arguments.first?.hasSuffix("vc_redist.x64.exe") == true })
+        #expect(run.arguments.count == 1)                    // just the installer path — no /install /quiet
+        #expect(!run.arguments.contains("/quiet"))           // user-guided (license shown)
+        #expect(bottle.isVCRedistInstalled(x86: false))
+        // Idempotent.
+        let runsBefore = fake.invocations.count
+        try await bottle.installVCRedist(x86: false, wine: URL(fileURLWithPath: "/w/wine64"))
+        #expect(fake.invocations.count == runsBefore)
+    }
+
+    @Test("runSteamInstaller user-guided omits /S (the interactive GUI installer)")
+    func runSteamInstallerUserGuided() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, _, _) = make(tmp, session: session)
+        FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("installer".utf8), session: session)
+
+        try await bottle.runSteamInstaller(wine: URL(fileURLWithPath: "/w/wine64"), userGuided: true)
+
+        let run = try #require(fake.invocations.last { $0.arguments.first?.hasSuffix("SteamSetup.exe") == true })
+        #expect(!run.arguments.contains("/S"))               // user-guided — no silent flag
+    }
+
+    // MARK: - Ordered provisioning
+
+    @Test("provisionComponents installs the CrossOver set in the fixed order (msync skipped — a no-op)")
+    func provisionComponentsOrder() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, _, _, _) = make(tmp, session: session)
+        // Stub every component's download so each install can proceed (success is irrelevant to ordering —
+        // the phase fires BEFORE each install).
+        for font in Silo.coreFonts {
+            FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString, data: Data("X".utf8), session: session)
+        }
+        for pack in Silo.sourceHanSansPacks {
+            FakeURLProtocol.stub(Silo.sourceHanSansBaseURL.appendingPathComponent("\(pack).zip").absoluteString, data: Data("X".utf8), session: session)
+        }
+        FakeURLProtocol.stub(Silo.d3dCompiler47X64CabURL.absoluteString, data: Data("X".utf8), session: session)
+        FakeURLProtocol.stub(Silo.d3dCompiler47X86CabURL.absoluteString, data: Data("X".utf8), session: session)
+        FakeURLProtocol.stub(Silo.vcRedistX86URL.absoluteString, data: Data("X".utf8), session: session)
+        FakeURLProtocol.stub(Silo.vcRedistX64URL.absoluteString, data: Data("X".utf8), session: session)
+        FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("X".utf8), session: session)
+
+        let phases = LockedBox<[BottleComponent]>([])
+        try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64")) { component in
+            phases.set(phases.value + [component])
+        }
+
+        // msync is always satisfied (launch-time env var) → skipped, never a phase, zero process work.
+        #expect(phases.value == [.coreFonts, .sourceHanSans, .d3dcompiler47, .vcRedistX86, .vcRedistX64, .steamClient])
+    }
+
+    @Test("provisionComponents skips already-satisfied components")
+    func provisionComponentsSkipsSatisfied() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, _, paths, _) = make(tmp, session: session)
+        // Pre-satisfy coreFonts (Arial.TTF) + steamClient (steam.exe); leave the rest unsatisfied.
+        let fonts = paths.steamBottle.appendingPathComponent("drive_c/windows/Fonts")
+        try FileManager.default.createDirectory(at: fonts, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: fonts.appendingPathComponent("Arial.TTF").path, contents: Data())
+        try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        // Stub the remaining components so they can proceed.
+        for pack in Silo.sourceHanSansPacks {
+            FakeURLProtocol.stub(Silo.sourceHanSansBaseURL.appendingPathComponent("\(pack).zip").absoluteString, data: Data("X".utf8), session: session)
+        }
+        FakeURLProtocol.stub(Silo.d3dCompiler47X64CabURL.absoluteString, data: Data("X".utf8), session: session)
+        FakeURLProtocol.stub(Silo.d3dCompiler47X86CabURL.absoluteString, data: Data("X".utf8), session: session)
+        FakeURLProtocol.stub(Silo.vcRedistX86URL.absoluteString, data: Data("X".utf8), session: session)
+        FakeURLProtocol.stub(Silo.vcRedistX64URL.absoluteString, data: Data("X".utf8), session: session)
+
+        let phases = LockedBox<[BottleComponent]>([])
+        try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64")) { component in
+            phases.set(phases.value + [component])
+        }
+
+        #expect(!phases.value.contains(.coreFonts))    // Arial.TTF present → skipped
+        #expect(!phases.value.contains(.steamClient))  // steam.exe present → skipped
+        #expect(phases.value.contains(.sourceHanSans)) // not installed → fired
+        #expect(phases.value.contains(.vcRedistX86))
     }
 
 }

@@ -219,6 +219,40 @@ public final class AppEnvironment {
     /// graphics backend for manual (non-Steam) games.
     public var dxmtReady: Bool { backendSettings.config.dxmtLibDirPath != nil }
 
+    // MARK: - Guided setup (the onboarding "Set up" chain)
+
+    /// True while any part of the guided setup is running (a Wine/DXMT runtime download, or the Steam-bottle
+    /// setUp) — drives the onboarding "Set up" step's spinner.
+    public var setupBusy: Bool {
+        runtime.isInstalling || dxmtRuntime.isInstalling || steamBottleVM.busy
+    }
+
+    /// The full ordered onboarding setup, chained from a single "Set up" click: download the latest Wine
+    /// runtime (if missing) → download the latest DXMT runtime (if missing) → set up the Steam bottle
+    /// (download Steam → create the bottle → install the CrossOver-parity component set, user-guided where a
+    /// license is shown → warm up the client). GPTK is imported separately (its own onboarding step).
+    public func runFullSetup() async {
+        // 1. Wine — then wait for the new default to persist AND reach the bottle VM. `installLatest` applies
+        //    the default via `onDefaultChanged` (a Task), so `setUp` could otherwise read a nil wine binary.
+        if !wineReady {
+            await runtime.installLatest()
+            await waitFor { self.wineReady && self.steamBottleVM.canSetUp }
+        }
+        // 2. DXMT runtime (best-effort — readies the future auto-backend; not a prerequisite for the bottle).
+        //    Matched to the configured wine, so it must run AFTER the wine default is applied (step 1's wait).
+        if !dxmtReady {
+            await dxmtRuntime.installLatest()
+        }
+        // 3. The Steam bottle: download → create → components → user-guided Steam → warm-up + wrap.
+        await steamBottleVM.setUp()
+    }
+
+    /// Bounded wait for a main-actor condition to hold (e.g. an async config-persist `Task` fired by a
+    /// runtime-default change to land). Best-effort — returns after ~5s regardless.
+    private func waitFor(_ condition: () -> Bool) async {
+        for _ in 0..<250 where !condition() { try? await Task.sleep(for: .milliseconds(20)) }
+    }
+
     // MARK: - Steam-bottle Wine tools (Settings → General)
 
     /// Last result of a bottle-tool action (Retina toggle / winecfg / regedit), shown in Settings.

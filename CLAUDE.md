@@ -85,6 +85,19 @@ Per game (`SteamPresenceStrategy`, default `.steamAppIDFile`):
 features ("no online" = dealbreaker), so `.emulatorStub` was dropped. Constraint #7 still stands — never
 bundle/auto-download an emulator.
 
+## Steam-bottle setup (CrossOver-parity, Phase 1 — 2026-07-10)
+Onboarding is **2 steps**: (1) import GPTK `.dmg`, (2) **"Set up"** → `AppEnvironment.runFullSetup()` chains
+download Wine → download DXMT runtime → download Steam → `wineboot` → the ordered **component set** → warm-up.
+The component set + order is `BottleComponent.allCases` (single source of truth), installed by
+`SteamBottle.provisionComponents(wine:onPhase:)` (each component has an `isSatisfied` predicate → skipped when
+present, so setup is resumable/idempotent): **Core Fonts** (first font user-guided for its EULA, rest silent)
+→ **Source Han Sans** (4 CJK packs, OFL, file-copy) → **d3dcompiler_47** (both ABIs via `wine expand` of the
+MS-SDK CABs, native override) → **MSVC redist x86 → x64** (user-guided) → **msync** (no-op — `WINEMSYNC=1` is
+launch-time env) → **Steam** (user-guided, no `/S`). License-bearing installers run via `ProcessRunning.run`
+(blocks until the user closes the window). New download URLs live in `Silo.swift` (no `versions.env` entry, per
+the corefonts precedent). On-device-unverified risks (see STATUS): `wine expand` member extraction, the
+user-guided SteamSetup black-window/auto-launch (mitigated by `forceQuit` before warm-up).
+
 ## Concurrency model (apply consistently)
 - **Pure & synchronous** (trivially `Sendable`): `ACFTokenizer`, `KeyValuesParser`, `KVNode`,
   decoders, `LaunchPlan` + `makePlan`, `BackendResolver`, `RuntimeRelease` decoding. Keep these

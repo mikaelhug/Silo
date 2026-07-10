@@ -3,6 +3,46 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **📦 Phase 1 — CrossOver-parity bottle provisioning + 2-step onboarding (2026-07-10, `main`; `swift build`
+  clean + zero warnings, `swift test` green serial + parallel, 360 tests).** The Steam bottle now installs the
+  same component set CrossOver does, in a fixed order, with the license-bearing pieces run as **user-guided**
+  GUI installers (`ProcessRunning.run` blocks until the user closes the window). Onboarding collapses from 3
+  steps to **2**: (1) import GPTK `.dmg`, (2) **"Set up"** → `AppEnvironment.runFullSetup()` chains it all.
+  - **Ordered component model.** `BottleComponent` enum (`allCases` = the single source of truth for order) +
+    per-component `isSatisfied`/`install` on `SteamBottle`, driven by `provisionComponents(wine:onPhase:)` —
+    satisfied components are skipped (resumable/idempotent), best-effort per component except the terminal
+    Steam install. Order: **Core Fonts → Source Han Sans → d3dcompiler_47 → MSVC x86 → MSVC x64 → msync →
+    Steam**. `SteamBottleViewModel.setUp()` now: download Steam → `wineboot` → `provisionComponents` →
+    `forceQuit` (black-window guard) → warm-up → webhelper wrap.
+  - **Core Fonts** (`installCoreFonts` reworked): installed in the FIXED `Silo.coreFonts` order; the FIRST
+    font runs its installer **bare** (shows the Microsoft EULA, blocks), the rest extract silently (`/T /C /Q`)
+    — "user-guided initially then auto." Added a GitHub-mirror fallback URL (SourceForge is flaky).
+  - **Source Han Sans** (new `installSourceHanSans`): all **4** language packs (J/K/SC/TC, ~360 MB, OFL, no
+    prompt) — download → bsdtar extract → copy `.otf` into `windows/Fonts`; **per-pack markers** make the big
+    download resumable.
+  - **d3dcompiler_47** (new `installD3DCompiler47`): both ABIs, extracted from Microsoft's Windows-SDK CABs via
+    Wine's builtin **`wine expand`** (no cabextract), 64-bit→`system32` / 32-bit→`syswow64`, then a native DLL
+    override. **⚠️ R2 (highest on-device risk):** whether `wine expand -F:<member>` pulls the named member on
+    a real Mac — fallback is re-hosting the two redistributable DLLs as Silo release assets.
+  - **MSVC redist** (new `installVCRedist`): x86 then x64, **user-guided** (no `/quiet` → license shown);
+    marker `msvcp140.dll`. **msync** is a no-op (env-only, always satisfied → skipped).
+  - **Steam** install is now **user-guided** (`runSteamInstaller(userGuided:)` drops `/S`); `installSteam`
+    (silent) kept for the CLI/tests. `downloadSteamInstaller` is a separate early step (fails fast on network;
+    now creates the prefix since it runs before `wineboot`).
+  - **Orchestrator** `AppEnvironment.runFullSetup()`: download Wine (if `!wineReady`, then **await** the
+    default-persist so the DXMT match / setUp don't read a nil wine binary — R7) → download DXMT (if
+    `!dxmtReady`) → `steamBottleVM.setUp()`. `setupBusy` drives the onboarding spinner. `OnboardingView` → 2
+    `StepRow`s; `--setup-steam` CLI drives the whole chain.
+  - **New constants** in `Silo.swift` (no `versions.env` change): corefonts mirror, Source Han Sans base +
+    packs, MSVC `aka.ms` URLs, d3dcompiler CAB URLs + member ids.
+  - **Tests (+9):** per-component (EULA-first fonts, 4-pack SHS + resume, `wine expand` d3dcompiler + override,
+    user-guided MSVC no-`/quiet`, user-guided Steam no-`/S`), the ordered-driver sequence + skip-satisfied, the
+    reworked `setUp` (user-guided Steam + `forceQuit` before warm-up), the pure `componentStatus` mapping, and
+    `runFullSetup` skip-when-ready delegation. `createComponentMarkers` test helper added.
+  - **Pending on-device validation (a real Mac + Wine/GPTK; not gating the commit):** R1 SteamSetup
+    auto-launch black-window (forceQuit mitigation); **R2 `wine expand` member extraction**; R3 MSVC bug-57518
+    (manual `msvcp140.dll`); R4 first-corefont bare EULA under Wine; R5 exact aka.ms redirect / SHS asset +
+    OTF names; R6 MSVC DLL-override set.
 - **🧹 Phase 0 — removed the DXMT Steam bottle; collapsed to a SINGLE "Steam" bottle (2026-07-10, `main`;
   `swift build` clean + zero warnings, `swift test` green serial + parallel, 351 tests).** First of a
   multi-phase restructure. The dual-Steam-bottle topology (a GPTK `SteamBottle` + a `SteamBottle-DXMT`, each
