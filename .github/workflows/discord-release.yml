@@ -1,0 +1,46 @@
+name: Announce release on Discord
+
+# Post to Discord whenever a GitHub Release is published (by release.yml on a v* tag, or by hand).
+# Decoupled from the build: runs on cheap ubuntu-latest, not the 30-min macos-26 release job.
+#
+# The webhook lives in the DISCORD_WEBHOOK repo secret (Settings → Secrets → Actions) — never in
+# this file, since a webhook URL is itself a credential and this repo is public. If the secret is
+# unset the step is a silent no-op, so forks/CI without it don't fail.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          [ -n "$DISCORD_WEBHOOK" ] || { echo "DISCORD_WEBHOOK unset — skipping."; exit 0; }
+
+          # Build the payload entirely in jq: --arg JSON-encodes every field (quotes/backticks/
+          # newlines are safe), and the truncation uses jq's codepoint-based length/slicing, so a
+          # long body can't be split mid-UTF-8 into bytes that break the JSON. Discord caps embed
+          # descriptions at 4096 chars — truncate at 3800 and link out to the full notes.
+          payload=$(jq -n \
+            --arg title "🚀 ${RELEASE_NAME:-$RELEASE_TAG}" \
+            --arg url "$RELEASE_URL" \
+            --arg body "$RELEASE_BODY" \
+            '
+            ( if ($body | length) > 3800
+              then ($body[0:3800] + "\n\n…[full release notes](" + $url + ")")
+              elif ($body | length) > 0 then $body
+              else "[View the release](" + $url + ")" end ) as $desc
+            | { username: "Silo Releases",
+                embeds: [ { title: $title, url: $url, description: $desc, color: 5793266 } ] }')
+
+          curl -sf -H 'Content-Type: application/json' -d "$payload" "$DISCORD_WEBHOOK"
