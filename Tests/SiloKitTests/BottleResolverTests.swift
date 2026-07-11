@@ -56,6 +56,26 @@ struct BottleResolverTests {
         #expect(try String(contentsOf: overlaid, encoding: .utf8) == "GPTK-PE")
     }
 
+    @Test("Steam with a DXMT backend resolves the SAME Steam prefix on the DXMT variant runtime")
+    func steamDXMT() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (config, paths) = try fixtures(tmp)
+        let ctx = try BottleResolver(paths: paths).steam(backend: .dxmt, config: config)
+
+        #expect(ctx.graphics == .dxmt)
+        #expect(ctx.prefix == paths.steamBottle)                    // the shared Steam prefix, NOT a manual bottle
+        #expect(ctx.wineBinary.path.contains("/wine-dxmt/bin/wine64"))   // the DXMT variant clone
+    }
+
+    @Test("Steam with an unconfigured DXMT backend refuses — never mis-routes onto the base runtime")
+    func steamDXMTNotConfigured() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (config, paths) = try fixtures(tmp, dxmt: false)   // wine + GPTK only
+        #expect(throws: BottleResolver.ResolveError.backendNotConfigured(.dxmt)) {
+            try BottleResolver(paths: paths).steam(backend: .dxmt, config: config)
+        }
+    }
+
     // MARK: - Manual routing (the DXMT graphics backend now runs only for manual games)
 
     @Test("Manual game resolves its OWN isolated bottle under its chosen backend's runtime")

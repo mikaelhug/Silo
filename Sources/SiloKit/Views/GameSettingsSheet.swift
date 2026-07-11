@@ -46,6 +46,19 @@ struct GameSettingsSheet: View {
             if let message = vm.errorMessage {
                 Section { Text(message).foregroundStyle(.red) }
             }
+            Section {
+                Picker("Graphics", selection: $vm.config.graphics) {
+                    ForEach(GraphicsChoice.allCases) { Text($0.displayName).tag($0) }
+                }
+            } header: {
+                Text("Graphics")
+            } footer: {
+                Text("Automatic picks the best translation layer per game — 32-bit games use DXMT, others "
+                     + "start on GPTK / D3DMetal and switch to DXMT if GPTK can't run them. Using DXMT "
+                     + "requires installing it in Settings → DXMT. Takes effect next launch.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             PerformanceFlagsSection(flags: $vm.config.envFlags)
             LaunchOptionsSection(text: $vm.config.launchOptionsString)
 

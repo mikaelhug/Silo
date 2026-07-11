@@ -3,6 +3,36 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🎛️ Automatic graphics backend (GPTK ⇄ DXMT) for the shared Steam bottle (2026-07-11, `main`; `swift build`
+  clean + zero warnings, 354 tests green).** Steam games are no longer GPTK-only: each has a per-game
+  `GraphicsChoice` (`.auto`/`.gptk`/`.dxmt`, default `.auto`) and GPTK + DXMT games co-reside in the ONE Steam
+  bottle. Investigation (local CrossOver 26 + web) confirmed CrossOver's "Automatic" is a proprietary online
+  per-title DB (default → wined3d, unusable) and that backend selection is per-process env — so Silo's
+  variant-runtime + per-launch-overrides design already matches, and Silo's Automatic is an **educated guess
+  from the game binary + reactive learning** instead of a title DB.
+  - **`BackendChooser`** (pure, `Sources/SiloKit/Launch/BackendChooser.swift`): `.auto` → 32-bit ⇒ DXMT (GPTK
+    is 64-bit-only), else GPTK (the proven default; also the only D3D12 path). `dxmtMightHelp` reads the PE
+    **import table** (`WindowsExecutable.importedDLLs`) to gate the reactive switch — fail-open (empty imports
+    / dynamic `LoadLibrary` loaders → try DXMT), suppressed only when confident DXMT can't help (imports D3D12,
+    or D3D9 with no D3D10/11).
+  - **Reactive learning**: when the `GraphicsFallbackMonitor` detects "GPTK didn't engage" on an `.auto` game
+    and DXMT is installed + might help, `play` persists `.dxmt` for that game ("Silo will use DXMT next time").
+  - `GameConfig.graphics` (tolerant decode, `graphics` key — the legacy dual-bottle `backend` key stays
+    ignored); `BottleResolver.steam(backend:config:)` routes a DXMT Steam game onto the DXMT variant clone in
+    the SAME Steam prefix (unconfigured DXMT still throws `backendNotConfigured`); `play` picks the backend off
+    the chooser (32-bit-on-explicit-GPTK still refused, now steering to DXMT); a **Graphics** picker
+    (Automatic/GPTK/DXMT) added to the Steam game settings sheet. Fallback/refusal messages unified to steer to
+    DXMT (Steam + manual both have a per-game Graphics setting).
+  - Tests (+10): `BackendChooser` table + PE-import reader (synthetic PE32/PE32+ fixtures, fail-open);
+    `BottleResolver.steam(backend:.dxmt)` → clone runtime + Steam prefix (+ refusal); `play` auto-routes a
+    32-bit Steam game onto the DXMT clone in the shared prefix with winemetal seeded; reactive switch persists
+    `.dxmt`; `GameConfig` graphics codec.
+  - **On-device (Wine absent here):** (1) **co-residency** — with the bottle Steam up, launch a DXMT-routed
+    game and confirm it joins the SAME wineserver (one `server-*` socket under `/tmp/.wine-$(id -u)/` or
+    `$TMPDIR`), Steamworks connects, and the log shows DXMT's feature level; (2) a 32-bit Steam title (e.g.
+    Overcooked 2) end-to-end via Automatic → DXMT (needs the both-ABI DXMT release asset — confirm i386 is
+    published, else run `build-dxmt.yml`); (3) a known-good GPTK title unchanged; (4) a GPTK-failing DX11 title
+    flips itself to DXMT and works on the second launch.
 - **🚪 Phase 4 — quit leaves Steam + games running; PID-free bottle liveness (2026-07-10, `main`; `swift build`
   clean + zero warnings, 350 tests green).** Like CrossOver, Silo now LAUNCHES detached and never owns a
   launched process's lifecycle: quitting Silo no longer kills Steam or games, and there is no per-game Stop

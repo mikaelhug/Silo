@@ -234,17 +234,26 @@ public final class GameLibraryViewModel {
         if launchBlockedByBottles() { return }
         busyGames.insert(game.appID); defer { busyGames.remove(game.appID) }
         let config = await configStore.load().config(for: game.appID)
-        // A 32-bit game in the Steam bottle is a dead end — GPTK / D3DMetal is 64-bit-only, so it could only
-        // fall back to wined3d and fail. Refuse up front (before bringing Steam up).
-        if orchestrator.isBlocked32BitOnGPTK(app: game, config: config, graphics: .gptk) {
-            setStatus(Self.unsupported32BitMessage(name: game.name, isSteamGame: true, dxmtAvailable: false))
+        let cfg = backend
+        let dxmtConfigured = backend.libDir(for: .dxmt) != nil
+        // Pick the backend from the game's choice + its binary (PE read + install-dir scan off-main).
+        let (chosen, is32, dxmtMightHelp) = await Task.detached { [orchestrator] in
+            let exe = orchestrator.resolvedExecutable(app: game, config: config)
+            let is32 = exe.map { WindowsExecutable.is32Bit($0) } ?? false
+            let mightHelp = exe.map { BackendChooser.dxmtMightHelp(exe: $0) } ?? true
+            return (BackendChooser.choose(config.graphics, exe: exe), is32, mightHelp)
+        }.value
+        // A 32-bit game under GPTK is a dead end (Apple ships no i386 D3DMetal) — only reachable via an
+        // EXPLICIT GPTK choice (Automatic routes 32-bit to DXMT). Refuse up front with a DXMT steer.
+        if chosen == .gptk, is32 {
+            setStatus(Self.unsupported32BitMessage(name: game.name, dxmtAvailable: dxmtConfigured))
             return
         }
         do {
-            // Resolve the bottle prefix + prepared runtime (off-main).
-            let cfg = backend
+            // Resolve the bottle prefix + prepared runtime for the chosen backend (off-main). An unconfigured
+            // DXMT throws here (before Steam is brought up), surfaced via `resolveMessage`.
             let context = try await Task.detached { [paths] in
-                try BottleResolver(paths: paths).steam(config: cfg)
+                try BottleResolver(paths: paths).steam(backend: chosen, config: cfg)
             }.value
             // Steamworks IPC is prefix-scoped: the client must be up + logged in first. If it can't start,
             // surface why rather than launching against a dead Steam (which fails SteamAPI_Init silently).
@@ -254,7 +263,7 @@ public final class GameLibraryViewModel {
                 return
             }
             try await orchestrator.launchInBottle(
-                app: game, config: config, backend: backend, graphics: .gptk,
+                app: game, config: config, backend: backend, graphics: chosen,
                 wine: context.wineBinary, prefix: context.prefix,
                 logURL: paths.log(forAppID: game.appID),
                 dock: .init(name: game.name, folder: "app-\(game.appID)", containerDir: paths.dockAppsDir))
@@ -266,10 +275,11 @@ public final class GameLibraryViewModel {
                 setStatus("Launched \(game.name), but couldn't save its play date: "
                     + (error as NSError).localizedDescription)
             }
-            // Last, so a detected fallback (which usually arrives a beat later as the log is written, but
-            // may already be present) overrides the "Launched" status rather than being clobbered by it.
-            watchGraphics(gameID(game), log: paths.log(forAppID: game.appID),
-                          name: game.name, backend: .gptk)
+            // Automatic learns: an AUTO game that GPTK can't drive (and DXMT plausibly could) gets remembered
+            // as DXMT for next time. Last, so a detected fallback overrides the "Launched" status.
+            let autoSwitch = config.graphics == .auto && chosen == .gptk && dxmtConfigured && dxmtMightHelp
+            watchGraphics(gameID(game), log: paths.log(forAppID: game.appID), name: game.name,
+                          backend: chosen, autoSwitchAppID: autoSwitch ? game.appID : nil)
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
         }
@@ -377,7 +387,7 @@ public final class GameLibraryViewModel {
         // its bottle and steer to switching this game's backend to DXMT.
         if game.backend == .gptk, WindowsExecutable.is32Bit(game.executablePath) {
             setStatus(Self.unsupported32BitMessage(
-                name: game.name, isSteamGame: false, dxmtAvailable: backend.libDir(for: .dxmt) != nil))
+                name: game.name, dxmtAvailable: backend.libDir(for: .dxmt) != nil))
             return
         }
         guard await ensureManualBottle(game.id) else { return }
@@ -468,57 +478,56 @@ public final class GameLibraryViewModel {
     /// backend⇔bottle rule forbids it), so the message tells the user where the game actually belongs
     /// rather than pretending graphics came up. `dxmtAvailable` is read INSIDE the fired closure so it
     /// reflects the state at detection time.
-    private func watchGraphics(_ id: GameID, log: URL, name: String, backend graphics: GraphicsBackend) {
-        let isSteamGame: Bool = if case .steam = id { true } else { false }
+    private func watchGraphics(_ id: GameID, log: URL, name: String, backend graphics: GraphicsBackend,
+                               autoSwitchAppID: Int? = nil) {
         monitors[id]?.stop()   // supersede any prior launch's monitor for the same game
         let monitor = GraphicsFallbackMonitor()
         monitors[id] = monitor
         monitor.start(url: log, backend: graphics) { [weak self] in
             guard let self else { return }
             self.monitors[id] = nil          // fires at most once, then drops itself
-            // Only manual games can steer to DXMT (a Steam game has no DXMT bottle to move to yet).
-            let dxmtAvailable = isSteamGame ? false : (self.backend.libDir(for: .dxmt) != nil)
+            // Automatic mode: a GPTK game that couldn't engage → remember DXMT so the next launch uses it,
+            // instead of asking the user to switch by hand.
+            if let appID = autoSwitchAppID {
+                Task { @MainActor in
+                    _ = try? await self.configStore.updateGame(appID: appID) { $0.graphics = .dxmt }
+                    self.setStatus("\(name): GPTK / D3DMetal couldn't run this game — Silo will use DXMT "
+                        + "the next time you launch it.")
+                }
+                return
+            }
+            let dxmtAvailable = self.backend.libDir(for: .dxmt) != nil
             self.setStatus(Self.graphicsFallbackMessage(
-                name: name, backend: graphics, isSteamGame: isSteamGame, dxmtAvailable: dxmtAvailable))
+                name: name, backend: graphics, dxmtAvailable: dxmtAvailable))
         }
     }
 
-    /// The user-facing message when a backend didn't engage. Pure + table-testable; backend- and
-    /// kind-aware. Never claims a working "fallback" and never suggests Silo rerouted the game. A GPTK
-    /// MANUAL title is steered to DXMT (adapting to whether DXMT is set up); a GPTK Steam title has no DXMT
-    /// bottle to move to yet, so it's told the class isn't supported in the Steam bottle.
-    static func graphicsFallbackMessage(
-        name: String, backend: GraphicsBackend, isSteamGame: Bool, dxmtAvailable: Bool
-    ) -> String {
+    /// The user-facing message when a backend didn't engage. Pure + table-testable. Never claims a working
+    /// "fallback" and never suggests Silo rerouted the game — it steers to DXMT (Steam and manual games both
+    /// have a per-game Graphics setting), adapting to whether DXMT is installed.
+    static func graphicsFallbackMessage(name: String, backend: GraphicsBackend, dxmtAvailable: Bool) -> String {
         switch backend {
         case .gptk:
-            if isSteamGame {
-                return "\(name): GPTK / D3DMetal couldn't drive this game's graphics. This class of older "
-                    + "DirectX 10/11 titles isn't supported in the Steam bottle yet."
-            }
-            return "\(name): GPTK / D3DMetal couldn't drive this game's graphics — this class of older "
-                + "DirectX 10/11 titles needs DXMT. " + dxmtSteer(dxmtAvailable: dxmtAvailable)
+            return "\(name): GPTK / D3DMetal couldn't drive this game's graphics. "
+                + dxmtSteer(dxmtAvailable: dxmtAvailable)
         case .dxmt:
             return "\(name): DXMT couldn't drive this game's graphics. "
                 + "Check the DXMT runtime in Settings → DXMT."
         }
     }
 
-    /// The message when a 32-bit (i386) game is refused under GPTK. GPTK / D3DMetal is 64-bit-only (Apple
-    /// ships no 32-bit D3DMetal). A manual title is steered to DXMT; a Steam title has no DXMT bottle yet.
-    /// Pure + table-testable.
-    static func unsupported32BitMessage(name: String, isSteamGame: Bool, dxmtAvailable: Bool) -> String {
-        let base = "\(name) is a 32-bit game — GPTK / D3DMetal is 64-bit-only and can't run it. "
-        return isSteamGame
-            ? base + "32-bit Steam games aren't supported yet."
-            : base + dxmtSteer(dxmtAvailable: dxmtAvailable)
+    /// The message when a 32-bit (i386) game is refused under an explicit GPTK choice. GPTK / D3DMetal is
+    /// 64-bit-only (Apple ships no 32-bit D3DMetal), so the game is steered to DXMT / Automatic. Pure.
+    static func unsupported32BitMessage(name: String, dxmtAvailable: Bool) -> String {
+        "\(name) is a 32-bit game — GPTK / D3DMetal is 64-bit-only and can't run it. "
+            + dxmtSteer(dxmtAvailable: dxmtAvailable)
     }
 
-    /// Where an (older DirectX 10/11, or 32-bit) MANUAL title actually belongs — the DXMT-steering suffix
-    /// shared by the graphics-fallback and 32-bit-refusal messages, adapting to DXMT readiness.
+    /// The DXMT-steering suffix shared by the graphics-fallback and 32-bit-refusal messages, adapting to
+    /// DXMT readiness. Both Steam and manual games expose a per-game Graphics setting.
     private static func dxmtSteer(dxmtAvailable: Bool) -> String {
         dxmtAvailable
-            ? "Switch this game's graphics backend to DXMT in its settings."
+            ? "Switch this game's graphics to DXMT in its settings."
             : "Set up DXMT in Settings → DXMT first."
     }
 }

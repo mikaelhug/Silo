@@ -20,7 +20,10 @@ public struct LaunchContext: Sendable, Equatable {
 /// prefix and its prepared per-backend runtime. Every launch / provision / wine-tool path routes through
 /// here instead of hard-coding `paths.steamBottle` or `backend.wineBinaryPath`, so a game can never run in
 /// the wrong bottle or under the wrong runtime:
-/// - A **Steam** game runs in the single Steam bottle under GPTK/D3DMetal.
+/// - A **Steam** game runs in the single Steam bottle under a per-launch backend (GPTK by default, or DXMT
+///   when the game's `Automatic`/explicit choice resolves there — see `BackendChooser`). Backend-ness is
+///   per-launch (runtime + `WINEDLLOVERRIDES` + an inert `winemetal.dll` prefix-loader), never baked into
+///   the shared prefix, so games on different backends co-reside in the one bottle.
 /// - A **manual** game runs in its own isolated bottle under its chosen backend.
 public struct BottleResolver: Sendable {
     private let paths: AppPaths
@@ -37,9 +40,11 @@ public struct BottleResolver: Sendable {
         case backendNotConfigured(GraphicsBackend)
     }
 
-    /// Resolve a Steam game's launch context: the shared Steam bottle under GPTK/D3DMetal.
-    public func steam(config: BackendConfig) throws -> LaunchContext {
-        try context(backend: .gptk, prefix: paths.steamBottle, config: config)
+    /// Resolve a Steam game's launch context: the shared Steam bottle under `backend` (GPTK by default).
+    /// A DXMT-routed Steam game runs in the SAME Steam prefix on the DXMT variant runtime; an unconfigured
+    /// DXMT throws `backendNotConfigured` (the caller steers the user to install it).
+    public func steam(backend: GraphicsBackend = .gptk, config: BackendConfig) throws -> LaunchContext {
+        try context(backend: backend, prefix: paths.steamBottle, config: config)
     }
 
     /// Resolve a manual game's launch context: its OWN isolated bottle under its chosen backend's variant.

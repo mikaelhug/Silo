@@ -68,6 +68,51 @@ struct GameLibraryViewModelTests {
         for _ in 0..<200 where !condition() { try await Task.sleep(for: .milliseconds(5)) }
     }
 
+    /// A library VM with BOTH runtimes configured (real base wine + DXMT source trees so the DXMT variant can
+    /// clone/overlay), + its fake runner + paths — for exercising the Automatic backend routing.
+    private func makeDXMTReady(_ tmp: TempDir) throws -> (GameLibraryViewModel, FakeProcessRunner, AppPaths) {
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
+        try tmp.makeDir("wine/lib/wine/x86_64-windows"); try tmp.makeDir("wine/lib/wine/x86_64-unix")
+        let dxmtLib = try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
+        for m in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
+            try tmp.write("dxmt/lib/wine/x86_64-windows/\(m)", "DXMT")
+        }
+        try tmp.makeDir("dxmt/lib/wine/x86_64-unix"); try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WM")
+        var backend = BackendConfig(); backend.wineBinaryPath = wine; backend.dxmtLibDirPath = dxmtLib
+        let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        session.updateWine(backend.wineBinaryPath); session.readinessTimeout = 0
+        let vm = GameLibraryViewModel(
+            bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
+            provisioner: WinePrefixProvisioner(runner: fake))
+        return (vm, fake, paths)
+    }
+
+    /// A Steam game whose install dir holds a PE `game.exe` of the given COFF machine (0x014c = 32-bit,
+    /// 0x8664 = 64-bit) — just enough header for `WindowsExecutable.machine`.
+    private func installedGamePE(
+        _ paths: AppPaths, appID: Int, name: String, dir: String, machine: UInt16) throws -> SteamApp {
+        let common = paths.steamBottleClientDir.appendingPathComponent("steamapps/common/\(dir)")
+        try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
+        var b = [UInt8](repeating: 0, count: 0x50)
+        b[0] = 0x4D; b[1] = 0x5A; b[0x3C] = 0x40                        // "MZ", e_lfanew = 0x40
+        b[0x40] = 0x50; b[0x41] = 0x45                                  // "PE\0\0"
+        b[0x44] = UInt8(machine & 0xFF); b[0x45] = UInt8(machine >> 8)  // COFF Machine
+        FileManager.default.createFile(
+            atPath: common.appendingPathComponent("game.exe").path, contents: Data(b))
+        return SteamApp(appID: appID, name: name, installDir: dir,
+                        stateFlags: .fullyInstalled, sizeOnDisk: 100, libraryPath: paths.steamBottleClientDir)
+    }
+
+    /// The persisted graphics choice for a Steam game (reads config.json back).
+    private func persistedGraphics(_ paths: AppPaths, _ appID: Int) async -> GraphicsChoice {
+        await ConfigStore(paths: paths).load().config(for: appID).graphics
+    }
+
     @Test("load discovers games installed in the bottle's Steam library")
     func loadsInstalledGames() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -220,6 +265,49 @@ struct GameLibraryViewModelTests {
         // CrossOver). No stop path, no taskkill.
         #expect(fake.terminatedPIDs.isEmpty)
         #expect(!fake.invocations.contains { $0.arguments.first == "taskkill" })
+    }
+
+    @Test("Automatic routes a 32-bit Steam game to DXMT in the shared bottle")
+    func autoRoutes32BitToDXMT() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = try makeDXMTReady(tmp)
+        try installSteam(paths)
+        let game = try installedGamePE(paths, appID: 220, name: "OC2", dir: "OC2", machine: 0x014c)
+
+        await vm.play(game)
+
+        // The GAME spawn (not the Steam client) runs in the SHARED Steam prefix on the DXMT variant runtime.
+        let spawn = try #require(fake.invocations.last {
+            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
+                && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
+        })
+        #expect(spawn.environment["WINELOADER"]?.contains("/wine-dxmt/bin/wine64") == true)
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        // The DXMT prefix-loader seeded winemetal.dll into the shared Steam prefix (needed for DXMT to load).
+        let wm = paths.steamBottle.appendingPathComponent("drive_c/windows/system32/winemetal.dll")
+        #expect(FileManager.default.fileExists(atPath: wm.path))
+    }
+
+    @Test("Automatic reactively remembers DXMT after a 64-bit game fails under GPTK")
+    func autoReactiveSwitchToDXMT() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = try makeDXMTReady(tmp)
+        try installSteam(paths)
+        let game = try installedGamePE(paths, appID: 220, name: "HL2", dir: "HL2", machine: 0x8664)  // 64-bit → GPTK
+        // The game writes the GPTK-didn't-engage signature to its log as it spawns.
+        let log = paths.log(forAppID: 220)
+        fake.onRun = { inv in
+            guard inv.detached, inv.logURL == log, let h = try? FileHandle(forWritingTo: log) else { return }
+            h.seekToEndOfFile()
+            h.write(Data(#"Assertion failed: (GFXTHandle && "Failed to dlopen D3DMetal")"#.utf8))
+            try? h.close()
+        }
+
+        await vm.play(game)   // launches on GPTK; the monitor detects the failure and persists DXMT
+
+        for _ in 0..<200 where await persistedGraphics(paths, 220) != .dxmt { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await persistedGraphics(paths, 220) == .dxmt)          // Automatic learned: use DXMT next time
+        #expect(vm.statusMessage?.contains("use DXMT") == true)
     }
 
     @Test("the status line self-clears after its visible window (a stale 'Launched …' doesn't linger)")
@@ -550,29 +638,27 @@ struct GameLibraryViewModelTests {
 
         #expect(vm.statusMessage?.contains("GPTK") == true)          // fallback surfaced, not a silent "Launched"
         #expect(vm.statusMessage?.contains("Launched") != true)
-        // Honest: it doesn't claim a working "fallback", and (Steam is GPTK-only now) it admits the class
-        // isn't supported in the Steam bottle yet rather than steering to a removed DXMT Steam bottle.
+        // Honest: it doesn't claim a working "fallback". DXMT isn't configured in this test, so the Automatic
+        // reactive switch can't fire — the message steers the user to set DXMT up.
         #expect(vm.statusMessage?.contains("fallback graphics") != true)
-        #expect(vm.statusMessage?.contains("isn't supported in the Steam bottle") == true)
+        #expect(vm.statusMessage?.contains("couldn't drive this game's graphics") == true)
+        #expect(vm.statusMessage?.contains("Set up DXMT") == true)
     }
 
-    @Test("graphicsFallbackMessage is honest + backend/kind-aware across all branches")
+    @Test("graphicsFallbackMessage steers to DXMT, adapting to DXMT readiness")
     func graphicsFallbackMessageBranches() {
         typealias VM = GameLibraryViewModel
-        // GPTK Steam game → no DXMT Steam bottle to steer to; admit the class isn't supported yet
-        // (dxmtAvailable is irrelevant for a Steam game).
-        let gptkSteam = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: true, dxmtAvailable: false)
-        #expect(gptkSteam.contains("isn't supported in the Steam bottle"))
-        // GPTK manual game → switch this game's backend (configured) / set up DXMT first (not).
-        let gptkManualReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: false, dxmtAvailable: true)
-        #expect(gptkManualReady.contains("Switch this game's graphics backend to DXMT"))
-        let gptkManualNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, isSteamGame: false, dxmtAvailable: false)
-        #expect(gptkManualNotReady.contains("Set up DXMT in Settings → DXMT first"))
-        // DXMT backend (manual only) → names DXMT, admits the wined3d fallback likely failed, points at Settings.
-        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, isSteamGame: false, dxmtAvailable: true)
+        // GPTK, DXMT installed → switch this game's graphics to DXMT.
+        let gptkReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: true)
+        #expect(gptkReady.contains("Switch this game's graphics to DXMT"))
+        // GPTK, DXMT not installed → set DXMT up first.
+        let gptkNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: false)
+        #expect(gptkNotReady.contains("Set up DXMT in Settings → DXMT first"))
+        // DXMT backend → names DXMT, points at Settings.
+        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, dxmtAvailable: true)
         #expect(dxmt.contains("DXMT couldn't drive this game's graphics") && dxmt.contains("Settings → DXMT"))
         // None of them pretends graphics are "running on fallback graphics".
-        for m in [gptkSteam, gptkManualReady, gptkManualNotReady, dxmt] {
+        for m in [gptkReady, gptkNotReady, dxmt] {
             #expect(m.hasPrefix("OC2: "))
             #expect(!m.contains("running on fallback graphics"))
         }

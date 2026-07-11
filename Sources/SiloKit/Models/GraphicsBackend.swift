@@ -62,3 +62,34 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
         }
     }
 }
+
+/// A per-game backend **preference** (what the user picks), distinct from `GraphicsBackend` (the concrete
+/// layer a launch resolves to). A game persists a *choice*; `BackendChooser` turns `.auto` into a concrete
+/// backend from the game binary + install state at launch time.
+public enum GraphicsChoice: String, Codable, Sendable, CaseIterable, Identifiable {
+    /// Let Silo pick per launch (see `BackendChooser`): 32-bit → DXMT (GPTK is 64-bit-only), else GPTK, with
+    /// an automatic switch to DXMT if GPTK can't drive the game.
+    case auto
+    case gptk
+    case dxmt
+
+    public var id: String { rawValue }
+
+    /// The explicit backend this choice pins, or nil for `.auto`.
+    public var explicitBackend: GraphicsBackend? {
+        switch self {
+        case .auto: nil
+        case .gptk: .gptk
+        case .dxmt: .dxmt
+        }
+    }
+
+    /// Full name for the settings picker.
+    public var displayName: String {
+        switch self {
+        case .auto: "Automatic"
+        case .gptk: GraphicsBackend.gptk.displayName
+        case .dxmt: GraphicsBackend.dxmt.displayName
+        }
+    }
+}

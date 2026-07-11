@@ -39,4 +39,82 @@ enum WindowsExecutable {
 
     /// True only for a **confirmed** 32-bit (i386) PE. Unreadable/unknown → false (fail open).
     static func is32Bit(_ url: URL) -> Bool { machine(of: url) == .i386 }
+
+    /// The set of DLL names a PE statically imports, lowercased (e.g. `"d3d11.dll"`) — a hint at the graphics
+    /// API a game needs. Walks the PE import directory (data directory 1). **Fail-open**: any parse/bounds
+    /// issue returns whatever was collected so far (empty on early failure) — never blocks a launch, and an
+    /// EMPTY result means "unknown" (many games load Direct3D dynamically via `LoadLibrary`, so absence of a
+    /// d3d import is NOT proof it doesn't use one). Memory-maps the file so a large `.exe` isn't read whole.
+    static func importedDLLs(of url: URL) -> Set<String> {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return [] }
+        let n = data.count
+        return data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> Set<String> in
+            func u16(_ off: Int) -> UInt16? {
+                guard off >= 0, off + 2 <= n else { return nil }
+                return UInt16(raw[off]) | (UInt16(raw[off + 1]) << 8)
+            }
+            func u32(_ off: Int) -> UInt32? {
+                guard off >= 0, off + 4 <= n else { return nil }
+                return UInt32(raw[off]) | (UInt32(raw[off + 1]) << 8)
+                    | (UInt32(raw[off + 2]) << 16) | (UInt32(raw[off + 3]) << 24)
+            }
+            // DOS "MZ" → e_lfanew → PE "PE\0\0".
+            guard n >= 0x40, raw[0] == 0x4D, raw[1] == 0x5A, let peOff = u32(0x3C).map(Int.init),
+                  peOff + 24 <= n, u16(peOff) == 0x4550, u16(peOff + 2) == 0 else { return [] }
+            let numSections = Int(u16(peOff + 6) ?? 0)
+            let sizeOptHdr = Int(u16(peOff + 20) ?? 0)
+            let optHdr = peOff + 24
+            guard let magic = u16(optHdr) else { return [] }
+            // Data directories begin after the fixed optional-header body: 96 bytes (PE32) / 112 (PE32+).
+            let dataDirs: Int
+            switch magic {
+            case 0x10b: dataDirs = optHdr + 96
+            case 0x20b: dataDirs = optHdr + 112
+            default: return []
+            }
+            // Import directory = data directory index 1 (RVA, size).
+            guard let importRVA = u32(dataDirs + 8), importRVA != 0 else { return [] }
+
+            // Section table (right after the optional header) → RVA→file-offset mapping.
+            let sectionsStart = optHdr + sizeOptHdr
+            struct Section { let va: UInt32; let vsize: UInt32; let rawSize: UInt32; let rawPtr: UInt32 }
+            var sections: [Section] = []
+            for i in 0..<min(numSections, 96) {
+                let s = sectionsStart + i * 40
+                guard let va = u32(s + 12), let vsize = u32(s + 8),
+                      let rawSize = u32(s + 16), let rawPtr = u32(s + 20) else { break }
+                sections.append(Section(va: va, vsize: vsize, rawSize: rawSize, rawPtr: rawPtr))
+            }
+            func fileOffset(_ rva: UInt32) -> Int? {
+                for s in sections {
+                    let span = max(s.vsize, s.rawSize)
+                    if rva >= s.va, rva < s.va &+ span {
+                        return Int(rva - s.va) + Int(s.rawPtr)
+                    }
+                }
+                return nil
+            }
+            func cString(at off: Int, max: Int = 256) -> String? {
+                guard off >= 0, off < n else { return nil }
+                var bytes: [UInt8] = []
+                var i = off
+                while i < n, raw[i] != 0, bytes.count < max { bytes.append(raw[i]); i += 1 }
+                return bytes.isEmpty ? nil : String(decoding: bytes, as: UTF8.self)
+            }
+
+            // Walk IMAGE_IMPORT_DESCRIPTORs (20 bytes each) until the all-zero terminator.
+            guard var desc = fileOffset(importRVA) else { return [] }
+            var names: Set<String> = []
+            for _ in 0..<2048 {
+                guard let origFirstThunk = u32(desc), let nameRVA = u32(desc + 12),
+                      let firstThunk = u32(desc + 16) else { break }
+                if origFirstThunk == 0, nameRVA == 0, firstThunk == 0 { break }   // terminator
+                if nameRVA != 0, let off = fileOffset(nameRVA), let name = cString(at: off) {
+                    names.insert(name.lowercased())
+                }
+                desc += 20
+            }
+            return names
+        }
+    }
 }

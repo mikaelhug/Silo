@@ -34,4 +34,19 @@ struct GameConfigTests {
             prefix: URL(fileURLWithPath: "/p"), logURL: URL(fileURLWithPath: "/p.log"))
         #expect(plan.arguments == [exe.path, "-foo", "-bar"])
     }
+
+    @Test("graphics choice round-trips; defaults to .auto; a legacy backend key is ignored")
+    func graphicsCodec() throws {
+        var c = GameConfig(appID: 220)
+        #expect(c.graphics == .auto)                       // default
+        c.graphics = .dxmt
+        let back = try JSONDecoder().decode(GameConfig.self, from: JSONEncoder().encode(c))
+        #expect(back.graphics == .dxmt)                    // round-trips
+
+        // An old config.json with no graphics key → .auto; the dual-bottle-era `backend` key is ignored.
+        let legacy = Data(#"{"appID":220,"backend":"dxmt"}"#.utf8)
+        let decoded = try JSONDecoder().decode(GameConfig.self, from: legacy)
+        #expect(decoded.appID == 220)
+        #expect(decoded.graphics == .auto)
+    }
 }

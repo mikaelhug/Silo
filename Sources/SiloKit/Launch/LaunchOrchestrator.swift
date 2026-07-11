@@ -218,12 +218,11 @@ public struct LaunchOrchestrator: Sendable {
     /// so setup can wrap the steamwebhelper. Not a user-facing "stop": Silo doesn't stop running games.
     public func terminate(pid: Int32) { runner.terminate(pid: pid) }
 
-    /// Whether launching `app` under `graphics` is a dead end because it's a 32-bit game on GPTK (which is
-    /// 64-bit-only). Lets the UI refuse EARLY — before bringing the Steam client up — for a game that could
-    /// never render under GPTK. Fails open (unresolvable exe → false).
-    public func isBlocked32BitOnGPTK(app: SteamApp, config: GameConfig, graphics: GraphicsBackend) -> Bool {
-        guard graphics == .gptk, let exe = try? resolveExecutable(app: app, config: config) else { return false }
-        return WindowsExecutable.is32Bit(exe)
+    /// The absolute path of the executable a Steam game would launch (from `config.executableRelativePath`
+    /// or an auto-scan of its install dir), or nil if it can't be resolved. Used by `BackendChooser` to pick
+    /// the Automatic backend from the game binary. Does a directory walk when auto-detecting — call off-main.
+    public func resolvedExecutable(app: SteamApp, config: GameConfig) -> URL? {
+        try? resolveExecutable(app: app, config: config)
     }
 
     /// Run a built-in wine tool (e.g. `winecfg`) against `prefix`, detached. Msync env so the tool shares
