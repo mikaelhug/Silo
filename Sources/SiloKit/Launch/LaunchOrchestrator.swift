@@ -136,7 +136,7 @@ public struct LaunchOrchestrator: Sendable {
     @discardableResult
     public func launchInBottle(
         app: SteamApp, config: GameConfig, backend: BackendConfig,
-        graphics: GraphicsBackend = .gptk, wine: URL? = nil, prefix: URL, logURL: URL,
+        graphics: GraphicsBackend, wine: URL? = nil, prefix: URL, logURL: URL,
         dock: DockIdentity? = nil, gameExe: URL? = nil
     ) async throws -> Int32 {
         guard let launchWine = wine ?? backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }
@@ -162,7 +162,7 @@ public struct LaunchOrchestrator: Sendable {
     @discardableResult
     public func launchManualGame(
         _ game: ManualGame, backend: BackendConfig,
-        graphics: GraphicsBackend = .gptk, wine: URL? = nil, prefix: URL, logURL: URL,
+        graphics: GraphicsBackend, wine: URL? = nil, prefix: URL, logURL: URL,
         dock: DockIdentity? = nil
     ) async throws -> Int32 {
         guard let launchWine = wine ?? backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }

@@ -234,7 +234,8 @@ struct LaunchPipelineTests {
         cfg.executableRelativePath = "hl2.exe"
 
         let pid = try await orchestrator.launchInBottle(
-            app: app, config: cfg, backend: backend, prefix: prefix, logURL: paths.log(forAppID: 220))
+            app: app, config: cfg, backend: backend, graphics: .gptk, prefix: prefix,
+            logURL: paths.log(forAppID: 220))
         #expect(pid == 4242)
 
         // GPTK overlaid into the wine RUNTIME (not the prefix): wine now carries GPTK's d3d11.dll.
@@ -263,7 +264,7 @@ struct LaunchPipelineTests {
                            libraryPath: tmp.url)   // install dir doesn't exist → no exe
         await #expect(throws: LaunchOrchestrator.LaunchError.self) {
             try await orchestrator.launchInBottle(
-                app: app, config: GameConfig(appID: 9), backend: backend,
+                app: app, config: GameConfig(appID: 9), backend: backend, graphics: .gptk,
                 prefix: tmp.url, logURL: paths.log(forAppID: 9))
         }
     }
@@ -280,7 +281,8 @@ struct LaunchPipelineTests {
         let game = ManualGame(name: "My Game", executablePath: exe, customArgs: ["-windowed"])
 
         let pid = try await orchestrator.launchManualGame(
-            game, backend: backend, prefix: prefix, logURL: tmp.url.appendingPathComponent("m.log"))
+            game, backend: backend, graphics: .gptk, prefix: prefix,
+            logURL: tmp.url.appendingPathComponent("m.log"))
         #expect(pid == 4242)
 
         let spawn = try #require(fake.invocations.last { $0.detached })
@@ -294,14 +296,7 @@ struct LaunchPipelineTests {
     }
 
     /// A minimal valid PE with the given COFF machine type (0x014c = i386, 0x8664 = amd64).
-    private func makePE(machine: UInt16, peOffset: Int = 0x40) -> Data {
-        var d = Data(count: peOffset + 6)
-        d[0] = 0x4D; d[1] = 0x5A
-        d[0x3C] = UInt8(peOffset & 0xFF); d[0x3D] = UInt8((peOffset >> 8) & 0xFF)
-        d[peOffset] = 0x50; d[peOffset + 1] = 0x45; d[peOffset + 2] = 0; d[peOffset + 3] = 0
-        d[peOffset + 4] = UInt8(machine & 0xFF); d[peOffset + 5] = UInt8((machine >> 8) & 0xFF)
-        return d
-    }
+    private func makePE(machine: UInt16) -> Data { PEFixture.header(machine: machine) }
 
     @Test("Refuses a 32-bit game on GPTK (64-bit-only), but allows the same exe on DXMT")
     func refuses32BitOnGPTK() async throws {
@@ -391,7 +386,8 @@ struct LaunchPipelineTests {
         let game = ManualGame(name: "Gone", executablePath: tmp.url.appendingPathComponent("nope.exe"))
         await #expect(throws: LaunchOrchestrator.LaunchError.self) {
             try await orchestrator.launchManualGame(
-                game, backend: backend, prefix: tmp.url, logURL: tmp.url.appendingPathComponent("m.log"))
+                game, backend: backend, graphics: .gptk, prefix: tmp.url,
+                logURL: tmp.url.appendingPathComponent("m.log"))
         }
     }
 
@@ -407,7 +403,7 @@ struct LaunchPipelineTests {
         cfg.executableRelativePath = "../../escape.exe"           // path traversal out of the install dir
         await #expect(throws: LaunchOrchestrator.LaunchError.self) {
             try await orchestrator.launchInBottle(
-                app: app, config: cfg, backend: backend, prefix: tmp.url,
+                app: app, config: cfg, backend: backend, graphics: .gptk, prefix: tmp.url,
                 logURL: tmp.url.appendingPathComponent("x.log"))
         }
     }

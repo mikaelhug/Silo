@@ -35,6 +35,14 @@
     .dxmtSupports32Bit`); `play` resolves the exe ONCE and hands it to `launchInBottle` (no double install-dir
     walk, decision + launch use the same binary); `BackendChooser.choose` is now pure (`is32Bit:` in). 355
     tests green.
+  - **Quality pass:** the failure-only PE import read (`dxmtMightHelp`) is now lazy — computed in
+    `handleGraphicsFallback` only when a fallback actually fires, never on a healthy launch; the reactive-learn
+    logic is factored into named `handleGraphicsFallback`/`learnDXMT`/`fallbackMessage` methods (no dense
+    nested closure); the `.gptk` default was removed from `BottleResolver.steam` / `launchInBottle` /
+    `launchManualGame` so a future launch path can't silently land on GPTK (`makePlan` keeps its default — it's
+    the pure builder, always fed `graphics` by those methods); the four copied test PE-byte builders collapsed
+    into one `Support/PEFixture`. No polling loops (fallback detection stays kqueue-driven via
+    `GraphicsFallbackMonitor`).
   - **On-device (Wine absent here):** (1) **co-residency** — with the bottle Steam up, launch a DXMT-routed
     game and confirm it joins the SAME wineserver (one `server-*` socket under `/tmp/.wine-$(id -u)/` or
     `$TMPDIR`), Steamworks connects, and the log shows DXMT's feature level; (2) a 32-bit Steam title (e.g.

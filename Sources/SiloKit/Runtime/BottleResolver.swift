@@ -40,10 +40,11 @@ public struct BottleResolver: Sendable {
         case backendNotConfigured(GraphicsBackend)
     }
 
-    /// Resolve a Steam game's launch context: the shared Steam bottle under `backend` (GPTK by default).
-    /// A DXMT-routed Steam game runs in the SAME Steam prefix on the DXMT variant runtime; an unconfigured
-    /// DXMT throws `backendNotConfigured` (the caller steers the user to install it).
-    public func steam(backend: GraphicsBackend = .gptk, config: BackendConfig) throws -> LaunchContext {
+    /// Resolve a Steam game's launch context: the shared Steam bottle under `backend` (the caller's
+    /// `BackendChooser` result — no default, so a launch path can't silently land on GPTK). A DXMT-routed
+    /// Steam game runs in the SAME Steam prefix on the DXMT variant runtime; an unconfigured DXMT throws
+    /// `backendNotConfigured` (the caller steers the user to install it).
+    public func steam(backend: GraphicsBackend, config: BackendConfig) throws -> LaunchContext {
         try context(backend: backend, prefix: paths.steamBottle, config: config)
     }
 

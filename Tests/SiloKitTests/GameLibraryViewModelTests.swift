@@ -101,12 +101,8 @@ struct GameLibraryViewModelTests {
         _ paths: AppPaths, appID: Int, name: String, dir: String, machine: UInt16) throws -> SteamApp {
         let common = paths.steamBottleClientDir.appendingPathComponent("steamapps/common/\(dir)")
         try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
-        var b = [UInt8](repeating: 0, count: 0x50)
-        b[0] = 0x4D; b[1] = 0x5A; b[0x3C] = 0x40                        // "MZ", e_lfanew = 0x40
-        b[0x40] = 0x50; b[0x41] = 0x45                                  // "PE\0\0"
-        b[0x44] = UInt8(machine & 0xFF); b[0x45] = UInt8(machine >> 8)  // COFF Machine
-        FileManager.default.createFile(
-            atPath: common.appendingPathComponent("game.exe").path, contents: Data(b))
+        FileManager.default.createFile(atPath: common.appendingPathComponent("game.exe").path,
+                                       contents: PEFixture.header(machine: machine))
         return SteamApp(appID: appID, name: name, installDir: dir,
                         stateFlags: .fullyInstalled, sizeOnDisk: 100, libraryPath: paths.steamBottleClientDir)
     }
@@ -653,6 +649,9 @@ struct GameLibraryViewModelTests {
         }
 
         await vm.play(game)
+        // The fallback handler reads the exe's imports off-main before messaging, so the status arrives a
+        // beat after play() returns.
+        try await waitUntil { vm.statusMessage?.contains("couldn't drive this game's graphics") == true }
 
         #expect(vm.statusMessage?.contains("GPTK") == true)          // fallback surfaced, not a silent "Launched"
         #expect(vm.statusMessage?.contains("Launched") != true)

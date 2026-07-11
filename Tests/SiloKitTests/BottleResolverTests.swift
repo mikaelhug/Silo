@@ -46,7 +46,7 @@ struct BottleResolverTests {
     func steamGPTK() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (config, paths) = try fixtures(tmp)
-        let ctx = try BottleResolver(paths: paths).steam(config: config)
+        let ctx = try BottleResolver(paths: paths).steam(backend: .gptk, config: config)
 
         #expect(ctx.graphics == .gptk)
         #expect(ctx.prefix.lastPathComponent == "SteamBottle")
@@ -97,7 +97,7 @@ struct BottleResolverTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (_, paths) = try fixtures(tmp)
         #expect(throws: BottleResolver.ResolveError.wineNotConfigured) {
-            try BottleResolver(paths: paths).steam(config: BackendConfig())
+            try BottleResolver(paths: paths).steam(backend: .gptk, config: BackendConfig())
         }
     }
 
@@ -115,7 +115,7 @@ struct BottleResolverTests {
     func gptkFallsBackToWined3d() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (config, paths) = try fixtures(tmp, gptk: false)   // wine only, no GPTK overlay
-        let ctx = try BottleResolver(paths: paths).steam(config: config)
+        let ctx = try BottleResolver(paths: paths).steam(backend: .gptk, config: config)
         #expect(ctx.graphics == .gptk)
         #expect(ctx.wineBinary == config.wineBinaryPath)   // base runtime, un-overlaid
     }
