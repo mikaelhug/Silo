@@ -21,15 +21,18 @@ struct ViewModelTests {
         #expect(await ConfigStore(paths: paths).load().backend.wineBinaryPath?.path == "/w/wine64")
     }
 
-    @Test("GameSettings save reports success and clears any earlier error")
+    @Test("GameSettings save persists the graphics choice + args, clears any earlier error")
     func gameSettingsSaveSucceeds() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let vm = GameSettingsViewModel(config: GameConfig(appID: 220), configStore: ConfigStore(paths: paths))
         vm.config.customArgs = ["-novid"]
+        vm.config.graphics = .dxmt                              // the picker must actually stick
         #expect(await vm.save())
         #expect(vm.errorMessage == nil)
-        #expect(await ConfigStore(paths: paths).load().config(for: 220).customArgs == ["-novid"])
+        let saved = await ConfigStore(paths: paths).load().config(for: 220)
+        #expect(saved.customArgs == ["-novid"])
+        #expect(saved.graphics == .dxmt)                        // regression guard: save() drops nothing
     }
 
     @Test("GameSettings save failure returns false + surfaces errorMessage (sheet must NOT dismiss)")

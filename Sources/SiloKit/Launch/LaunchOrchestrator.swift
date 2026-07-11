@@ -137,10 +137,13 @@ public struct LaunchOrchestrator: Sendable {
     public func launchInBottle(
         app: SteamApp, config: GameConfig, backend: BackendConfig,
         graphics: GraphicsBackend = .gptk, wine: URL? = nil, prefix: URL, logURL: URL,
-        dock: DockIdentity? = nil
+        dock: DockIdentity? = nil, gameExe: URL? = nil
     ) async throws -> Int32 {
         guard let launchWine = wine ?? backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }
-        let gameExe = try resolveExecutable(app: app, config: config)
+        // Reuse the exe the caller already resolved (the VM resolves it once to pick the backend), else
+        // resolve it here — avoids a second full install-dir walk AND guarantees the launched binary is the
+        // one the backend decision was made against.
+        let gameExe = try gameExe ?? resolveExecutable(app: app, config: config)
         try check32BitSupported(gameExe, graphics: graphics)
         try linkGraphics(backendConfig: backend, graphics: graphics, wine: launchWine, prefix: prefix)
         try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)

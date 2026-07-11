@@ -27,6 +27,14 @@
     `BottleResolver.steam(backend:.dxmt)` → clone runtime + Steam prefix (+ refusal); `play` auto-routes a
     32-bit Steam game onto the DXMT clone in the shared prefix with winemetal seeded; reactive switch persists
     `.dxmt`; `GameConfig` graphics codec.
+  - **Review fixes (2026-07-11, high-effort multi-agent review):** the Steam Graphics picker now actually
+    persists (`GameSettingsViewModel.save` was dropping `graphics`); the reactive switch re-reads fresh config
+    at fire time (can't clobber an explicit pin or write for an uninstalled DXMT) and only promises the switch
+    when the write succeeds; the fallback message steers to DXMT only when it could help (no false steer for
+    D3D12/D3D9-only); a 32-bit game routed to a 64-bit-only DXMT is refused up front (`BackendConfig
+    .dxmtSupports32Bit`); `play` resolves the exe ONCE and hands it to `launchInBottle` (no double install-dir
+    walk, decision + launch use the same binary); `BackendChooser.choose` is now pure (`is32Bit:` in). 355
+    tests green.
   - **On-device (Wine absent here):** (1) **co-residency** — with the bottle Steam up, launch a DXMT-routed
     game and confirm it joins the SAME wineserver (one `server-*` socket under `/tmp/.wine-$(id -u)/` or
     `$TMPDIR`), Steamworks connects, and the log shows DXMT's feature level; (2) a 32-bit Steam title (e.g.

@@ -18,7 +18,7 @@ public final class GameSettingsViewModel {
     public func save() async -> Bool {
         // Snapshot the user-editable fields (all Sendable) before the @Sendable mutation closure.
         let appID = config.appID
-        let (envFlags, presence) = (config.envFlags, config.presence)
+        let (envFlags, presence, graphics) = (config.envFlags, config.presence, config.graphics)
         let (exePath, args) = (config.executableRelativePath, config.customArgs)
         do {
             // Field-merge into the CURRENT record rather than upserting the whole snapshot captured when the
@@ -27,6 +27,7 @@ public final class GameSettingsViewModel {
             _ = try await configStore.updateGame(appID: appID) {
                 $0.envFlags = envFlags
                 $0.presence = presence
+                $0.graphics = graphics
                 $0.executableRelativePath = exePath
                 $0.customArgs = args
             }

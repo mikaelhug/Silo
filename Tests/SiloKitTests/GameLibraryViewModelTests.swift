@@ -70,7 +70,8 @@ struct GameLibraryViewModelTests {
 
     /// A library VM with BOTH runtimes configured (real base wine + DXMT source trees so the DXMT variant can
     /// clone/overlay), + its fake runner + paths — for exercising the Automatic backend routing.
-    private func makeDXMTReady(_ tmp: TempDir) throws -> (GameLibraryViewModel, FakeProcessRunner, AppPaths) {
+    private func makeDXMTReady(_ tmp: TempDir, i386: Bool = true)
+        throws -> (GameLibraryViewModel, FakeProcessRunner, AppPaths) {
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
         let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
@@ -78,8 +79,10 @@ struct GameLibraryViewModelTests {
         let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
         try tmp.makeDir("wine/lib/wine/x86_64-windows"); try tmp.makeDir("wine/lib/wine/x86_64-unix")
         let dxmtLib = try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
+        if i386 { try tmp.makeDir("dxmt/lib/wine/i386-windows") }   // both ABIs → a 32-bit game may route to DXMT
         for m in ["d3d11.dll", "d3d10core.dll", "dxgi.dll", "winemetal.dll"] {
             try tmp.write("dxmt/lib/wine/x86_64-windows/\(m)", "DXMT")
+            if i386 { try tmp.write("dxmt/lib/wine/i386-windows/\(m)", "DXMT32") }
         }
         try tmp.makeDir("dxmt/lib/wine/x86_64-unix"); try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WM")
         var backend = BackendConfig(); backend.wineBinaryPath = wine; backend.dxmtLibDirPath = dxmtLib
@@ -286,6 +289,21 @@ struct GameLibraryViewModelTests {
         // The DXMT prefix-loader seeded winemetal.dll into the shared Steam prefix (needed for DXMT to load).
         let wm = paths.steamBottle.appendingPathComponent("drive_c/windows/system32/winemetal.dll")
         #expect(FileManager.default.fileExists(atPath: wm.path))
+    }
+
+    @Test("A 32-bit game is refused when the installed DXMT has no i386 build (no silent black screen)")
+    func refuses32BitWhenDXMTLacksI386() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = try makeDXMTReady(tmp, i386: false)   // DXMT installed, 64-bit-only
+        try installSteam(paths)
+        let game = try installedGamePE(paths, appID: 220, name: "OC2", dir: "OC2", machine: 0x014c)
+
+        await vm.play(game)
+
+        #expect(vm.statusMessage?.contains("32-bit DXMT build") == true)   // honest refusal, steers to update
+        #expect(!fake.invocations.contains {                               // never spawned the game
+            $0.detached && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
+        })
     }
 
     @Test("Automatic reactively remembers DXMT after a 64-bit game fails under GPTK")
@@ -645,20 +663,24 @@ struct GameLibraryViewModelTests {
         #expect(vm.statusMessage?.contains("Set up DXMT") == true)
     }
 
-    @Test("graphicsFallbackMessage steers to DXMT, adapting to DXMT readiness")
+    @Test("graphicsFallbackMessage steers to DXMT only when DXMT could help, adapting to readiness")
     func graphicsFallbackMessageBranches() {
         typealias VM = GameLibraryViewModel
-        // GPTK, DXMT installed → switch this game's graphics to DXMT.
-        let gptkReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: true)
+        // GPTK, DXMT installed + could help → switch this game's graphics to DXMT.
+        let gptkReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: true, dxmtMightHelp: true)
         #expect(gptkReady.contains("Switch this game's graphics to DXMT"))
         // GPTK, DXMT not installed → set DXMT up first.
-        let gptkNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: false)
+        let gptkNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: false, dxmtMightHelp: true)
         #expect(gptkNotReady.contains("Set up DXMT in Settings → DXMT first"))
+        // GPTK, DXMT can't help this game (D3D12 / D3D9-only) → NO false DXMT steer.
+        let gptkNoHelp = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: true, dxmtMightHelp: false)
+        #expect(gptkNoHelp.contains("couldn't drive this game's graphics"))
+        #expect(!gptkNoHelp.contains("DXMT"))
         // DXMT backend → names DXMT, points at Settings.
-        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, dxmtAvailable: true)
+        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, dxmtAvailable: true, dxmtMightHelp: true)
         #expect(dxmt.contains("DXMT couldn't drive this game's graphics") && dxmt.contains("Settings → DXMT"))
         // None of them pretends graphics are "running on fallback graphics".
-        for m in [gptkReady, gptkNotReady, dxmt] {
+        for m in [gptkReady, gptkNotReady, gptkNoHelp, dxmt] {
             #expect(m.hasPrefix("OC2: "))
             #expect(!m.contains("running on fallback graphics"))
         }

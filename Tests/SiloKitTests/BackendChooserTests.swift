@@ -74,22 +74,18 @@ struct BackendChooserTests {
         #expect(WindowsExecutable.importedDLLs(of: tmp.url.appendingPathComponent("missing.exe")).isEmpty)
     }
 
-    // MARK: - choose()
+    // MARK: - choose() (pure — bitness in, backend out)
 
-    @Test("explicit choices are honored regardless of the binary")
+    @Test("explicit choices are honored regardless of bitness")
     func chooseExplicit() {
-        #expect(BackendChooser.choose(.gptk, exe: nil) == .gptk)
-        #expect(BackendChooser.choose(.dxmt, exe: nil) == .dxmt)
+        #expect(BackendChooser.choose(.gptk, is32Bit: true) == .gptk)
+        #expect(BackendChooser.choose(.dxmt, is32Bit: false) == .dxmt)
     }
 
-    @Test("auto: 64-bit → GPTK, 32-bit → DXMT, unknown → GPTK")
-    func chooseAuto() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        let x64 = try writePE(tmp, "g64.exe", magic: 0x20b, machine: 0x8664, imports: ["d3d11.dll"])
-        let x86 = try writePE(tmp, "g32.exe", magic: 0x10b, machine: 0x014c, imports: ["d3d9.dll"])
-        #expect(BackendChooser.choose(.auto, exe: x64) == .gptk)
-        #expect(BackendChooser.choose(.auto, exe: x86) == .dxmt)   // GPTK is 64-bit-only
-        #expect(BackendChooser.choose(.auto, exe: nil) == .gptk)   // unresolved binary → proven default
+    @Test("auto: 64-bit → GPTK, 32-bit → DXMT")
+    func chooseAuto() {
+        #expect(BackendChooser.choose(.auto, is32Bit: false) == .gptk)
+        #expect(BackendChooser.choose(.auto, is32Bit: true) == .dxmt)   // GPTK is 64-bit-only
     }
 
     // MARK: - dxmtMightHelp()

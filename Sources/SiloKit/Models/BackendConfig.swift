@@ -69,4 +69,14 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         case .dxmt: dxmtLibDirPath
         }
     }
+
+    /// Whether the installed DXMT runtime ships 32-bit (i386) modules — a 32-bit game can ONLY run on DXMT if
+    /// so (GPTK is 64-bit-only). `dxmtLibDirPath` points at the `x86_64-windows` tree, so this checks its
+    /// `i386-windows` sibling for `winemetal.dll` (the load-bearing DXMT builtin). False when DXMT is unset.
+    public var dxmtSupports32Bit: Bool {
+        guard let lib = dxmtLibDirPath else { return false }
+        let i386 = lib.deletingLastPathComponent()
+            .appendingPathComponent("i386-windows/winemetal.dll")
+        return FileManager.default.fileExists(atPath: i386.path)
+    }
 }

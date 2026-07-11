@@ -64,7 +64,9 @@ only (DXMT isn't Wine); we build from upstream for the canonical, reproducible b
 submodules. Never a third-party prebuilt. DXVK was evaluated and rejected (Vulkan/MoltenVK stack; DXMT is
 Metal-direct).
 
-**The deterministic rule — backend ⇔ runtime ⇔ bottle** (`GraphicsBackend` is the single source of truth):
+**The deterministic rule — backend ⇔ runtime ⇔ overrides** (`GraphicsBackend` is the single source of truth
+for a backend's runtime + `WINEDLLOVERRIDES`; the *bottle* is per-launch, not per-backend — Steam games on
+GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + overrides at launch):
 - Both backends overlay a **builtin** `d3d11`/`dxgi` into a runtime's `lib/wine` tree, so they can't share
   one runtime. `RuntimeVariants` prepares each: GPTK overlays the base runtime in place (the proven path,
   unchanged); DXMT gets an **APFS clone** of the base + `GraphicsLinker.overlayDXMT`.
