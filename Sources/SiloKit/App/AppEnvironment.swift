@@ -75,7 +75,8 @@ public final class AppEnvironment {
         // (CEF needs no d3d; a co-resident game picks the variant runtime — shared wineserver).
         let steamBottle = SteamBottle(runner: runner, paths: paths)
         let steamClientSession = SteamClientSession(bottle: steamBottle, orchestrator: orchestrator)
-        let steamBottleVM = SteamBottleViewModel(bottle: steamBottle, session: steamClientSession)
+        let steamBottleVM = SteamBottleViewModel(
+            bottle: steamBottle, session: steamClientSession, focuser: InstallerWindowFocuser())
         self.steamClientSession = steamClientSession
         self.steamBottleVM = steamBottleVM
 

@@ -33,6 +33,10 @@ public struct SteamBottle: Sendable {
         case winebootFailed(Int32)
         case installerDownloadFailed(Int)
         case steamInstallFailed(Int32)
+        /// A user-guided, license-bearing component installer was cancelled/declined (its window closed
+        /// without a successful install). Fatal to setup — the bottle would otherwise be half-provisioned —
+        /// but leaves the component UNMARKED so the next Set up run re-prompts it.
+        case componentCancelled(BottleComponent)
     }
 
     /// The bottle's Wine prefix.
@@ -191,10 +195,16 @@ public struct SteamBottle: Sendable {
             guard let exe = downloaded[font] else { continue }
             if index == 0 {
                 // User-guided: the installer shows its EULA and installs the font itself on accept (blocks).
-                _ = try? await runner.run(
+                // A decline/cancel exits non-zero and installs nothing — fail setup rather than silently
+                // continue with a half-provisioned bottle (the user asked to be stopped, not skipped past).
+                let result = try? await runner.run(
                     executable: wine, arguments: ["C:\\\(font).exe"],
                     environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
                     currentDirectory: prefixDir)
+                guard result?.succeeded == true else {
+                    try? fileManager.removeItem(at: exe)
+                    throw BottleError.componentCancelled(.coreFonts)
+                }
             } else {
                 // IExpress extract-only (`/T:<dir> /C /Q`): drops the .ttf into the target with no GUI.
                 try? fileManager.removeItem(at: extractDir)
@@ -386,10 +396,15 @@ public struct SteamBottle: Sendable {
             environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
             currentDirectory: prefixDir)
         try? fileManager.removeItem(at: installer)
+        // Success (0), success-needs-reboot (3010), or a newer version already present (1638) → mark done.
         if let code = result?.exitCode, [0, 3010, 1638].contains(code) {
             try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
             fileManager.createFile(atPath: vcRedistMarker(x86: x86).path, contents: Data())
+            return
         }
+        // Anything else — a user cancel (1602), a failure, or a run that couldn't start — leaves it UNMARKED
+        // and stops setup, so the bottle isn't left half-provisioned (re-prompted on the next Set up run).
+        throw BottleError.componentCancelled(x86 ? .vcRedistX86 : .vcRedistX64)
     }
 
     // MARK: - Default Wine DLL overrides
@@ -467,6 +482,10 @@ public struct SteamBottle: Sendable {
             do {
                 try await install(component, wine: wine)
             } catch {
+                // A user cancel of a license-bearing installer is fatal — stop rather than build a
+                // half-provisioned bottle (it re-prompts next run, since nothing was marked). The terminal
+                // Steam install is likewise fatal. Everything else stays best-effort per component.
+                if case BottleError.componentCancelled = error { throw error }
                 if component == .steamClient { throw error }
             }
         }

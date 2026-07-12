@@ -390,17 +390,67 @@ struct SteamBottleTests {
         #expect(fake.invocations.count == runsBefore)
     }
 
-    @Test("a user cancel (exit 1602) leaves MSVC UNMARKED so setup re-prompts")
-    func vcRedistCancelReprompts() async throws {
+    @Test("a user cancel (exit 1602) FAILS setup (componentCancelled) and leaves MSVC UNMARKED to re-prompt")
+    func vcRedistCancelFailsSetup() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
         let (bottle, fake, _, _) = make(tmp, session: session)
         FakeURLProtocol.stub(Silo.vcRedistX86URL.absoluteString, data: Data("EXE".utf8), session: session)
         fake.queueResult(ProcessResult(exitCode: 1602))   // user cancelled the bootstrapper
 
-        try await bottle.installVCRedist(x86: true, wine: URL(fileURLWithPath: "/w/wine64"))
-
+        await #expect(throws: SteamBottle.BottleError.componentCancelled(.vcRedistX86)) {
+            try await bottle.installVCRedist(x86: true, wine: URL(fileURLWithPath: "/w/wine64"))
+        }
         #expect(!bottle.isVCRedistInstalled(x86: true))   // NOT marked → the next setup runs it again
+    }
+
+    @Test("declining the first Core Font EULA FAILS setup (componentCancelled) and installs nothing")
+    func coreFontsCancelFailsSetup() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, _, _) = make(tmp, session: session)
+        for font in Silo.coreFonts {
+            FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString,
+                                 data: Data("EXE".utf8), session: session)
+        }
+        fake.queueResult(ProcessResult(exitCode: 1))   // user declined the first font's license
+
+        await #expect(throws: SteamBottle.BottleError.componentCancelled(.coreFonts)) {
+            try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        }
+        #expect(!bottle.hasCoreFonts)                                                  // nothing installed
+        let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
+        #expect(fontRuns.count == 1)                                                   // stopped after the first
+    }
+
+    @Test("provisionComponents rethrows a user cancel — setup STOPS before Steam (not best-effort)")
+    func provisionComponentsCancelIsFatal() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        // Satisfy every component BEFORE vcRedistX86 so it's the first to actually run, then cancel it.
+        let driveC = paths.steamBottle.appendingPathComponent("drive_c")
+        let fonts = driveC.appendingPathComponent("windows/Fonts")
+        try FileManager.default.createDirectory(at: fonts, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: fonts.appendingPathComponent("Arial.TTF").path, contents: Data())
+        let markers = paths.steamBottle.appendingPathComponent(".silo-installed")
+        try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
+        for pack in Silo.sourceHanSansPacks {
+            FileManager.default.createFile(atPath: markers.appendingPathComponent(pack).path, contents: Data())
+        }
+        for dir in ["windows/system32", "windows/syswow64"] {
+            let d = driveC.appendingPathComponent(dir)
+            try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: d.appendingPathComponent("d3dcompiler_47.dll").path, contents: Data(count: 600_000))
+        }
+        FakeURLProtocol.stub(Silo.vcRedistX86URL.absoluteString, data: Data("EXE".utf8), session: session)
+        fake.queueResult(ProcessResult(exitCode: 1602))   // user cancels the x86 redist
+
+        await #expect(throws: SteamBottle.BottleError.componentCancelled(.vcRedistX86)) {
+            try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64")) { _ in }
+        }
+        // The terminal Steam component never installed — provisioning stopped at the cancel.
+        #expect(!fake.invocations.contains { $0.arguments.first?.hasSuffix("SteamSetup.exe") == true })
     }
 
     @Test("a Wine fakedll stub does NOT mark d3dcompiler_47 / MSVC installed (they still run)")

@@ -6,7 +6,8 @@ import Testing
 @Suite("SteamBottleViewModel")
 struct SteamBottleViewModelTests {
 
-    private func make(_ tmp: TempDir) -> (SteamBottleViewModel, FakeProcessRunner, AppPaths) {
+    private func make(_ tmp: TempDir, focuser: GuidedInstallFocusing? = nil)
+        -> (SteamBottleViewModel, FakeProcessRunner, AppPaths) {
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
         let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
@@ -21,8 +22,17 @@ struct SteamBottleViewModelTests {
         session.warmUpBringUpTimeout = 0.005
         session.warmUpCefSettleSeconds = 0.002
         session.warmUpForceQuitSettle = 0
-        let vm = SteamBottleViewModel(bottle: bottle, session: session)
+        let vm = SteamBottleViewModel(bottle: bottle, session: session, focuser: focuser)
         return (vm, fake, paths)
+    }
+
+    /// Records arm/disarm so a test can assert the setup flow focuses the user-guided installer windows.
+    @MainActor
+    final class SpyFocuser: GuidedInstallFocusing {
+        private(set) var armedRoots: [URL] = []
+        private(set) var disarmCount = 0
+        func arm(wineRoot: URL) { armedRoots.append(wineRoot) }
+        func disarm() { disarmCount += 1 }
     }
 
     @Test("steamInstalled is a cache: refreshInstalled() probes off-main; setUp sets it + fires the hook")
@@ -88,6 +98,39 @@ struct SteamBottleViewModelTests {
         #expect(vm.status.contains("Steam is ready"))
         #expect(vm.steamInstalled)
         #expect(!vm.busy)
+    }
+
+    @Test("setUp focuses the user-guided installer window during that step, then disarms")
+    func setUpFocusesGuidedInstaller() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let spy = SpyFocuser()
+        let (vm, fake, paths) = make(tmp, focuser: spy)
+        FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("installer".utf8))
+        // Pre-satisfy the non-Steam components so only the user-guided Steam client step runs.
+        paths.createComponentMarkers()
+        fake.onRun = { inv in
+            if inv.arguments.first?.hasSuffix("SteamSetup.exe") == true { paths.createWarmedSteamClient() }
+        }
+        vm.updateWine(URL(fileURLWithPath: "/runtimes/wine/bin/wine64"))
+
+        await vm.setUp()
+
+        // The Steam step (user-guided) armed the focuser with the Wine runtime ROOT (parent of bin/)…
+        #expect(spy.armedRoots.map(\.path) == ["/runtimes/wine"])
+        // …and the focuser was disarmed by the time setup finished (never left armed).
+        #expect(spy.disarmCount >= 1)
+    }
+
+    @Test("setupFailureMessage reads a cancelled installer as a pause with a retry cue")
+    func setupFailureMessageForCancel() {
+        let cancel = SteamBottle.BottleError.componentCancelled(.vcRedistX86)
+        let msg = SteamBottleViewModel.setupFailureMessage(cancel)
+        #expect(msg.contains("cancelled"))
+        #expect(msg.contains("Visual C++"))          // the component's title
+        #expect(msg.contains("Set up again"))
+        // Anything else is a plain failure.
+        #expect(SteamBottleViewModel.setupFailureMessage(
+            SteamBottle.BottleError.steamInstallFailed(1)).hasPrefix("Setup failed"))
     }
 
     @Test("setUp surfaces a 'Setup failed' status when the Steam install fails")

@@ -13,11 +13,19 @@ public final class SteamBottleViewModel {
     /// The live Steam client is owned by the shared session (not spawned here), so the settings "Launch
     /// Steam" can't start a second, untracked client behind the Library's back.
     private let session: SteamClientSession
+    /// Brings the user-guided installer/license windows to the front so the user notices them (nil in tests).
+    private let focuser: GuidedInstallFocusing?
     private var wineBinary: URL?
 
-    public init(bottle: SteamBottle, session: SteamClientSession) {
+    init(bottle: SteamBottle, session: SteamClientSession, focuser: GuidedInstallFocusing? = nil) {
         self.bottle = bottle
         self.session = session
+        self.focuser = focuser
+    }
+
+    /// The Wine runtime root (`…/wine`), parent of `bin/`, used to recognise Wine's own installer windows.
+    private var wineRoot: URL? {
+        wineBinary?.deletingLastPathComponent().deletingLastPathComponent()
     }
 
     public func updateWine(_ url: URL?) {
@@ -64,7 +72,8 @@ public final class SteamBottleViewModel {
         }
         guard let wine = wineBinary else { status = "Set up Wine first."; return }
         busy = true
-        defer { busy = false }
+        // The focuser is armed per user-guided step (see `applyComponentPhase`); always disarm on exit.
+        defer { busy = false; focuser?.disarm() }
         do {
             // Step 3: download the Steam installer up front so a network failure surfaces before booting.
             status = "Downloading Steam…"
@@ -79,6 +88,7 @@ public final class SteamBottleViewModel {
             try await bottle.provisionComponents(wine: wine, onPhase: { [weak self] component in
                 self?.applyComponentPhase(component)
             })
+            focuser?.disarm()   // installers done — stop focusing before the (windowless) warm-up
             // The user-guided Steam installer may auto-launch Steam with no CEF wrapper/virtual-desktop env
             // (→ black window) AND an untracked client. Kill whatever it spawned before the controlled warm-up.
             await bottle.forceQuit(wine: wine)
@@ -97,8 +107,17 @@ public final class SteamBottleViewModel {
             onSteamInstalled?()   // refresh the library's cached readiness (now reflects the warmed client)
         } catch {
             warmingUp = false; warmUpFraction = nil
-            status = "Setup failed: \(message(error))"
+            status = Self.setupFailureMessage(error)
         }
+    }
+
+    /// User-facing status for a setup that didn't complete. A cancelled license installer reads as a pause
+    /// (the user chose to stop) with a clear "run Set up again" cue; anything else is a plain failure.
+    static func setupFailureMessage(_ error: Error) -> String {
+        if case SteamBottle.BottleError.componentCancelled(let component) = error {
+            return "Setup paused — you cancelled the \(component.title) installer. Run Set up again to finish."
+        }
+        return "Setup failed: \((error as NSError).localizedDescription)"
     }
 
     /// User-facing status for a component-install phase. Pure + testable; user-guided steps ask the user to
@@ -111,6 +130,10 @@ public final class SteamBottleViewModel {
 
     private func applyComponentPhase(_ component: BottleComponent) {
         status = Self.componentStatus(component)
+        // Focus this step's license/installer window (user-guided steps only); drop the previous arm so a
+        // headless step in between doesn't pull a stray Wine helper forward.
+        focuser?.disarm()
+        if component.isUserGuided, let wineRoot { focuser?.arm(wineRoot: wineRoot) }
     }
 
     /// Map a warm-up phase to the UI status text + progress fraction.

@@ -3,6 +3,27 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🪟 Setup installer windows: focus them + a cancel now stops setup (2026-07-12, `main`; `swift build` clean +
+  zero warnings, 360 tests green).** Two onboarding annoyances the user hit during a real setup:
+  - **Focus the license/installer windows.** A window Silo's forked `wine` opens (a Core Fonts EULA, an MSVC
+    redist, the Steam installer) lands *behind* the still-active Silo, so the user can miss that it appeared at
+    all. New `InstallerWindowFocuser` (`Sources/SiloKit/Support/`, behind a `GuidedInstallFocusing` protocol so
+    the VM unit-tests with a spy) observes `NSWorkspace.didLaunchApplicationNotification` and `activate()`s the
+    launched app whose executable lives under the Wine runtime root (`isWineApp`, trailing-slash guarded so
+    `…/wine-dxmt` can't match `…/wine`). `SteamBottleViewModel` arms it per **user-guided** component step and
+    disarms between steps / before the windowless warm-up / on exit. Fail-safe: an unmatched window just stays
+    where macOS put it (today's behaviour) — never a regression. On-device-unverified (Wine absent on the dev
+    box); the arm/disarm bracketing + the match predicate are unit-tested.
+  - **Cancelling a font/redist installer now FAILS setup** instead of silently continuing with a
+    half-provisioned bottle. Declining the first Core Font EULA, or a non-success MSVC redist exit (incl. a
+    1602 user cancel), throws `BottleError.componentCancelled(component)`; `provisionComponents` rethrows it
+    (was best-effort for everything but Steam). Nothing is marked, so the next Set up re-prompts that
+    component. The VM surfaces it as a pause — "Setup paused — you cancelled the … installer. Run Set up again
+    to finish." — not a hard failure.
+  - Tests (+5): VC-redist cancel now asserts the throw; first-Core-Font decline throws + installs nothing +
+    stops after the first font; `provisionComponents` rethrows a mid-set cancel (Steam never runs);
+    `isWineApp` predicate; the setUp flow arms the focuser with the runtime root on the user-guided step, then
+    disarms; `setupFailureMessage` cancel copy.
 - **🎛️ Automatic graphics backend (GPTK ⇄ DXMT) for the shared Steam bottle (2026-07-11, `main`; `swift build`
   clean + zero warnings, 354 tests green).** Steam games are no longer GPTK-only: each has a per-game
   `GraphicsChoice` (`.auto`/`.gptk`/`.dxmt`, default `.auto`) and GPTK + DXMT games co-reside in the ONE Steam
