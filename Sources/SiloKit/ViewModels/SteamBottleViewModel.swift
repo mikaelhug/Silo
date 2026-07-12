@@ -143,9 +143,9 @@ public final class SteamBottleViewModel {
         case .downloading(let fraction):
             warmUpFraction = fraction
             if let fraction {
-                status = "Downloading Steam client — \(Int(fraction * 100))%…"
+                status = "Steam is updating itself — \(Int(fraction * 100))%…"
             } else {
-                status = "Downloading Steam client…"
+                status = "Steam is updating itself…"
             }
         case .finishing:
             warmUpFraction = nil
