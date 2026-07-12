@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import CryptoKit
 @testable import SiloKit
 
 @Suite("SteamBottle")
@@ -10,13 +11,23 @@ struct SteamBottleTests {
         return (bottle, fake, paths)
     }
 
+    /// Lower-case hex SHA-256 of `data` (to pin a stub download's digest in the verification test).
+    private func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Variant that exposes the session, so a test can register a session-scoped stub for the fixed
-    /// `Silo.steamInstallerURL` without colliding with other tests stubbing the same URL.
-    private func make(_ tmp: TempDir, session: URLSession)
+    /// `Silo.steamInstallerURL` without colliding with other tests stubbing the same URL. Digest maps default
+    /// to `[:]` — the install-flow tests use stub bytes that can't match the real pins, so they skip
+    /// verification (a missing key = unpinned = allowed); the dedicated verification test injects real digests.
+    private func make(_ tmp: TempDir, session: URLSession,
+                      coreFontDigests: [String: String] = [:],
+                      d3dCabDigests: [String: String] = [:])
         -> (SteamBottle, FakeProcessRunner, AppPaths, URLSession) {
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
-        let bottle = SteamBottle(runner: fake, session: session, paths: paths)
+        let bottle = SteamBottle(runner: fake, session: session, paths: paths,
+                                 coreFontDigests: coreFontDigests, d3dCabDigests: d3dCabDigests)
         return (bottle, fake, paths, session)
     }
 
@@ -295,6 +306,37 @@ struct SteamBottleTests {
         let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
         #expect(fontRuns.count == Silo.coreFonts.count)
         #expect(fontRuns.allSatisfy { $0.arguments.contains("/Q") })
+    }
+
+    @Test("installCoreFonts verifies each font's pinned SHA-256 and drops a mismatch (never executes it)")
+    func coreFontsVerifyDigest() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let stub = Data("FONT-INSTALLER-BYTES".utf8)
+        // andale32 (the user-guided first font) is pinned to the stub's REAL digest → accepted + executed;
+        // arial32 is pinned to a WRONG digest → the downloaded .exe is rejected + never executed.
+        let (bottle, fake, _, _) = make(
+            tmp, session: session,
+            coreFontDigests: ["andale32": sha256Hex(stub), "arial32": String(repeating: "0", count: 64)])
+        FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("andale32.exe").absoluteString,
+                             data: stub, session: session)
+        FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("arial32.exe").absoluteString,
+                             data: stub, session: session)
+
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+
+        let ranExes = Set(fake.invocations.compactMap { $0.arguments.first(where: { $0.hasSuffix(".exe") }) })
+        #expect(ranExes.contains("C:\\andale32.exe"))    // matching digest → executed
+        #expect(!ranExes.contains("C:\\arial32.exe"))     // wrong digest → dropped, never executed
+    }
+
+    @Test("every core font + both d3dcompiler cabs have a 64-hex pinned SHA-256 (fail-open-on-missing is safe)")
+    func pinnedDigestsAreComplete() {
+        for font in Silo.coreFonts {
+            #expect(Silo.coreFontSHA256[font]?.count == 64, "missing/short pin for \(font)")
+        }
+        #expect(Silo.d3dCompiler47X64CabSHA256.count == 64)
+        #expect(Silo.d3dCompiler47X86CabSHA256.count == 64)
     }
 
     // MARK: - Game-dependency components

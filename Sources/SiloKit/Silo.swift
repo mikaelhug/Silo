@@ -35,10 +35,31 @@ public enum Silo {
     /// run Microsoft's original installers, never re-host the fonts.
     public static let coreFontsBaseURL = URL(string: "https://downloads.sourceforge.net/corefonts/")!
     public static let coreFonts = ["andale32", "arial32", "arialb32", "comic32", "courie32", "georgi32",
-                                   "impact32", "times32", "trebuc32", "verdan32", "webdings32"]
-    /// Winetricks' current corefonts mirror. SourceForge's `downloads.sourceforge.net` redirector is flaky,
-    /// so each font falls back to this GitHub raw mirror (byte-identical) when the primary download fails.
+                                   "impact32", "times32", "trebuc32", "verdan32", "webdin32"]
+    /// Winetricks' current corefonts mirror (its OWN primary download URL for these files) — byte-identical
+    /// to SourceForge. SourceForge's `downloads.sourceforge.net` redirector is flaky, so each font falls back
+    /// to this GitHub raw mirror when the primary download fails. Both mirrors are tamper-checked against the
+    /// pinned SHA-256 below before the installer is executed, so which mirror served the bytes is immaterial.
     public static let coreFontsFallbackBaseURL = URL(string: "https://github.com/pushcx/corefonts/raw/master/")!
+    /// Pinned SHA-256 of each core-font self-extracting `.exe` (keyed by `coreFonts` entry). Silo DOWNLOADS
+    /// these from a third-party mirror and then EXECUTES them under Wine, so each is verified against its
+    /// digest before it runs — a tampered/corrupt mirror is rejected, not executed. Values are winetricks'
+    /// published pins (`src/winetricks`, the `load_corefonts` verb), cross-checked here against the live
+    /// SourceForge + pushcx bytes (both matched, 2026-07-12). A completeness test asserts every `coreFonts`
+    /// entry has one here.
+    public static let coreFontSHA256: [String: String] = [
+        "andale32": "0524fe42951adc3a7eb870e32f0920313c71f170c859b5f770d82b4ee111e970",
+        "arial32":  "85297a4d146e9c87ac6f74822734bdee5f4b2a722d7eaa584b7f2cbf76f478f6",
+        "arialb32": "a425f0ffb6a1a5ede5b979ed6177f4f4f4fdef6ae7c302a7b7720ef332fec0a8",
+        "comic32":  "9c6df3feefde26d4e41d4a4fe5db2a89f9123a772594d7f59afd062625cd204e",
+        "courie32": "bb511d861655dde879ae552eb86b134d6fae67cb58502e6ff73ec5d9151f3384",
+        "georgi32": "2c2c7dcda6606ea5cf08918fb7cd3f3359e9e84338dc690013f20cd42e930301",
+        "impact32": "6061ef3b7401d9642f5dfdb5f2b376aa14663f6275e60a51207ad4facf2fccfb",
+        "times32":  "db56595ec6ef5d3de5c24994f001f03b2a13e37cee27bc25c58f6f43e8f807ab",
+        "trebuc32": "5a690d9bb8510be1b8b4fe49f1f2319651fe51bbe54775ddddd8ef0bd07fdac9",
+        "verdan32": "c1cb61255e363166794e47664e2f21af8e3a26cb6346eb8d2ae2fa85dd5aad96",
+        "webdin32": "64595b5abc1080fba8610c5c34fab5863408e806aafe84653ca8575bed17d75a",
+    ]
 
     /// Adobe Source Han Sans — the open-source (SIL OFL 1.1) pan-CJK font family. Silo installs the four
     /// per-language "Language-specific OTF" packs (Japanese / Korean / Simplified / Traditional Chinese) into
@@ -64,6 +85,14 @@ public enum Silo {
     public static let d3dCompiler47X86CabURL = URL(string:
         "https://download.microsoft.com/download/B/0/C/B0C80BA3-8AD6-4958-810B-6882485230B5/standalonesdk/Installers/2630bae9681db6a9f6722366f47d055c.cab")!
     public static let d3dCompiler47X86Member = "fila319f706acfa16d6707473ebf29bdc7f"
+    /// Pinned SHA-256 of the two d3dcompiler_47 SDK cabinets (keyed by their `…Member`), verified before the
+    /// DLL is `wine expand`ed out and later loaded by games. These are fixed, GUID-named, immutable Microsoft
+    /// SDK installers; winetricks itself doesn't pin them (it relies on cabextract matching a named member),
+    /// so these are computed from Microsoft's own `download.microsoft.com` HTTPS artifacts (captured 2026-07-12,
+    /// stable across re-download) — trust-on-first-use from the vendor, strictly stronger than the prior
+    /// no-verification path.
+    public static let d3dCompiler47X64CabSHA256 = "f736e161547095bb8d98c636b85fdfeb4070fefeee3c3745db3ce88f6eb1d9de"
+    public static let d3dCompiler47X86CabSHA256 = "d0440eb81c532dc23639c0c63f2fcde9deddb23bb4cce01c19ac6b96cc3e269d"
 
     /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.

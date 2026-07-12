@@ -3,6 +3,37 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔐 Supply-chain integrity — third-party downloads now content-pinned (2026-07-12, `main`; `swift build`
+  clean + zero warnings, 372 tests green).** Closes the remaining production gate from sweep #2: the artifacts
+  Silo downloads and then EXECUTES under Wine are now verified against pinned SHA-256 before they run, so a
+  compromised mirror/CDN can no longer feed the prefix malicious code.
+  - **Core fonts pinned.** `Silo.coreFontSHA256` pins all 11 self-extracting `.exe`s (winetricks' published
+    `load_corefonts` digests, cross-checked here against the live SourceForge **and** pushcx bytes — both
+    matched). `SteamBottle.installCoreFonts` verifies each download before executing it; a tampered/corrupt
+    mirror falls through to the other mirror, and if neither verifies the font is dropped (never run). The
+    pushcx GitHub fallback is now safe to keep (it's winetricks' own primary mirror, and the pin makes the
+    source immaterial) — so it stays, for resilience, rather than being removed.
+  - **Bugfix found while pinning:** the core-font list had `webdings32`, but the real corefonts filename is
+    `webdin32` — `webdings32.exe` 404s on both mirrors, so Webdings never installed. Fixed to `webdin32` (+
+    its verified pin).
+  - **d3dcompiler cabs pinned.** `Silo.d3dCompiler47{X64,X86}CabSHA256` pin the two MS SDK cabinets (verified
+    before `wine expand`s the DLL games load). winetricks doesn't pin these, so the values are SHA-256 of
+    Microsoft's own `download.microsoft.com` HTTPS artifacts (immutable GUID-named SDK cabs; stable across
+    re-download) — trust-on-first-use from the vendor, strictly stronger than the prior zero verification.
+  - **Redirect-safe HTTPS was already covered — by ATS, more strongly than app code could.** Confirmed
+    `NSAllowsArbitraryLoads=false` (Info.plist) makes the OS refuse cleartext at EVERY hop, so a redirect to
+    `http://` fails the whole request (through SourceForge/`aka.ms` redirectors too). Documented the layering
+    in `DownloadGuard` rather than adding a redundant per-hop delegate. The residual (https→attacker-*https*)
+    is what the content pins above close.
+  - **Design:** digest maps are injected into `SteamBottle` (default = the real `Silo` pins). A missing key =
+    "unpinned → don't verify"; a completeness test asserts the production maps cover every font + both cabs,
+    so fail-open-on-missing can't bite in production while tests inject `[:]` to run the install flow with stub
+    bytes. Tests (+2): a mismatched font digest is dropped + never executed (accept + reject paths); pins are
+    complete.
+  - **Still deferred (correctly):** the Steam + VC-redist *bootstrappers* auto-rotate versions, so they stay
+    HTTPS + official-host (aka.ms / steamstatic) without a content pin; and the self-update codesign/
+    notarization check remains a no-op until there's an Apple Developer ID (see BLOCKED). Neither is a
+    fixed-artifact pin, so neither is guessed inline.
 - **🛡️ Production-hardening sweep #2 — security/integrity/robustness (2026-07-12, `main`; `swift build` clean
   + zero warnings, 370 tests green).** A second, differently-scoped pass (3 parallel audits: security/injection
   surface, download & extraction integrity, untrusted-input & filesystem/concurrency robustness) — the first

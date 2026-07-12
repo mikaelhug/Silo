@@ -12,13 +12,28 @@ public struct SteamBottle: Sendable {
     private let runner: ProcessRunning
     private let session: URLSession
     private let paths: AppPaths
+    /// Pinned SHA-256 the downloaded-then-EXECUTED third-party artifacts are verified against before they run
+    /// (core-font `.exe`s keyed by `coreFonts` entry; d3dcompiler cabs keyed by member). A missing key means
+    /// "not pinned → don't verify" — production always passes the full `Silo` maps (a completeness test
+    /// guarantees no gaps), while tests inject `[:]` to exercise the install flow with stub bytes.
+    private let coreFontDigests: [String: String]
+    private let d3dCabDigests: [String: String]
     // Computed (not stored): FileManager isn't Sendable, but the shared instance is fine to use.
     private var fileManager: FileManager { .default }
 
-    public init(runner: ProcessRunning, session: URLSession = .shared, paths: AppPaths) {
+    public init(
+        runner: ProcessRunning, session: URLSession = .shared, paths: AppPaths,
+        coreFontDigests: [String: String] = Silo.coreFontSHA256,
+        d3dCabDigests: [String: String] = [
+            Silo.d3dCompiler47X64Member: Silo.d3dCompiler47X64CabSHA256,
+            Silo.d3dCompiler47X86Member: Silo.d3dCompiler47X86CabSHA256,
+        ]
+    ) {
         self.runner = runner
         self.session = session
         self.paths = paths
+        self.coreFontDigests = coreFontDigests
+        self.d3dCabDigests = d3dCabDigests
     }
 
     // The bottle's paths.
@@ -164,6 +179,7 @@ public struct SteamBottle: Sendable {
         // Download all installers CONCURRENTLY (independent ~500 KB files); each falls back to the winetricks
         // GitHub mirror when SourceForge's flaky redirector fails.
         let session = self.session
+        let coreFontDigests = self.coreFontDigests
         let downloaded: [String: URL] = await withTaskGroup(of: (font: String, exe: URL)?.self) { group in
             for font in Silo.coreFonts {
                 let exe = driveC.appendingPathComponent("\(font).exe")
@@ -177,6 +193,13 @@ public struct SteamBottle: Sendable {
                               (200..<300).contains(http.statusCode) else { continue }
                         try? fm.removeItem(at: exe)
                         guard (try? fm.moveItem(at: tempFile, to: exe)) != nil else { continue }
+                        // Integrity: these .exe are EXECUTED under Wine, so a pinned font is verified against
+                        // its SHA-256 before it's trusted. A tamper/corruption on one mirror falls through to
+                        // the next; if none verifies, the font is dropped (never run). Unpinned (no key) passes.
+                        if let expected = coreFontDigests[font],
+                           (try? FileDigest.sha256(ofFileAt: exe)) != expected {
+                            try? fm.removeItem(at: exe); continue
+                        }
                         return (font: font, exe: exe)
                     }
                     return nil
@@ -353,6 +376,12 @@ public struct SteamBottle: Sendable {
                   let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { continue }
             try? fileManager.removeItem(at: cab)
             guard (try? fileManager.moveItem(at: tempFile, to: cab)) != nil else { continue }
+            // Integrity: verify the cab against its pinned SHA-256 before expanding a DLL that games load.
+            // A tampered/corrupt cab is dropped (skip this ABI). Unpinned (no key) passes (tests inject `[:]`).
+            if let expected = d3dCabDigests[member],
+               (try? FileDigest.sha256(ofFileAt: cab)) != expected {
+                try? fileManager.removeItem(at: cab); continue
+            }
             let destDir = driveC.appendingPathComponent(unixDir)
             try? fileManager.createDirectory(at: destDir, withIntermediateDirectories: true)
             // `wine expand <cab> -F:<member> C:\windows\<dir>` extracts the single member (named `member`)
