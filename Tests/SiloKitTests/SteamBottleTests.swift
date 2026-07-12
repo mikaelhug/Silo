@@ -491,23 +491,28 @@ struct SteamBottleTests {
         #expect(!bottle.isVCRedistInstalled(x86: true))   // NOT marked → the next setup runs it again
     }
 
-    @Test("declining the first Core Font EULA FAILS setup (componentCancelled) and installs nothing")
-    func coreFontsCancelFailsSetup() async throws {
+    @Test("declining the core-fonts license installs nothing but does NOT fail setup (best-effort; re-prompts)")
+    func coreFontsDeclineIsBestEffort() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
-        let (bottle, fake, _, _) = make(tmp, session: session)
+        let (bottle, fake, paths, _) = make(tmp, session: session)
         for font in Silo.coreFonts {
             FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString,
                                  data: Data("EXE".utf8), session: session)
         }
-        fake.queueResult(ProcessResult(exitCode: 1))   // user declined the first font's license
+        fake.onRun = { _ in }   // nothing extracts to silo-fonts → simulates the user DECLINING the license
 
-        await #expect(throws: SteamBottle.BottleError.componentCancelled(.coreFonts)) {
-            try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
-        }
-        #expect(!bottle.hasCoreFonts)                                                  // nothing installed
+        // Best-effort: the (unreliable-under-Wine) installer exit code is no longer treated as a cancel, so
+        // this must NOT throw — a declined font is simply skipped, it doesn't halt the whole setup.
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+
+        #expect(!bottle.hasCoreFonts)                                    // nothing extracted ⇒ nothing installed
+        // Acceptance is NOT recorded, so a resumed Set up re-shows the license.
+        let eulaMarker = paths.steamBottle.appendingPathComponent(".silo-installed/corefonts-eula")
+        #expect(!FileManager.default.fileExists(atPath: eulaMarker.path))
+        // The first font still ran WITHOUT /Q (the license prompt); the decline just didn't install anything.
         let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
-        #expect(fontRuns.count == 1)                                                   // stopped after the first
+        #expect(fontRuns.first?.arguments.contains("/Q") == false)
     }
 
     @Test("provisionComponents rethrows a user cancel — setup STOPS before Steam (not best-effort)")

@@ -3,6 +3,23 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🩹 Fix: Core Fonts setup step (regression in 0.3.5) (2026-07-12, `main`; `swift build` clean, 372 tests
+  green).** A user hit two problems at the Core Fonts step during a real on-device setup:
+  - **Accepting the license was misread as a cancel → setup halted.** The IExpress core-font installers return
+    a NON-ZERO exit code even on Accept under Wine (winetricks never runs them for exactly this reason — it
+    extracts them), so the exit-code check (`result?.succeeded`) falsely tripped `componentCancelled`. Reworked
+    `installCoreFonts`: every font is extracted to Silo's own dir via `/C /T` (reliable under Wine), the FIRST
+    runs WITHOUT `/Q` so IExpress shows Microsoft's license once, and accept-vs-decline is read from whether
+    the `.ttf` actually extracted — a decline now just skips that font (best-effort), it never fails setup. Core
+    Fonts no longer uses `componentCancelled` (VC-redist / Steam still hard-stop on cancel, via their reliable
+    MSI/installer exit codes).
+  - **Confusing "Accept the license" message** appeared minutes before the window (during the font download).
+    The user-guided component narration now says the license window will open shortly and may take a moment to
+    download first.
+  - **⚠️ On-device-unverified (Wine absent on the dev box):** the logic is unit-tested, but the Wine-specific
+    behavior — `/C /T` (no `/Q`) showing the license + extracting the `.ttf` on Accept — needs a real Set up run
+    to confirm before shipping a 0.3.6. Worst case it extracts silently (license not shown) but setup still
+    completes; it can no longer falsely block.
 - **🔐 Supply-chain integrity — third-party downloads now content-pinned (2026-07-12, `main`; `swift build`
   clean + zero warnings, 372 tests green).** Closes the remaining production gate from sweep #2: the artifacts
   Silo downloads and then EXECUTES under Wine are now verified against pinned SHA-256 before they run, so a

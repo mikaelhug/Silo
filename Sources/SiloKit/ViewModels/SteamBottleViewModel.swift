@@ -124,7 +124,8 @@ public final class SteamBottleViewModel {
     /// accept the license (the install blocks on the GUI), the rest just narrate progress.
     static func componentStatus(_ component: BottleComponent) -> String {
         component.isUserGuided
-            ? "Accept the license for \(component.title), then setup continues…"
+            ? "Setting up \(component.title) — its license window will open shortly (it may take a moment to "
+              + "download first); accept it to continue…"
             : "Setting up Steam — installing \(component.title)…"
     }
 

@@ -222,35 +222,35 @@ public struct SteamBottle: Sendable {
         let eulaAccepted = fileManager.fileExists(atPath: eulaMarker.path)
         for (index, font) in Silo.coreFonts.enumerated() {
             guard let exe = downloaded[font] else { continue }
-            if index == 0, !eulaAccepted {
-                // User-guided: the installer shows its EULA and installs the font itself on accept (blocks).
-                // A decline/cancel exits non-zero and installs nothing — fail setup rather than silently
-                // continue with a half-provisioned bottle (the user asked to be stopped, not skipped past).
-                let result = try? await runner.run(
-                    executable: wine, arguments: ["C:\\\(font).exe"],
-                    environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
-                    currentDirectory: prefixDir)
-                guard result?.succeeded == true else {
-                    try? fileManager.removeItem(at: exe)
-                    throw BottleError.componentCancelled(.coreFonts)
-                }
+            // Extract each font's `.ttf` into our OWN dir via IExpress extract-only (`/C /T:<dir>`), then copy
+            // it into Fonts. This is reliable under Wine — unlike relying on the installer to self-install, or
+            // on its EXIT CODE, which is NOT trustworthy here (an ACCEPTED core-font installer routinely exits
+            // non-zero under Wine, which previously misfired as a "cancelled" and halted setup). The FIRST font
+            // (once) runs WITHOUT `/Q`, so IExpress shows Microsoft's core-fonts LICENSE for the user to accept;
+            // the rest are silent. Accept vs decline is read from whether the `.ttf` actually extracted — a
+            // decline simply skips that font (best-effort), it never fails the whole setup.
+            let showLicense = (index == 0 && !eulaAccepted)
+            try? fileManager.removeItem(at: extractDir)
+            try? fileManager.createDirectory(at: extractDir, withIntermediateDirectories: true)
+            var args = ["C:\\\(font).exe", "/T:C:\\silo-fonts", "/C"]
+            if !showLicense { args.append("/Q") }   // silent for every font AFTER the one-time license prompt
+            _ = try? await runner.run(
+                executable: wine, arguments: args,
+                environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
+                currentDirectory: prefixDir)
+            let ttfs = ((try? fileManager.contentsOfDirectory(at: extractDir, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.pathExtension.lowercased() == "ttf" }
+            for file in ttfs {
+                let dest = fontsDir.appendingPathComponent(file.lastPathComponent)
+                try? fileManager.removeItem(at: dest)
+                try? fileManager.copyItem(at: file, to: dest)
+            }
+            // Record the accepted license (so a resumed setup doesn't re-prompt) ONLY once the licensed font
+            // actually extracted — i.e. the user accepted. A decline extracts nothing, leaves the marker
+            // absent, and the next Set up re-shows the license.
+            if showLicense, !ttfs.isEmpty {
                 try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
                 fileManager.createFile(atPath: eulaMarker.path, contents: Data())
-            } else {
-                // IExpress extract-only (`/T:<dir> /C /Q`): drops the .ttf into the target with no GUI.
-                try? fileManager.removeItem(at: extractDir)
-                try? fileManager.createDirectory(at: extractDir, withIntermediateDirectories: true)
-                _ = try? await runner.run(
-                    executable: wine, arguments: ["C:\\\(font).exe", "/T:C:\\silo-fonts", "/C", "/Q"],
-                    environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
-                    currentDirectory: prefixDir)
-                let extracted = (try? fileManager.contentsOfDirectory(
-                    at: extractDir, includingPropertiesForKeys: nil)) ?? []
-                for file in extracted where file.pathExtension.lowercased() == "ttf" {
-                    let dest = fontsDir.appendingPathComponent(file.lastPathComponent)
-                    try? fileManager.removeItem(at: dest)
-                    try? fileManager.copyItem(at: file, to: dest)
-                }
             }
             try? fileManager.removeItem(at: exe)
         }
