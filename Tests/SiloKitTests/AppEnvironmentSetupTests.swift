@@ -43,4 +43,27 @@ struct AppEnvironmentSetupTests {
         #expect(runner.invocations.contains { $0.arguments == ["wineboot", "--init"] })
         #expect(!runner.invocations.contains { $0.arguments.first?.hasSuffix("SteamSetup.exe") == true })
     }
+
+    @Test("runFullSetup stops (and surfaces the real error) when the Wine install fails — no masked setUp")
+    func runFullSetupStopsWhenWineInstallFails() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let runner = FakeProcessRunner()
+        // A stub-less runtime session → the Wine releases fetch fails deterministically (offline, no stub).
+        let env = AppEnvironment(
+            paths: paths, runner: runner,
+            updater: Updater(repo: "x/y", session: FakeURLProtocol.makeSession()),
+            runtimeSession: FakeURLProtocol.makeSession())
+        #expect(!env.wineReady)   // Wine not configured → runFullSetup will try (and fail) to install it
+
+        await env.runFullSetup()
+
+        #expect(!env.wineReady)                        // still unconfigured
+        #expect(env.runtime.statusMessage != nil)      // the REAL install error is preserved for the UI…
+        #expect(env.steamBottleVM.status.isEmpty)      // …and setUp never ran to mask it with "Set up Wine first."
+        // The Steam bottle was never provisioned (no wineboot) and DXMT was never attempted.
+        #expect(!runner.invocations.contains { $0.arguments == ["wineboot", "--init"] })
+        #expect(env.dxmtRuntime.statusMessage == nil)
+        #expect(!env.setupBusy)
+    }
 }

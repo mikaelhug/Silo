@@ -36,20 +36,28 @@ struct OnboardingView: View {
                 .frame(maxWidth: 540)
 
                 if env.setupBusy {
-                    // A blue progress bar instead of the changing per-step text — determinate during the
-                    // Steam client download (a real %), an animated indeterminate bar for the other steps.
-                    // NB: use a value-less `ProgressView()` for the indeterminate case — `ProgressView(value:
-                    // nil)` renders a STATIC (non-animating) linear bar, so it can't be one call with an
-                    // optional value (same split as GeneralSettingsView's bottle progress).
-                    Group {
-                        if let fraction = env.steamBottleVM.warmUpFraction {
-                            ProgressView(value: fraction)   // real % from Steam's own download progress
-                        } else {
-                            ProgressView()                  // indeterminate → animates left-to-right
+                    // A blue progress bar — with the active phase's status under it — instead of the changing
+                    // per-step text. Determinate during the Steam client download (a real %), an animated
+                    // indeterminate bar otherwise. NB: use a value-less `ProgressView()` for the indeterminate
+                    // case — `ProgressView(value: nil)` renders a STATIC (non-animating) linear bar (same
+                    // split as GeneralSettingsView's bottle progress).
+                    VStack(spacing: 10) {
+                        Group {
+                            if let fraction = steam.warmUpFraction {
+                                ProgressView(value: fraction)   // real % from Steam's own download progress
+                            } else {
+                                ProgressView()                  // indeterminate → animates left-to-right
+                            }
+                        }
+                        .progressViewStyle(.linear)
+                        .tint(.blue)
+                        // The active phase's status (esp. "Accept the license for …") so a license/installer
+                        // window that pops up has context — it was previously hidden behind the bare bar.
+                        if let phase = setupPhaseText() {
+                            Text(phase).font(.callout).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
                     }
-                    .progressViewStyle(.linear)
-                    .tint(.blue)
                     .frame(maxWidth: 540)
                 } else {
                     // Idle: surface the final/error status (setup done, or a Wine/GPTK failure).
@@ -72,6 +80,15 @@ struct OnboardingView: View {
             .padding(40)
             .frame(maxWidth: .infinity)
         }
+    }
+
+    /// The status of whichever setup phase is active, for the line under the progress bar: the bottle's own
+    /// status once setUp is running (component prompts + warm-up), else the in-flight runtime download.
+    private func setupPhaseText() -> String? {
+        if !env.steamBottleVM.status.isEmpty { return env.steamBottleVM.status }
+        if env.runtime.isInstalling { return env.runtime.statusMessage }
+        if env.dxmtRuntime.isInstalling { return env.dxmtRuntime.statusMessage }
+        return nil
     }
 }
 

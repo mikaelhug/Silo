@@ -34,11 +34,15 @@ public final class AppEnvironment {
     public let bottles: BottlesRelocationCoordinator
     public private(set) var didBootstrap = false
     private var isBootstrapping = false
+    /// Re-entrancy guard for the guided setup chain (the onboarding "Set up" button) — a double-tap in the
+    /// sub-millisecond window before the runtime/bottle busy flags flip would otherwise start two chains.
+    private var isRunningFullSetup = false
 
     public init(
         paths: AppPaths = .standard(),
         runner: ProcessRunning = SystemProcessRunner(),
-        updater: Updater? = nil
+        updater: Updater? = nil,
+        runtimeSession: URLSession = .shared
     ) {
         self.paths = paths
         self.runner = runner
@@ -52,7 +56,7 @@ public final class AppEnvironment {
         let linker = GraphicsLinker()
         let discovery = DiscoveryEngine()
         let orchestrator = LaunchOrchestrator(runner: runner, linker: linker)
-        let runtimeManager = RuntimeManager(paths: paths, runner: runner)
+        let runtimeManager = RuntimeManager(paths: paths, runner: runner, session: runtimeSession)
 
         self.configStore = configStore
         self.linker = linker
@@ -216,25 +220,29 @@ public final class AppEnvironment {
     /// (download Steam → create the bottle → install the game-dependency component set, user-guided where a
     /// license is shown → warm up the client). GPTK is imported separately (its own onboarding step).
     public func runFullSetup() async {
-        // 1. Wine — then wait for the new default to persist AND reach the bottle VM. `installLatest` applies
-        //    the default via `onDefaultChanged` (a Task), so `setUp` could otherwise read a nil wine binary.
+        guard !isRunningFullSetup else { return }
+        isRunningFullSetup = true
+        defer { isRunningFullSetup = false }
+
+        // 1. Wine — then apply the freshly-installed runtime to the backend config HERE, awaited, so the
+        //    bottle VM has its wine binary before setUp. `installLatest` also adopts it via `onDefaultChanged`
+        //    (a fire-and-forget Task), but we can't await that; applying it directly is deterministic (no poll)
+        //    and idempotent with the Task. If the download failed, `wineReady` stays false — bail so the real
+        //    error (`runtime.statusMessage`) surfaces instead of setUp masking it with "Set up Wine first."
         if !wineReady {
             await runtime.installLatest()
-            await waitFor { self.wineReady && self.steamBottleVM.canSetUp }
+            if let wine = runtime.installed.first(where: { $0.name == runtime.defaultName }) {
+                await backendSettings.applyDefaultWine(wine)
+            }
+            guard wineReady else { return }
         }
         // 2. DXMT runtime (best-effort — readies the future auto-backend; not a prerequisite for the bottle).
-        //    Matched to the configured wine, so it must run AFTER the wine default is applied (step 1's wait).
+        //    Matched to the configured wine, so it must run AFTER the wine default is applied (step 1).
         if !dxmtReady {
             await dxmtRuntime.installLatest()
         }
         // 3. The Steam bottle: download → create → components → user-guided Steam → warm-up + wrap.
         await steamBottleVM.setUp()
-    }
-
-    /// Bounded wait for a main-actor condition to hold (e.g. an async config-persist `Task` fired by a
-    /// runtime-default change to land). Best-effort — returns after ~5s regardless.
-    private func waitFor(_ condition: () -> Bool) async {
-        for _ in 0..<250 where !condition() { try? await Task.sleep(for: .milliseconds(20)) }
     }
 
     // MARK: - Steam-bottle Wine tools (Settings → General)
