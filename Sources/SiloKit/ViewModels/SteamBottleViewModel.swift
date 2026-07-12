@@ -74,9 +74,12 @@ public final class SteamBottleViewModel {
         busy = true
         // Prefetch the core-font installers in the BACKGROUND from the moment Set up is pressed, so their
         // (small but sometimes slow-mirror) download overlaps the Steam download + wineboot below instead of
-        // stalling the Core Fonts step. Awaited just before the component phase — a warm cache means no wait
-        // there, and no double-download.
-        let fontsPrefetch = Task.detached { [bottle] in await bottle.prefetchCoreFonts() }
+        // stalling the Core Fonts step. `prefetchDone` lets the wait below surface a "Downloading…" status
+        // ONLY if it's still running when we get there — a warm cache (the common case) skips that flash.
+        let prefetchDone = LockedBox(false)
+        let fontsPrefetch = Task.detached { [bottle, prefetchDone] in
+            await bottle.prefetchCoreFonts(); prefetchDone.set(true)
+        }
         // The focuser is armed per user-guided step (see `applyComponentPhase`); always disarm on exit.
         defer { busy = false; focuser?.disarm() }
         do {
@@ -90,8 +93,9 @@ public final class SteamBottleViewModel {
             status = "Configuring the bottle…"
             await bottle.applyWineDefaults(wine: wine)
             // Make sure the background core-font prefetch has finished warming the cache before the component
-            // phase consumes it (usually already done — it overlapped the steps above).
-            status = "Downloading core fonts…"
+            // phase consumes it. Surface "Downloading…" ONLY if it's still running (a warm cache — the common
+            // case, it overlapped the steps above — goes straight through with no flash).
+            if !prefetchDone.value { status = "Downloading core fonts…" }
             await fontsPrefetch.value
             // Steps 5–11: the game-dependency component set, in order (fonts → d3dcompiler → MSVC → Steam).
             try await bottle.provisionComponents(wine: wine, onPhase: { [weak self] component in

@@ -10,7 +10,9 @@
   New `SteamBottle.prefetchCoreFonts()` (best-effort; no-ops when `hasCoreFonts`) + a shared `cachedCoreFontExe`
   fetch-or-cache primitive that both the prefetch and `installCoreFonts` consume — so each font downloads at
   most once (HTTPS-guarded, SHA-verified). `SteamBottleViewModel.setUp` kicks it off up front and `await`s it
-  just before the component phase (warm cache ⇒ no wait there, no double-download). The user-guided component
+  just before the component phase (warm cache ⇒ no wait there, no double-download) — surfacing a "Downloading
+  core fonts…" status there ONLY if the prefetch is still running (a `LockedBox` completion flag), so a warm
+  cache skips the flash. The user-guided component
   narration is now the short "Accept the … license in the window that opens…" (the "downloading first" text is
   obsolete now the download is prefetched). Shares the Core Fonts fix's on-device-unverified caveat.
 - **🩹 Fix: Core Fonts setup step (regression in 0.3.5) (2026-07-12, `main`; `swift build` clean, 372 tests
