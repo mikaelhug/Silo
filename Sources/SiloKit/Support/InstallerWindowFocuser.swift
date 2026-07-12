@@ -17,11 +17,11 @@ protocol GuidedInstallFocusing: AnyObject {
 /// *behind* the still-active launcher, so the user can miss the license dialog they're meant to click through.
 ///
 /// Two things make this reliable on modern macOS, where the naive approach fails:
-///  - **Detection by polling, not the launch notification.** A Wine GUI process forked via `Process` (not
-///    LaunchServices) self-transforms into a UI app and frequently does NOT post
-///    `didLaunchApplicationNotification` — and its window can appear a beat after the process starts. So while
-///    armed we POLL `runningApplications` for a regular-policy app whose executable lives under `wineRoot`.
-///    (The launch notification is kept as an extra immediate trigger for when it *does* fire.)
+///  - **Event-driven detection (no polling).** A plain launch notification is unreliable here — a Wine GUI
+///    process forked via `Process` (not LaunchServices) self-transforms into a UI app and frequently doesn't
+///    post `didLaunchApplicationNotification`. So we ALSO KVO-observe `NSWorkspace.runningApplications`, whose
+///    set changes the instant that Wine process becomes a UI app (and its window is about to appear). Either
+///    signal — plus an immediate check at arm time — triggers a front attempt.
 ///  - **Cooperative activation.** A plain `activate()` from a helper is ignored by the focus-stealing guard
 ///    since macOS 14, so Silo (the active app) must YIELD activation to the Wine app first.
 ///
@@ -31,33 +31,32 @@ protocol GuidedInstallFocusing: AnyObject {
 @MainActor
 final class InstallerWindowFocuser: GuidedInstallFocusing {
     private var wineRoot: URL?
-    private var poller: Task<Void, Never>?
-    private var observer: NSObjectProtocol?
-    /// How often to re-check for a Wine installer window while armed.
-    private let pollInterval: Duration = .milliseconds(400)
+    private var launchObserver: NSObjectProtocol?
+    private var appsObservation: NSKeyValueObservation?
 
     init() {}
 
     func arm(wineRoot: URL) {
         self.wineRoot = wineRoot
-        if observer == nil {
-            observer = NSWorkspace.shared.notificationCenter.addObserver(
+        if launchObserver == nil {
+            launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
             ) { [weak self] _ in MainActor.assumeIsolated { self?.focusWineWindow() } }
         }
-        guard poller == nil else { return }
-        poller = Task { [weak self] in
-            while !Task.isCancelled {
-                self?.focusWineWindow()
-                try? await Task.sleep(for: self?.pollInterval ?? .milliseconds(400))
+        if appsObservation == nil {
+            // Fires whenever an app joins/leaves the running-apps set — i.e. the moment a Wine process becomes
+            // a UI app — which the launch notification alone can miss.
+            appsObservation = NSWorkspace.shared.observe(\.runningApplications, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor in self?.focusWineWindow() }
             }
         }
+        focusWineWindow()   // the window may already be up when this step arms
     }
 
     func disarm() {
-        poller?.cancel(); poller = nil
-        if let observer { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
-        observer = nil
+        if let launchObserver { NSWorkspace.shared.notificationCenter.removeObserver(launchObserver) }
+        launchObserver = nil
+        appsObservation?.invalidate(); appsObservation = nil
         wineRoot = nil
     }
 

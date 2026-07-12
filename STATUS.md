@@ -8,11 +8,13 @@
   cause: the focuser relied on `didLaunchApplicationNotification` + a bare `activate()` — but a Wine GUI process
   forked via `Process` (not LaunchServices) self-transforms into a UI app and usually does NOT fire that launch
   notification, and a plain `activate()` from a helper is ignored by macOS 14+'s focus-stealing guard.
-  `InstallerWindowFocuser` rewritten to (a) POLL `runningApplications` every 400ms while armed for a
-  regular-activation-policy app whose executable is under the runtime root, and (b) use COOPERATIVE activation
-  (`NSApp.yieldActivation(to:)` + `activate([.activateAllWindows])`) — only when SILO itself is frontmost (so it
-  never yanks the user away from a deliberate app switch). `isWineApp` match unchanged. Fail-safe (can only
-  help) but **on-device-unverified** (no Wine on the dev box) — it's the standard macOS 14+ approach.
+  `InstallerWindowFocuser` rewritten to (a) detect EVENT-DRIVEN (no polling): the launch notification PLUS KVO
+  on `NSWorkspace.runningApplications`, whose set changes the instant a Wine process becomes a UI app (the
+  reliable signal the launch notification alone misses), matching a regular-activation-policy app under the
+  runtime root; and (b) use COOPERATIVE activation (`NSApp.yieldActivation(to:)` + `activate([.activateAllWindows])`)
+  — only when SILO itself is frontmost (so it never yanks the user away from a deliberate app switch). `isWineApp`
+  match unchanged. Fail-safe (can only help) but **on-device-unverified** (no Wine on the dev box) — it's the
+  standard macOS 14+ approach.
 - **🔎 Setup logical sweep + fixes before the on-device test (2026-07-12, `main`; `swift build` clean, 375
   tests green).** Two fresh-eyes audits of the whole setup path (`runFullSetup` → `setUp` → `provisionComponents`
   → warm-up) confirmed the happy path is sound; fixed the defects most likely to bite an on-device run:
