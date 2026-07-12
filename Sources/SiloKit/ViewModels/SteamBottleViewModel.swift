@@ -13,19 +13,11 @@ public final class SteamBottleViewModel {
     /// The live Steam client is owned by the shared session (not spawned here), so the settings "Launch
     /// Steam" can't start a second, untracked client behind the Library's back.
     private let session: SteamClientSession
-    /// Brings the user-guided installer/license windows to the front so the user notices them (nil in tests).
-    private let focuser: GuidedInstallFocusing?
     private var wineBinary: URL?
 
-    init(bottle: SteamBottle, session: SteamClientSession, focuser: GuidedInstallFocusing? = nil) {
+    init(bottle: SteamBottle, session: SteamClientSession) {
         self.bottle = bottle
         self.session = session
-        self.focuser = focuser
-    }
-
-    /// The Wine runtime root (`…/wine`), parent of `bin/`, used to recognise Wine's own installer windows.
-    private var wineRoot: URL? {
-        wineBinary?.deletingLastPathComponent().deletingLastPathComponent()
     }
 
     public func updateWine(_ url: URL?) {
@@ -80,10 +72,9 @@ public final class SteamBottleViewModel {
         let fontsPrefetch = Task.detached { [bottle, prefetchDone] in
             await bottle.prefetchCoreFonts(); prefetchDone.set(true)
         }
-        // The focuser is armed per user-guided step (see `applyComponentPhase`); always disarm on exit.
-        // Cancel the prefetch too: a no-op on the success path (already awaited below), but on an EARLY throw it
-        // stops the detached download from outliving setUp and racing a re-run's prefetch on the same cache.
-        defer { busy = false; focuser?.disarm(); fontsPrefetch.cancel() }
+        // Cancel the prefetch on exit: a no-op on the success path (already awaited below), but on an EARLY
+        // throw it stops the detached download from outliving setUp and racing a re-run's prefetch on the cache.
+        defer { busy = false; fontsPrefetch.cancel() }
         do {
             // Step 3: download the Steam installer up front so a network failure surfaces before booting.
             status = "Downloading Steam…"
@@ -103,7 +94,6 @@ public final class SteamBottleViewModel {
             try await bottle.provisionComponents(wine: wine, onPhase: { [weak self] component in
                 self?.applyComponentPhase(component)
             })
-            focuser?.disarm()   // installers done — stop focusing before the (windowless) warm-up
             // The user-guided Steam installer may auto-launch Steam with no CEF wrapper/virtual-desktop env
             // (→ black window) AND an untracked client. Kill whatever it spawned before the controlled warm-up.
             await bottle.forceQuit(wine: wine)
@@ -146,10 +136,6 @@ public final class SteamBottleViewModel {
 
     private func applyComponentPhase(_ component: BottleComponent) {
         status = Self.componentStatus(component)
-        // Focus this step's license/installer window (user-guided steps only); drop the previous arm so a
-        // headless step in between doesn't pull a stray Wine helper forward.
-        focuser?.disarm()
-        if component.isUserGuided, let wineRoot { focuser?.arm(wineRoot: wineRoot) }
     }
 
     /// Map a warm-up phase to the UI status text + progress fraction.

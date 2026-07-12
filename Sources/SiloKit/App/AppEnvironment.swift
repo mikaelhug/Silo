@@ -80,7 +80,7 @@ public final class AppEnvironment {
         let steamBottle = SteamBottle(runner: runner, paths: paths)
         let steamClientSession = SteamClientSession(bottle: steamBottle, orchestrator: orchestrator)
         let steamBottleVM = SteamBottleViewModel(
-            bottle: steamBottle, session: steamClientSession, focuser: InstallerWindowFocuser())
+            bottle: steamBottle, session: steamClientSession)
         self.steamClientSession = steamClientSession
         self.steamBottleVM = steamBottleVM
 

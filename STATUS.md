@@ -3,18 +3,16 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
-- **🪟 Setup: bring Wine installer/license windows to the FRONT reliably (2026-07-12, `main`; 375 tests green).**
-  The user reported every Wine setup window (Core Fonts EULA, MSVC redist, Steam) opening BEHIND Silo. Root
-  cause: the focuser relied on `didLaunchApplicationNotification` + a bare `activate()` — but a Wine GUI process
-  forked via `Process` (not LaunchServices) self-transforms into a UI app and usually does NOT fire that launch
-  notification, and a plain `activate()` from a helper is ignored by macOS 14+'s focus-stealing guard.
-  `InstallerWindowFocuser` rewritten to (a) detect EVENT-DRIVEN (no polling): the launch notification PLUS KVO
-  on `NSWorkspace.runningApplications`, whose set changes the instant a Wine process becomes a UI app (the
-  reliable signal the launch notification alone misses), matching a regular-activation-policy app under the
-  runtime root; and (b) use COOPERATIVE activation (`NSApp.yieldActivation(to:)` + `activate([.activateAllWindows])`)
-  — only when SILO itself is frontmost (so it never yanks the user away from a deliberate app switch). `isWineApp`
-  match unchanged. Fail-safe (can only help) but **on-device-unverified** (no Wine on the dev box) — it's the
-  standard macOS 14+ approach.
+- **🪟 Setup: REMOVED the installer-window focuser; rely on a ⌘-Tab hint instead (2026-07-12, `main`; 373 tests
+  green).** Wine setup windows (Core Fonts EULA, MSVC redist, Steam) open BEHIND Silo, and reliably raising them
+  proved unachievable from Silo's side: a `Process`-forked Wine app doesn't self-activate, and macOS's
+  focus-stealing guard refuses cross-app activation (even the cooperative `NSApp.yieldActivation`). Three
+  attempts (launch-notification, poll, KVO on `runningApplications` — all + cooperative activation) didn't work;
+  the durable fix would be winemac.drv-side (self-activating the window), a Wine-build change deferred until
+  it's worth it. So `InstallerWindowFocuser` (+ its `GuidedInstallFocusing` protocol, the VM's `focuser`/`wineRoot`,
+  and the arm/disarm wiring) is **deleted** — not worth the complexity for a ⌘-Tab-able window. The user-guided
+  component status now tells the user a license window opened and to press ⌘-Tab / click it in the Dock if it's
+  behind Silo (they're looking at Silo when it is, so they see the hint). Net −2 files, simpler setup VM.
 - **🔎 Setup logical sweep + fixes before the on-device test (2026-07-12, `main`; `swift build` clean, 375
   tests green).** Two fresh-eyes audits of the whole setup path (`runFullSetup` → `setUp` → `provisionComponents`
   → warm-up) confirmed the happy path is sound; fixed the defects most likely to bite an on-device run:
