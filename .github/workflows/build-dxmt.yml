@@ -68,7 +68,7 @@ jobs:
     # macos-26 matches the app build (release.yml) and the runtime's deploy target; it ships Xcode with
     # the Metal toolchain DXMT's shader compile needs.
     runs-on: macos-26
-    timeout-minutes: 120
+    timeout-minutes: 180
     env:
       # DXMT must be x86_64 to match the x86_64 CrossOver Wine + winemetal.so (Rosetta).
       ARCH_PREFIX: "arch -x86_64"
