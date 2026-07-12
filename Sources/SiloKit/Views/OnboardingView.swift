@@ -38,10 +38,19 @@ struct OnboardingView: View {
                 if env.setupBusy {
                     // A blue progress bar instead of the changing per-step text — determinate during the
                     // Steam client download (a real %), an animated indeterminate bar for the other steps.
-                    ProgressView(value: env.steamBottleVM.warmUpFraction)
-                        .progressViewStyle(.linear)
-                        .tint(.blue)
-                        .frame(maxWidth: 540)
+                    // NB: use a value-less `ProgressView()` for the indeterminate case — `ProgressView(value:
+                    // nil)` renders a STATIC (non-animating) linear bar, so it can't be one call with an
+                    // optional value (same split as GeneralSettingsView's bottle progress).
+                    Group {
+                        if let fraction = env.steamBottleVM.warmUpFraction {
+                            ProgressView(value: fraction)   // real % from Steam's own download progress
+                        } else {
+                            ProgressView()                  // indeterminate → animates left-to-right
+                        }
+                    }
+                    .progressViewStyle(.linear)
+                    .tint(.blue)
+                    .frame(maxWidth: 540)
                 } else {
                     // Idle: surface the final/error status (setup done, or a Wine/GPTK failure).
                     let message = steam.status.isEmpty
