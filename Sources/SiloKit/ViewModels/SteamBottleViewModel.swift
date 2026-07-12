@@ -126,11 +126,10 @@ public final class SteamBottleViewModel {
     }
 
     /// User-facing status for a component-install phase. Pure + testable; user-guided steps ask the user to
-    /// accept the license (the install blocks on the GUI), the rest just narrate progress. The license window
-    /// can open behind Silo (see the removed focuser), so the guided copy notes the ⌘-Tab escape.
+    /// accept the license (the install blocks on the GUI), the rest just narrate progress.
     static func componentStatus(_ component: BottleComponent) -> String {
         component.isUserGuided
-            ? "Accept the \(component.title) license — ⌘-Tab if it's behind Silo."
+            ? "Accept the \(component.title) license…"
             : "Installing \(component.title)…"
     }
 
