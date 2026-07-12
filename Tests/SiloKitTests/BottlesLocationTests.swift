@@ -128,6 +128,29 @@ struct BottlesLocationTests {
         #expect(!FileManager.default.fileExists(atPath: new.appendingPathComponent("ManualBottles").path))
     }
 
+    @Test("relocator aborts before touching sources if a bottle goes live mid-move (closes launch→move TOCTOU)")
+    func relocatorAbortsWhenSourceBecomesActive() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let old = try tmp.makeDir("old")
+        let new = tmp.url.appendingPathComponent("new")
+        try tmp.write("old/SteamBottle/drive_c/a.txt", "data")
+
+        // Cross-volume: `sourcesInUse` flips true (a game launched into a source bottle during the copy) by
+        // the time the relocator reaches the delete step → abort, roll back the copy, leave the source.
+        await #expect(throws: BottleRelocator.RelocateError.sourceBecameActive) {
+            try await BottleRelocator().move(
+                ["SteamBottle"], from: old, to: new, forceCopy: true, sourcesInUse: { true })
+        }
+        #expect(FileManager.default.fileExists(atPath: old.appendingPathComponent("SteamBottle/drive_c/a.txt").path))
+        #expect(!FileManager.default.fileExists(atPath: new.appendingPathComponent("SteamBottle").path))
+
+        // Same-volume rename path also refuses before renaming the source out from under a live wineserver.
+        await #expect(throws: BottleRelocator.RelocateError.sourceBecameActive) {
+            try await BottleRelocator().move(["SteamBottle"], from: old, to: new, sourcesInUse: { true })
+        }
+        #expect(FileManager.default.fileExists(atPath: old.appendingPathComponent("SteamBottle/drive_c/a.txt").path))
+    }
+
     @Test("relocator refuses a non-writable destination, leaving the source intact")
     func relocatorRefusesUnwritableDestination() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

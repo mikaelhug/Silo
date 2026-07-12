@@ -66,4 +66,19 @@ struct GraphicsFallbackTests {
         """
         #expect(GraphicsFallback.classify(log, backend: .dxmt) == .unknown)
     }
+
+    @MainActor
+    @Test("the monitor releases its kqueue watch after the observation window on a healthy launch (no fd leak)")
+    func monitorReleasesWatchAfterWindow() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let log = try tmp.write("game.log", "loading assets… all good, no fallback here\n")
+        let monitor = GraphicsFallbackMonitor()
+        monitor.observationWindow = .milliseconds(40)
+        var fired = false
+        monitor.start(url: log, backend: .gptk) { fired = true }
+        #expect(monitor.isObserving)               // armed — no fallback signature in the log yet
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(!monitor.isObserving)              // auto-released the fd once the window elapsed
+        #expect(!fired)                            // a healthy launch never fires the fallback callback
+    }
 }

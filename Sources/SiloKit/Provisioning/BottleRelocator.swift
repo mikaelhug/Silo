@@ -17,15 +17,25 @@ public struct BottleRelocator: Sendable {
         case destinationNotWritable(URL)
         case destinationOccupied(URL)        // dest already holds a bottle dir — refuse rather than merge
         case moveFailed(String)
+        /// A bottle's wineserver went live AFTER the pre-move gate passed but BEFORE the sources were
+        /// removed — renaming/deleting a live prefix would strand or corrupt it, so the move is aborted
+        /// (sources left intact). Closes the launch→move TOCTOU: `launchInFlight` clears when
+        /// `spawnDetached` returns, before wine has created its wineserver socket.
+        case sourceBecameActive
     }
 
     /// Move each of `names` from `oldRoot` to `newRoot`, reporting copy progress in `0...1`.
     /// - Parameters:
     ///   - forceCopy: skip the same-volume rename fast path and always copy (used in tests).
+    ///   - sourcesInUse: a last-chance liveness probe re-evaluated right before the point of no return
+    ///     (the source rename/delete). Returns true if any source bottle is live now — aborts the move so
+    ///     a game launched *during* a slow copy can't have its prefix deleted out from under it. Default
+    ///     `{ false }` (tests / callers with no live bottles).
     ///   - onProgress: cumulative fraction copied; only meaningful for a cross-volume copy.
     public func move(
         _ names: [String], from oldRoot: URL, to newRoot: URL,
         forceCopy: Bool = false,
+        sourcesInUse: @Sendable () -> Bool = { false },
         onProgress: @Sendable @escaping (Double) -> Void = { _ in }
     ) async throws {
         guard oldRoot.standardizedFileURL != newRoot.standardizedFileURL else {
@@ -43,17 +53,21 @@ public struct BottleRelocator: Sendable {
         let present = names.filter { fileManager.fileExists(atPath: oldRoot.appendingPathComponent($0).path) }
 
         if !forceCopy && sameVolume(oldRoot, newRoot) {
-            try renameMove(present, from: oldRoot, to: newRoot)   // instant, atomic
+            try renameMove(present, from: oldRoot, to: newRoot, sourcesInUse: sourcesInUse)   // instant, atomic
             onProgress(1.0)
             return
         }
-        try copyMove(present, from: oldRoot, to: newRoot, onProgress: onProgress)
+        try copyMove(present, from: oldRoot, to: newRoot, sourcesInUse: sourcesInUse, onProgress: onProgress)
         onProgress(1.0)
     }
 
     // MARK: - Same-volume (rename)
 
-    private func renameMove(_ names: [String], from oldRoot: URL, to newRoot: URL) throws {
+    private func renameMove(
+        _ names: [String], from oldRoot: URL, to newRoot: URL, sourcesInUse: @Sendable () -> Bool
+    ) throws {
+        // Last-chance liveness re-check before renaming a source out from under a possibly-live wineserver.
+        guard !sourcesInUse() else { throw RelocateError.sourceBecameActive }
         var moved: [(src: URL, dst: URL)] = []
         for name in names {
             let src = oldRoot.appendingPathComponent(name), dst = newRoot.appendingPathComponent(name)
@@ -70,7 +84,8 @@ public struct BottleRelocator: Sendable {
     // MARK: - Cross-volume (copy + delete, with progress)
 
     private func copyMove(
-        _ names: [String], from oldRoot: URL, to newRoot: URL, onProgress: @Sendable @escaping (Double) -> Void
+        _ names: [String], from oldRoot: URL, to newRoot: URL,
+        sourcesInUse: @Sendable () -> Bool, onProgress: @Sendable @escaping (Double) -> Void
     ) throws {
         let total = names.reduce(Int64(0)) { $0 + dirSize(oldRoot.appendingPathComponent($1)) }
         let progress = CopyProgress(total: total, onProgress: onProgress)
@@ -85,6 +100,13 @@ public struct BottleRelocator: Sendable {
                 try? fileManager.removeItem(at: dst)
                 throw RelocateError.moveFailed((error as NSError).localizedDescription)
             }
+        }
+        // Point of no return: a slow cross-volume copy gives a game time to launch into a source bottle
+        // after the pre-move gate passed. Re-check liveness before deleting the originals — if a bottle is
+        // now live, abort (roll back the copies, leave the sources intact) rather than delete under it.
+        guard !sourcesInUse() else {
+            for dest in copied { try? fileManager.removeItem(at: dest) }
+            throw RelocateError.sourceBecameActive
         }
         // Every dir copied — now remove the originals (the "move" completes).
         for name in names { try? fileManager.removeItem(at: oldRoot.appendingPathComponent(name)) }

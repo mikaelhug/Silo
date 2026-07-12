@@ -10,9 +10,12 @@ public actor DiscoveryEngine {
     private let fileManager: FileManager
     private let manifestDecoder = AppManifestDecoder()
     private let libraryDecoder = LibraryFoldersDecoder()
+    /// Upper bound on any single manifest/VDF we'll read into memory (see `discoverGames`/`collectLibraryRoots`).
+    private let maxManifestBytes: Int
 
-    public init(fileManager: FileManager = .default) {
+    public init(fileManager: FileManager = .default, maxManifestBytes: Int = 8 * 1024 * 1024) {
         self.fileManager = fileManager
+        self.maxManifestBytes = maxManifestBytes
     }
 
     public enum DiscoveryError: Error, Sendable, Equatable {
@@ -55,7 +58,11 @@ public actor DiscoveryEngine {
 
         let steamapps = primarySteamRoot.appendingPathComponent("steamapps", isDirectory: true)
         let vdf = steamapps.appendingPathComponent("libraryfolders.vdf")
-        if let text = try? String(contentsOf: vdf, encoding: .utf8),
+        // Bound the whole-file read like `scanLibrary` does for appmanifests — a real `libraryfolders.vdf`
+        // is a few KB; a pathologically large (corrupt/hostile) one shouldn't be slurped into memory.
+        let vdfSize = (try? vdf.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if vdfSize <= maxManifestBytes,
+           let text = try? String(contentsOf: vdf, encoding: .utf8),
            let folders = try? libraryDecoder.decode(text: text) {
             for folder in folders where folder.path.path.hasPrefix("/") {
                 let standardized = folder.path.standardizedFileURL
@@ -85,15 +92,11 @@ public actor DiscoveryEngine {
             // Skip a pathologically large file: the tokenizer reads the whole manifest into memory, and a
             // real appmanifest is a few KB — anything over the cap isn't a manifest worth parsing.
             let size = (try? entry.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            guard size <= Self.maxManifestBytes else { continue }
+            guard size <= maxManifestBytes else { continue }
             guard let text = try? String(contentsOf: entry, encoding: .utf8),
                   let app = try? manifestDecoder.decode(text: text, libraryPath: root) else { continue }
             apps.append(app)
         }
         return apps
     }
-
-    /// Upper bound on an `appmanifest_*.acf` we'll read (real ones are a few KB; 8 MB is far beyond any
-    /// legitimate manifest) — bounds the tokenizer's whole-file allocation against a hostile local file.
-    private static let maxManifestBytes = 8 * 1024 * 1024
 }

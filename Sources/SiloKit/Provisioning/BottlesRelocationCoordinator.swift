@@ -71,14 +71,23 @@ public final class BottlesRelocationCoordinator {
         defer { busy = false; progress = nil }
 
         let names = AppPaths.bottleDirNames
+        let paths = self.paths   // Sendable snapshot for the detached move's last-chance liveness probe
         do {
             // Off the main actor — a cross-volume move is a full copy of (potentially huge) game data.
-            // The progress callback hops back to the main actor to update the determinate bar.
+            // The progress callback hops back to the main actor to update the determinate bar. `sourcesInUse`
+            // re-checks wineserver liveness right before the source delete/rename, closing the launch→move
+            // TOCTOU (`isBlocked` above runs before the copy; a game can launch during a slow copy).
             try await Task.detached(priority: .userInitiated) { [weak self] in
-                try await BottleRelocator().move(names, from: old, to: newRoot) { fraction in
+                try await BottleRelocator().move(
+                    names, from: old, to: newRoot,
+                    sourcesInUse: { WineServerProbe.isAnyBottleLive(paths: paths) }
+                ) { fraction in
                     Task { @MainActor in self?.progress = fraction }
                 }
             }.value
+        } catch BottleRelocator.RelocateError.sourceBecameActive {
+            message = "A game or Steam started while moving — quit it and try again. Your bottles weren't moved."
+            return
         } catch {
             message = "Couldn't move bottles: \((error as NSError).localizedDescription)"
             return

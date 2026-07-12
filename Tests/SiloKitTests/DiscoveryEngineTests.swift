@@ -44,6 +44,25 @@ struct DiscoveryEngineTests {
         #expect(apps.first(where: { $0.appID == 570 })?.libraryPath.standardizedFileURL == secondRoot.standardizedFileURL)
     }
 
+    @Test("an oversized libraryfolders.vdf is skipped (not slurped into memory); its extra libraries are ignored")
+    func oversizedLibraryFoldersSkipped() async throws {
+        let tmp = try TempDir()
+        let steamRoot = try makeSteamRoot(tmp, named: "Steam", manifests: ["appmanifest_220.acf"])
+        let secondRoot = try makeSteamRoot(tmp, named: "Lib2", manifests: ["appmanifest_570.acf"])
+        let vdf = """
+        "libraryfolders"
+        {
+            "0" { "path" "\(steamRoot.path)" "apps" { "220" "1" } }
+            "1" { "path" "\(secondRoot.path)" "apps" { "570" "1" } }
+        }
+        """ + String(repeating: "\n", count: 150_000)   // pad the VDF past the cap below (whitespace is ignored)
+        try tmp.write("Steam/steamapps/libraryfolders.vdf", vdf)
+
+        // Cap between the small primary manifest and the padded VDF: the VDF is over-cap, so it's not read.
+        let apps = try await DiscoveryEngine(maxManifestBytes: 100_000).discoverGames(steamRoot: steamRoot)
+        #expect(apps.map(\.appID) == [220])   // only the primary library — the oversized VDF's extra lib is ignored
+    }
+
     @Test("Skips malformed manifests without failing the scan")
     func skipsMalformed() async throws {
         let tmp = try TempDir()

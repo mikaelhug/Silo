@@ -55,6 +55,14 @@ final class GraphicsFallbackMonitor {
     private var onFallback: (@MainActor () -> Void)?
     private var backend: GraphicsBackend = .gptk
     private var fired = false
+    private var autoStop: Task<Void, Never>?
+    /// A backend engages (or falls back) within the first seconds of a launch — the signature never appears
+    /// later. So after a bounded window, release the kqueue fd even if nothing fired, rather than holding it
+    /// for the whole app lifetime on every healthy launch (a per-launch fd leak). Injectable for tests.
+    var observationWindow: Duration = .seconds(120)
+
+    /// Whether a kqueue watch is currently armed (test/introspection hook).
+    var isObserving: Bool { watch != nil }
 
     func start(url: URL, backend: GraphicsBackend = .gptk, onFallback: @escaping @MainActor () -> Void) {
         stop()
@@ -72,9 +80,16 @@ final class GraphicsFallbackMonitor {
             let tail = url.tailString()                                  // read off the main actor
             Task { @MainActor [weak self] in self?.check(tail) }
         }
+        // Bound the watch's lifetime: a healthy launch never fires, so without this the fd leaks until the
+        // owning VM drops the monitor (i.e. never, within a session). Self-cancels on fire/stop.
+        autoStop = Task { [weak self, observationWindow] in
+            try? await Task.sleep(for: observationWindow)
+            guard !Task.isCancelled else { return }
+            self?.stop()
+        }
     }
 
-    func stop() { watch = nil; onFallback = nil }
+    func stop() { watch = nil; onFallback = nil; autoStop?.cancel(); autoStop = nil }
 
     private func check(_ tail: String) {
         guard !fired, GraphicsFallback.classify(tail, backend: backend) == .fallback else { return }

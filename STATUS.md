@@ -3,6 +3,41 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🛡️ Production-hardening sweep #2 — security/integrity/robustness (2026-07-12, `main`; `swift build` clean
+  + zero warnings, 370 tests green).** A second, differently-scoped pass (3 parallel audits: security/injection
+  surface, download & extraction integrity, untrusted-input & filesystem/concurrency robustness) — the first
+  sweep was *logical* consistency; this one targets the production-bar dimensions it didn't. Verdict: the
+  parsers/PE-readers/config-store are genuinely well-hardened (depth-capped recursion, bounds-checked every PE
+  offset, atomic+backed-up config, no shell/`Process`-argv injection, ATS blocks cleartext); the real defects
+  were a filesystem TOCTOU + a couple of resource/robustness gaps, patched:
+  - **Bottle-move TOCTOU (data corruption) closed.** `launchInFlight` clears when `spawnDetached` returns —
+    *before* wine creates its wineserver socket — so a game launched during a slow cross-volume move was
+    invisible to both liveness signals and its prefix got deleted out from under it. `BottleRelocator.move`
+    now takes a `sourcesInUse` probe re-checked right before the source rename/delete (the point of no
+    return); the coordinator passes `WineServerProbe.isAnyBottleLive`, aborting + rolling back (sources
+    intact) with a clear message if a bottle went live mid-move.
+  - **GraphicsFallbackMonitor kqueue-fd leak bounded.** A healthy launch (the common case) never fired the
+    fallback signature, so its `FileWatch` stayed armed for the whole session — one leaked fd per launch. The
+    monitor now auto-releases the watch after a bounded `observationWindow` (120s; the backend engages within
+    seconds), self-cancelling on fire/stop.
+  - **`libraryfolders.vdf` read is now size-capped** like the appmanifest read already was (a hostile/corrupt
+    multi-MB VDF is no longer slurped into memory); `maxManifestBytes` became an injectable `DiscoveryEngine`
+    param.
+  - Tests (+3): relocator aborts + rolls back on a mid-move live bottle (both cross-volume and rename paths);
+    oversized VDF skipped; fallback monitor releases its watch after the window.
+  - **⚠️ REMAINING production gate — supply-chain integrity (deferred, needs external inputs):** Silo
+    checksum-verifies the two artifacts it *publishes* (Wine/DXMT runtime, app self-update) but the four
+    third-party artifacts it downloads and *executes under Wine* — Steam installer, VC++ redist, MS core-font
+    `.exe`s, d3dcompiler CABs — are HTTPS-only, **not** integrity-verified; a compromised mirror/CDN → code
+    execution in the prefix (sharpest edge: the core-fonts fallback pulls `.exe`s from a *personal* GitHub
+    repo, `pushcx/corefonts`, in `Silo.swift`). Also: `DownloadGuard.requireHTTPS` checks only the initial
+    URL, not redirect hops (ATS blocks http→ downgrades but not http**s**→attacker-host); a user-overridden
+    runtime repo skips the digest when no sidecar `.sha256`; and the self-update does no codesign/notarization
+    check before replacing the running app (a no-op until there's a Developer ID — see BLOCKED). Fix track:
+    pin SHA-256 for the fixed-version artifacts (corefonts/d3dcompiler/SHS — the Steam/vcredist bootstrappers
+    auto-rotate, so those stay HTTPS+official-host), drop the personal-repo fallback, re-apply `requireHTTPS`
+    per redirect hop, and add the codesign check when signing lands. **This is the real "before production"
+    item; needs trustworthy published hashes, so it's a dedicated follow-up, not guessed inline.**
 - **🧭 Production-readiness architecture sweep — inconsistencies patched (2026-07-12, `main`; `swift build`
   clean + zero warnings, 367 tests green).** A logical sweep (4 parallel audits: concurrency/protocol
   boundaries, single-source-of-truth routing, dead-code/stale-refs, big-file logic) found the core
