@@ -46,6 +46,7 @@ public actor RuntimeManager {
     /// The latest `limit` releases of `repo` (newest first) — for the Heroic-style Wine list.
     public func availableReleases(repo: String, limit: Int = 3) async throws -> [GitHubRelease] {
         let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=\(limit)")!
+        try DownloadGuard.requireHTTPS(url)   // defense-in-depth: every remote fetch goes through the guard
         let (data, response) = try await session.data(for: .github(url))
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw RuntimeError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)

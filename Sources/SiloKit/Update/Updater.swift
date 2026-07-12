@@ -52,6 +52,7 @@ public struct Updater: Sendable {
         // app's own `v*` releases — not `/releases/latest`, which is often the newest wine build and would
         // make the updater "offer" a Wine version as an app update.
         let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=30")!
+        try DownloadGuard.requireHTTPS(url)   // defense-in-depth: every remote fetch goes through the guard
         let (data, response) = try await session.data(for: .github(url))
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw UpdateError.badResponse((response as? HTTPURLResponse)?.statusCode ?? -1)
