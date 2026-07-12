@@ -34,10 +34,20 @@ public final class SteamClientSession {
 
     public func updateWine(_ url: URL?) { wineBinary = url }
 
-    /// Whether the bottle's Steam client is up right now — detected PID-free from its Steamworks readiness
-    /// signal (the live `ActiveProcess` pid Steam itself registers in the prefix), NOT a PID Silo tracks.
-    /// Silo no longer owns the client's lifecycle: it launches Steam detached and lets it outlive the app.
-    public var isRunning: Bool { SteamReadiness.isReady(prefix: bottle.prefix) }
+    /// Whether the bottle's Steam client is up right now — detected PID-free, NOT a PID Silo tracks (Silo
+    /// launches Steam detached and lets it outlive the app). Two independent signals must BOTH hold, because
+    /// the registry pid alone can go stale: Steam records a non-zero `ActiveProcess` pid in the prefix, but a
+    /// hard crash / `taskkill /F` (e.g. setup's warm-up force-quit) can't clear it — so a stale pid would read
+    /// as "up" and make `ensureRunning` skip the relaunch, launching a game against a dead client (a silent
+    /// `SteamAPI_Init` failure). So it's ANDed with `WineServerProbe`: no live wineserver for the prefix ⇒
+    /// nothing in the bottle is running, stale pid or not. (The registry pid is Steam's *Windows* pid, in
+    /// Wine's own namespace — not host-`kill`able — so the wineserver socket is the correct host-side liveness
+    /// signal, the same one Silo already uses to gate bottle moves.) Residual narrow gap: a co-resident game
+    /// keeping the wineserver alive after Steam itself died would still read as up — rare, and not cheaply
+    /// detectable without a Windows-pid bridge.
+    public var isRunning: Bool {
+        SteamReadiness.isReady(prefix: bottle.prefix) && WineServerProbe.isLive(prefix: bottle.prefix)
+    }
 
     /// Bring the bottle's Steam client up (idempotent + coalesced): a no-op if it's already running, joins
     /// an in-flight launch, else launches it (re-applying the steamwebhelper wrapper) and tracks the PID.

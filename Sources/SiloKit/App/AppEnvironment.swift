@@ -258,15 +258,25 @@ public final class AppEnvironment {
     /// write the coupled `RetinaMode` + `LogPixels` (DPI companion) registry keys into the bottle's prefix.
     /// Takes effect on the next game launch.
     public func setSteamBottleRetina(_ on: Bool) async {
-        guard let wine = wineBinary else { bottleToolsMessage = "Set up Wine first."; return }
+        guard let ctx = try? BottleResolver(paths: paths).steamTool(config: backendSettings.config) else {
+            bottleToolsMessage = "Set up Wine first."; return
+        }
         guard !bottleToolsBusy else { return }
         bottleToolsBusy = true; defer { bottleToolsBusy = false }
         backendSettings.config.retinaMode = on
         await backendSettings.save()
+        // Retina is a prefix-wide registry pair — it needs a BOOTED prefix (`system.reg` present), NOT the
+        // fully-downloaded Steam client. Gate on that so a booted-but-not-yet-warmed bottle still applies it,
+        // and only claim it took effect when the write actually ran (the old `steamInstalled` gate silently
+        // skipped the write yet still reported success).
+        let booted = FileManager.default.fileExists(
+            atPath: ctx.prefix.appendingPathComponent("system.reg").path)
+        guard booted else {
+            bottleToolsMessage = "Set up the Steam bottle first — Retina mode applies to its prefix."
+            return
+        }
         do {
-            if gameLibrary.steamInstalled {
-                try await wineTools.setRetinaMode(on, prefix: paths.steamBottle, wine: wine)
-            }
+            try await wineTools.setRetinaMode(on, prefix: ctx.prefix, wine: ctx.wineBinary)
             bottleToolsMessage = "Retina mode \(on ? "on" : "off") — applies on the next game launch."
         } catch {
             bottleToolsMessage = "Couldn't update Retina mode: \((error as NSError).localizedDescription)"
@@ -278,8 +288,8 @@ public final class AppEnvironment {
     /// window IS the feedback — it deliberately posts NO status (the UI's status line lives in a different,
     /// Retina-preferences section, where an "Opened winecfg" toast just reads as misplaced).
     public func openWineTool(_ tool: String) async {
-        guard wineBinary != nil else { return }
-        await orchestrator.runWineTool(tool, prefix: paths.steamBottle, backend: backendSettings.config)
+        guard let ctx = try? BottleResolver(paths: paths).steamTool(config: backendSettings.config) else { return }
+        await orchestrator.runWineTool(tool, prefix: ctx.prefix, wine: ctx.wineBinary)
     }
 
     /// Build a per-game settings view model with the game's persisted config, keyed by appID.

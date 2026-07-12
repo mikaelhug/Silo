@@ -191,9 +191,15 @@ public struct SteamBottle: Sendable {
         // (Silo.enforceMsync), so this can safely share the prefix with a running Steam.
         let extractDir = driveC.appendingPathComponent("silo-fonts")
         defer { try? fileManager.removeItem(at: extractDir) }
+        // The user-guided EULA is shown ONCE. `hasCoreFonts` keys on a LATER font (Arial), so if an earlier
+        // font failed after the EULA was accepted, a resumed Set up re-enters this loop from index 0 — and
+        // must NOT re-prompt the license for a font already accepted. A dedicated marker records acceptance so
+        // index 0 then extracts SILENTLY like the rest.
+        let eulaMarker = markerDir.appendingPathComponent("corefonts-eula")
+        let eulaAccepted = fileManager.fileExists(atPath: eulaMarker.path)
         for (index, font) in Silo.coreFonts.enumerated() {
             guard let exe = downloaded[font] else { continue }
-            if index == 0 {
+            if index == 0, !eulaAccepted {
                 // User-guided: the installer shows its EULA and installs the font itself on accept (blocks).
                 // A decline/cancel exits non-zero and installs nothing — fail setup rather than silently
                 // continue with a half-provisioned bottle (the user asked to be stopped, not skipped past).
@@ -205,6 +211,8 @@ public struct SteamBottle: Sendable {
                     try? fileManager.removeItem(at: exe)
                     throw BottleError.componentCancelled(.coreFonts)
                 }
+                try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
+                fileManager.createFile(atPath: eulaMarker.path, contents: Data())
             } else {
                 // IExpress extract-only (`/T:<dir> /C /Q`): drops the .ttf into the target with no GUI.
                 try? fileManager.removeItem(at: extractDir)
@@ -298,13 +306,17 @@ public struct SteamBottle: Sendable {
             try? fileManager.removeItem(at: zip)
             guard result?.succeeded == true else { continue }
             // Copy every .otf (searched recursively) into Fonts.
+            var copied = 0
             for rel in (try? fileManager.subpathsOfDirectory(atPath: extractDir.path)) ?? []
             where rel.lowercased().hasSuffix(".otf") {
                 let src = extractDir.appendingPathComponent(rel)
                 let dest = fontsDir.appendingPathComponent((rel as NSString).lastPathComponent)
                 try? fileManager.removeItem(at: dest)
-                try? fileManager.copyItem(at: src, to: dest)
+                if (try? fileManager.copyItem(at: src, to: dest)) != nil { copied += 1 }
             }
+            // Only mark the pack satisfied if a font actually landed — a `tar` that exits 0 but yields no
+            // `.otf` (truncated/misformatted archive) must be retried next run, not recorded as installed.
+            guard copied > 0 else { continue }
             fileManager.createFile(atPath: markerDir.appendingPathComponent(pack).path, contents: Data())
         }
     }

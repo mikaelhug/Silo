@@ -3,6 +3,37 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🧭 Production-readiness architecture sweep — inconsistencies patched (2026-07-12, `main`; `swift build`
+  clean + zero warnings, 367 tests green).** A logical sweep (4 parallel audits: concurrency/protocol
+  boundaries, single-source-of-truth routing, dead-code/stale-refs, big-file logic) found the core
+  architecture sound (no `@unchecked`, no stray `Foundation.Process`, entitlements sandbox-free, both
+  launch paths route through `BottleResolver`). Fixed the real inconsistencies it surfaced:
+  - **Steam readiness now cross-checks liveness.** `SteamClientSession.isRunning` ANDed the reg
+    `ActiveProcess` pid with `WineServerProbe.isLive(prefix:)` — a stale non-zero pid (crash / setup's
+    warm-up `taskkill /F`) no longer reads as "up" and lets `ensureRunning` skip the relaunch → a game
+    launched against a dead client (silent `SteamAPI_Init` fail). The reg pid is Wine's Windows-pid
+    namespace (not host-`kill`able), so the wineserver socket is the correct host-side liveness signal.
+  - **`playManual` gained the 32-bit-DXMT guard `play` already had.** A manual DXMT game with a 32-bit exe
+    on a 64-bit-only DXMT build was refused honestly instead of launching to a silent black screen.
+  - **Wine maintenance tools route through `BottleResolver`.** winecfg (Steam + manual) / regedit /
+    retina no longer hard-code `paths.steamBottle` + `backend.wineBinaryPath`; new `BottleResolver
+    .steamTool`/`.manualTool` → `ToolTarget`, and `runWineTool` takes a resolved `wine`. Retina also gates
+    on a BOOTED prefix (`system.reg`) not the downloaded client, so it no longer reports success while
+    silently skipping the write.
+  - **Setup idempotency.** Core-fonts EULA is recorded by a dedicated marker (`.silo-installed/corefonts-eula`)
+    so a partial-failure resume never re-prompts the already-accepted license; Source Han Sans marks a pack
+    installed only when ≥1 `.otf` actually landed (a truncated-but-tar-OK archive is retried, not recorded).
+  - Tests (+6): stale-pid-without-wineserver liveness; `playManual` 32-bit refusal; `BottleResolver`
+    tool-targets + wineNotConfigured; core-fonts EULA-resume runs silent; SHS empty-extract not marked.
+    `setSteamReady` test helper now stages/unstages the wineserver socket to model a genuinely-live bottle.
+  - **Doc drift reconciled:** STATUS `## BLOCKED` + Handoff checklist purged of removed features (`stop()`,
+    flat-10s grace, `.sharedSteamClient`/`.emulatorStub`, `Kegworks` placeholder repo); CLAUDE.md
+    concurrency tier fixed (`BackendResolver`→`BackendChooser.choose`/`BottleResolver`, noted
+    `dxmtMightHelp`'s PE read) and the models rule split into persisted vs FS-probe descriptors.
+  - **Deliberately NOT changed** (documented decisions / test-load-bearing, not defects): the `.gptk`
+    default on the pure `makePlan`/`EnvFlags.environment`/`runInstaller` (makePlan is the pure builder,
+    always fed an explicit `graphics` by the launch methods); the four FS-probe model descriptors stay
+    `Sendable/Equatable/Identifiable` (contract clarified rather than bloating them with unused `Codable`).
 - **🪟 Setup installer windows: focus them + a cancel now stops setup (2026-07-12, `main`; `swift build` clean +
   zero warnings, 360 tests green).** Two onboarding annoyances the user hit during a real setup:
   - **Focus the license/installer windows.** A window Silo's forked `wine` opens (a Core Fonts EULA, an MSVC
@@ -1194,7 +1225,7 @@
 
 ## Known follow-ups (non-blocking)
 - DiscoveryEngine skips Windows-style (`C:\...`) library paths in `libraryfolders.vdf`; only host-absolute (`/...`) extra libraries are scanned. In the single-downloader model games land in the primary C: library (always scanned), so this is sufficient for v1. Add Wine `dosdevices` drive-letter translation if cross-drive libraries are needed.
-- `.sharedSteamClient` presence symlinks the master Steam into the prefix but does not yet launch a background `steam.exe` inside the prefix; full live-client wiring is a launch-time follow-up (most DRM cases use `.emulatorStub`).
+- Co-resident logged-in Steam: the real "Steam client in the game's prefix" answer is now the **shared Steam bottle** (`SteamBottle` + `SteamClientSession` run one logged-in Windows Steam client that all co-resident Steam games reach). The old per-game presence strategies `.sharedSteamClient` and `.emulatorStub` are **removed** — `SteamPresenceStrategy` has only `.none` + `.steamAppIDFile` (unknown/legacy raw values decode to `.none`). Constraint #7 still bars bundling any emulator.
 
 ## BLOCKED
 - **HW-accelerated Steam *UI* (M92, on-device test):** flip Advanced → Steam bottle → "Hardware-accelerated
@@ -1214,26 +1245,30 @@
 - **`explorer /desktop=` program-path form:** `launchSteam` passes the macOS **unix** path of `steam.exe`
   as the program arg to `wine explorer /desktop=Silo,<geom>`. If wine's explorer needs a Windows path
   (`C:\Program Files (x86)\Steam\steam.exe`) instead, Steam won't launch — verify on-device and switch if so.
-- **stop() under real Wine:** `stop()` SIGTERMs the loader PID **and** `wine taskkill /F /IM <exe>`. Confirm
-  a real game (esp. one with a separate launcher exe) actually exits and isn't orphaned; tune the image
-  name if a game's runtime process differs from the launched exe.
-- **Cold-start grace:** `play()` waits a flat 10s after cold-starting Steam before launching the game. If
-  Steam's first boot (self-update + login) is slower, the game can start before Steamworks is ready — may
-  need a readiness probe (Steam pipe/registry) instead of a fixed sleep.
+- **~~stop() under real Wine~~ + ~~cold-start 10s grace~~ — REMOVED as stale (reconciled 2026-07-12).**
+  Neither exists in the code: Phase 4 dropped the per-game `stop()`/`taskkill` teardown (Silo launches
+  detached and never stops a game), and the flat-10s `play()` grace was replaced by the event-driven
+  readiness gate (`SteamClientSession.ensureRunning` → kqueue on `user.reg`, 20s failsafe; `isRunning` now
+  also cross-checks the wineserver socket so a stale reg pid can't read as "up"). Delisted, not a gate.
 - **GPTK E2E activation — RESOLVED (M83).** Confirmed from a real D3D game (Bloons TD 6): `WINEDLLPATH`
   alone does NOT activate GPTK (wine keeps its own wined3d backend → device-creation failure); the overlay
   copy into wine's own `lib/wine` (Whisky's method) is required and now automated by
   `GraphicsLinker.overlayGPTK`. D3DMetal device creation + render verified on-device.
-- Confirm the exact third-party Wine/GPTK runtime repo/release to pin as default (currently placeholder
-  `Kegworks-App/Kegworks` in `Silo.defaultRuntimeRepo`; overridable in Settings). Non-blocking.
+- **~~Confirm the default Wine/GPTK runtime repo~~ — RESOLVED (reconciled 2026-07-12).** No
+  `Silo.defaultRuntimeRepo`/`Kegworks` symbol exists; the runtime repo is `Silo.wineRepo` =
+  `Versions.githubRepo` = `mikaelhug/Silo` (Silo ships its own from-CrossOver-source Wine). Delisted.
+- **Remaining items below are genuine on-device HARDWARE gates** (not code drift) — they need a real Wine
+  runtime + a Mac to run, and are a human on-device pass, not a code change.
 
 ## Handoff checklist (for human, post-loop E2E)
 - [ ] Build the patched wine: `Scripts/build-wine.sh 26.2.0` (adds `-fvisibility=default` + the
       steamwebhelper wrapper). Download/point Silo at a GPTK runtime.
-- [ ] Advanced → Steam bottle → **Set up** (installs Windows Steam into the bottle) → **Launch Steam**.
-      Confirm the CEF login window actually PAINTS (the gate above); sign in once (Steam caches it).
+- [ ] Onboarding: import GPTK `.dmg`, then **Set up** (chains Wine → DXMT → Steam → wineboot → components →
+      warm-up) → **Launch Steam**. Confirm the CEF login window actually PAINTS (the gate above); sign in
+      once (Steam caches it).
 - [ ] Confirm the library lists games installed in the bottle; **Install** routes a `steam://` URL to the
       running Steam.
-- [ ] **Play** → game launches co-resident in the bottle under GPTK (CrossOver fallback); Steamworks/online
-      works. **Stop** actually exits it.
+- [ ] **Play** → game launches co-resident in the bottle under its chosen backend (GPTK by default, DXMT
+      per game); Steamworks/online works. (There is NO Stop — Silo launches detached and leaves games
+      running, like CrossOver; quitting Silo doesn't kill them.)
 - [ ] (Distribution) provide Apple Developer ID + notarization secrets for signed releases.

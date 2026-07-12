@@ -132,13 +132,18 @@ once present, so no registry override is needed (the earlier `d3dcompiler_47=nat
 
 ## Concurrency model (apply consistently)
 - **Pure & synchronous** (trivially `Sendable`): `ACFTokenizer`, `KeyValuesParser`, `KVNode`,
-  decoders, `LaunchPlan` + `makePlan`, `BackendResolver`, `RuntimeRelease` decoding. Keep these
-  free of I/O so they unit-test instantly.
+  decoders, `LaunchPlan` + `makePlan`, `BackendChooser.choose`, `BottleResolver`, `RuntimeRelease`
+  decoding. Keep these free of I/O so they unit-test instantly. (One exception: `BackendChooser`'s
+  *other* method, `dxmtMightHelp`, reads the game exe's PE import table — a synchronous, non-`async`
+  file read on the rare fallback path; `choose` stays pure.)
 - **`actor`** (owns mutable FS/network state): `DiscoveryEngine`, `RuntimeManager`, `ConfigStore`.
 - **`struct` + injected deps, `async` methods**: `GraphicsLinker`, `LaunchOrchestrator`,
   `SteamPresenceInstaller`, `Updater`.
 - **`@MainActor @Observable final class`**: all view models.
-- **Models**: `Codable, Sendable, Hashable, Identifiable` value types.
+- **Models**: value types. *Persisted* models (`AppState`, `GameConfig`, `BackendConfig`, `ManualGame`,
+  `EnvFlags`, `SteamApp`, …) are `Codable, Sendable, Hashable, Identifiable` with tolerant decode.
+  Live filesystem-probe descriptors (`WineInstall`, `GPTKInstall`, `DXMTInstall`, `RuntimeInstall`) are
+  never serialized, so they're the lighter `Sendable, Equatable, Identifiable` — not `Codable`.
 - **All external-binary execution goes through the `ProcessRunning` protocol.** Never call
   `Foundation.Process` directly outside `SystemProcessRunner`.
 

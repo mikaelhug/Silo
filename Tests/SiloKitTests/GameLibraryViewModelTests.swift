@@ -37,14 +37,22 @@ struct GameLibraryViewModelTests {
         fm.createFile(atPath: cef.appendingPathComponent("steamwebhelper.exe").path, contents: Data())
     }
 
-    /// Simulate the bottle Steam's readiness by writing (or clearing) its `ActiveProcess` pid in `user.reg` —
-    /// the exact signal `SteamClientSession.isRunning` now reads (Silo no longer tracks a client PID).
+    /// Simulate the bottle Steam's readiness by writing (or clearing) its `ActiveProcess` pid in `user.reg`
+    /// AND creating/removing its `wineserver` socket — the two signals `SteamClientSession.isRunning` now ANDs
+    /// (a live pid with a dead wineserver is a stale-pid crash, not a running client). Tests using
+    /// `setSteamReady(_, true)` should `defer { removeWineServerSocket(for: paths.steamBottle) }` to keep the
+    /// per-user temp dir tidy.
     private func setSteamReady(_ paths: AppPaths, _ ready: Bool) throws {
         try FileManager.default.createDirectory(at: paths.steamBottle, withIntermediateDirectories: true)
         let pid = ready ? "00001092" : "00000000"
         let text = #"[Software\\Valve\\Steam\\ActiveProcess]"# + "\n\"pid\"=dword:\(pid)\n"
         try text.write(to: SteamReadiness.userReg(prefix: paths.steamBottle),
                        atomically: true, encoding: .utf8)
+        if ready {
+            try makeWineServerSocket(for: paths.steamBottle)
+        } else {
+            removeWineServerSocket(for: paths.steamBottle)
+        }
     }
 
     /// Write a game manifest into the bottle's Steam library.
@@ -467,6 +475,22 @@ struct GameLibraryViewModelTests {
         #expect(spawn.environment["WINEPREFIX"] == paths.manualBottle(game.id).path)   // its own isolated bottle
     }
 
+    @Test("playManual refuses a 32-bit game on DXMT when the installed DXMT has no i386 build")
+    func playManualRefuses32BitWhenDXMTLacksI386() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, _) = try makeDXMTReady(tmp, i386: false)     // DXMT installed, 64-bit-only
+        let dir = tmp.url.appendingPathComponent("Games/OC2", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let exe = dir.appendingPathComponent("oc2.exe")
+        try PEFixture.header(machine: 0x014c).write(to: exe)       // a 32-bit (i386) PE
+        let game = try #require(await vm.addManualGame(name: "OC2", executable: exe, backend: .dxmt))
+
+        await vm.playManual(game)
+
+        #expect(vm.statusMessage?.contains("32-bit DXMT build") == true)   // honest refusal (mirrors Steam)
+        #expect(!fake.invocations.contains { $0.detached && $0.arguments.first == exe.path })   // never launched
+    }
+
     @Test("addManualGame defaults the name to the exe filename and persists across a reload")
     func manualGameDefaultNameAndPersistence() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -503,6 +527,7 @@ struct GameLibraryViewModelTests {
     func sharedSteamClientNoDoubleSpawn() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        defer { removeWineServerSocket(for: paths.steamBottle) }
         let fake = FakeProcessRunner()
         let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
         let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
@@ -556,6 +581,7 @@ struct GameLibraryViewModelTests {
     func secondPlayReusesRunningSteam() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, fake, paths) = make(tmp)
+        defer { removeWineServerSocket(for: paths.steamBottle) }
         try installSteam(paths)
         let a = try installedGame(paths, appID: 220, name: "HL2", dir: "HL2")
         let b = try installedGame(paths, appID: 570, name: "Dota", dir: "Dota")

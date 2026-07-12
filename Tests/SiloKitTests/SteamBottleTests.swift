@@ -273,6 +273,30 @@ struct SteamBottleTests {
         #expect(fake.invocations.count == runsBefore)
     }
 
+    @Test("a resumed core-fonts install with the EULA already accepted does NOT re-prompt (first font runs silent)")
+    func coreFontsResumeSkipsEULA() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        for font in Silo.coreFonts {
+            FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString,
+                                 data: Data("EXE".utf8), session: session)
+        }
+        // Record the EULA as accepted on a prior run, but leave Arial absent so `hasCoreFonts` is false and
+        // the loop actually re-enters from index 0 (the partial-failure resume the marker exists to handle).
+        let markerDir = paths.steamBottle.appendingPathComponent(".silo-installed")
+        try FileManager.default.createDirectory(at: markerDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: markerDir.appendingPathComponent("corefonts-eula").path, contents: Data())
+
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+
+        // EVERY font — including the first (Andale) — ran SILENT (/Q): no license re-prompt on resume.
+        let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
+        #expect(fontRuns.count == Silo.coreFonts.count)
+        #expect(fontRuns.allSatisfy { $0.arguments.contains("/Q") })
+    }
+
     // MARK: - Game-dependency components
 
     @Test("installSourceHanSans downloads the 4 packs, extracts each, copies .otf into Fonts, per-pack markers")
@@ -328,6 +352,27 @@ struct SteamBottleTests {
         // Only the 3 remaining packs were extracted (the marked one was skipped).
         let tarRuns = fake.invocations.filter { $0.executable.path == "/usr/bin/tar" }
         #expect(tarRuns.count == Silo.sourceHanSansPacks.count - 1)
+    }
+
+    @Test("installSourceHanSans does NOT mark a pack whose extract yielded no .otf (retried next run)")
+    func sourceHanSansEmptyExtractNotMarked() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        for pack in Silo.sourceHanSansPacks {
+            FakeURLProtocol.stub(Silo.sourceHanSansBaseURL.appendingPathComponent("\(pack).zip").absoluteString,
+                                 data: Data("ZIP".utf8), session: session)
+        }
+        fake.onRun = { _ in }   // tar exits 0 but extracts NOTHING (truncated/misformatted archive)
+
+        try await bottle.installSourceHanSans()
+
+        // No .otf copied ⇒ no per-pack marker ⇒ not "installed", so a later Set up retries it.
+        #expect(!bottle.hasSourceHanSans)
+        let markerDir = paths.steamBottle.appendingPathComponent(".silo-installed")
+        for pack in Silo.sourceHanSansPacks {
+            #expect(!FileManager.default.fileExists(atPath: markerDir.appendingPathComponent(pack).path))
+        }
     }
 
     @Test("installD3DCompiler47 extracts both ABIs via `wine expand` and sets a native override")

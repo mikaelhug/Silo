@@ -228,10 +228,10 @@ public struct LaunchOrchestrator: Sendable {
         try? resolveExecutable(app: app, config: config)
     }
 
-    /// Run a built-in wine tool (e.g. `winecfg`) against `prefix`, detached. Msync env so the tool shares
-    /// the bottle's wineserver instead of forking a second one on the same prefix.
-    public func runWineTool(_ tool: String, prefix: URL, backend: BackendConfig) async {
-        guard let wine = backend.wineBinaryPath else { return }
+    /// Run a built-in wine tool (e.g. `winecfg`) against `prefix` with the resolved `wine`, detached. The
+    /// caller resolves `{prefix, wine}` through `BottleResolver` (never hard-codes them). Msync env so the
+    /// tool shares the bottle's wineserver instead of forking a second one on the same prefix.
+    public func runWineTool(_ tool: String, prefix: URL, wine: URL) async {
         _ = try? await runner.spawnDetached(
             executable: wine, arguments: [tool],
             environment: Silo.msyncWineEnvironment(prefix: prefix, wine: wine), currentDirectory: nil,

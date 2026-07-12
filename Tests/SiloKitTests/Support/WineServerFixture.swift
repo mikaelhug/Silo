@@ -16,3 +16,14 @@ func makeWineServerSocket(for prefix: URL) throws -> () -> Void {
     FileManager.default.createFile(atPath: dir.appendingPathComponent("socket").path, contents: Data())
     return { try? FileManager.default.removeItem(at: dir) }
 }
+
+/// Remove the fake `wineserver` socket for `prefix` (the inverse of `makeWineServerSocket`) — so a test can
+/// flip a bottle from live back to dead.
+func removeWineServerSocket(for prefix: URL) {
+    guard let dirName = WineServerProbe.serverDirName(for: prefix) else { return }
+    let root = URL(
+        fileURLWithPath: ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp", isDirectory: true)
+    let dir = root.appendingPathComponent(".wine-\(getuid())", isDirectory: true)
+        .appendingPathComponent(dirName, isDirectory: true)
+    try? FileManager.default.removeItem(at: dir)
+}

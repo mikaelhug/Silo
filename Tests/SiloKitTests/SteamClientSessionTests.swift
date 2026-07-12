@@ -46,6 +46,8 @@ struct SteamClientSessionTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (session, paths) = make(tmp)
         try setActivePid(paths, 0x1234)
+        let removeSocket = try makeWineServerSocket(for: paths.steamBottle)   // a genuinely-live bottle
+        defer { removeSocket() }
         session.readinessTimeout = 10               // generous failsafe; must NOT be the one that resolves
 
         let clock = ContinuousClock()
@@ -87,6 +89,18 @@ struct SteamClientSessionTests {
 
         #expect(running)                            // failsafe lets the launch proceed rather than hang
         #expect(clock.now - start >= .seconds(0.25))   // it actually waited the failsafe, not an instant return
+    }
+
+    @Test("a stale ActiveProcess pid with no live wineserver is NOT treated as running")
+    func staleRegPidWithoutWineserverNotRunning() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (session, paths) = make(tmp)
+        try setActivePid(paths, 0x1234)             // a non-zero pid lingering in user.reg (e.g. a crash)…
+        #expect(!session.isRunning)                 // …but no live wineserver ⇒ not actually up (no stale hit)
+
+        let removeSocket = try makeWineServerSocket(for: paths.steamBottle)   // a wineserver joins the prefix
+        defer { removeSocket() }
+        #expect(session.isRunning)                  // pid + live server ⇒ genuinely running
     }
 
     @Test("quitting leaves the running client alone — the session has no stop/kill path")

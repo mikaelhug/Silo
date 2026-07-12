@@ -119,4 +119,31 @@ struct BottleResolverTests {
         #expect(ctx.graphics == .gptk)
         #expect(ctx.wineBinary == config.wineBinaryPath)   // base runtime, un-overlaid
     }
+
+    // MARK: - Tool routing (winecfg / regedit / retina — prefix-wide, backend-agnostic, base runtime)
+
+    @Test("steamTool/manualTool resolve the right prefix on the base runtime (no backend variant)")
+    func toolTargets() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (config, paths) = try fixtures(tmp)
+        let resolver = BottleResolver(paths: paths)
+
+        let steam = try resolver.steamTool(config: config)
+        #expect(steam.prefix == paths.steamBottle)
+        #expect(steam.wineBinary == config.wineBinaryPath)   // base runtime, never a GPTK/DXMT variant
+
+        let id = UUID()
+        let manual = try resolver.manualTool(id, config: config)
+        #expect(manual.prefix == paths.manualBottle(id))
+        #expect(manual.wineBinary == config.wineBinaryPath)
+    }
+
+    @Test("a tool target throws wineNotConfigured when no wine is set")
+    func toolTargetNeedsWine() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (_, paths) = try fixtures(tmp)
+        #expect(throws: BottleResolver.ResolveError.wineNotConfigured) {
+            try BottleResolver(paths: paths).steamTool(config: BackendConfig())   // no wineBinaryPath
+        }
+    }
 }

@@ -53,6 +53,31 @@ public struct BottleResolver: Sendable {
         try context(backend: game.backend, prefix: paths.manualBottle(game.id), config: config)
     }
 
+    /// The prefix + runtime for a prefix-wide maintenance tool (winecfg / regedit / retina). Distinct from a
+    /// launch context: these are registry/config ops shared by every co-resident game, so they're
+    /// backend-agnostic and run on the BASE runtime (graphics variants are a per-launch concern, never a
+    /// prefix-config one). Routing them here keeps `paths.steamBottle` / `paths.manualBottle` and
+    /// `wineBinaryPath` out of the tool call sites — the same single-map guarantee the launch paths have.
+    public struct ToolTarget: Sendable, Equatable {
+        public let prefix: URL
+        public let wineBinary: URL
+    }
+
+    /// The tool target for the shared Steam bottle.
+    public func steamTool(config: BackendConfig) throws -> ToolTarget {
+        try tool(prefix: paths.steamBottle, config: config)
+    }
+
+    /// The tool target for a manual game's own bottle.
+    public func manualTool(_ id: UUID, config: BackendConfig) throws -> ToolTarget {
+        try tool(prefix: paths.manualBottle(id), config: config)
+    }
+
+    private func tool(prefix: URL, config: BackendConfig) throws -> ToolTarget {
+        guard let wine = config.wineBinaryPath else { throw ResolveError.wineNotConfigured }
+        return ToolTarget(prefix: prefix, wineBinary: wine)
+    }
+
     private func context(
         backend: GraphicsBackend, prefix: URL, config: BackendConfig
     ) throws -> LaunchContext {

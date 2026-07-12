@@ -298,8 +298,10 @@ public final class GameLibraryViewModel {
 
     /// Open `winecfg` for the Steam bottle prefix (prefix-wide, so not per-game).
     public func openWinecfg() async {
-        guard backend.isWineConfigured else { setStatus("No Wine configured."); return }
-        await orchestrator.runWineTool("winecfg", prefix: paths.steamBottle, backend: backend)
+        guard let ctx = try? BottleResolver(paths: paths).steamTool(config: backend) else {
+            setStatus("No Wine configured."); return
+        }
+        await orchestrator.runWineTool("winecfg", prefix: ctx.prefix, wine: ctx.wineBinary)
     }
 
     // MARK: - Manual (non-Steam) games — each in its OWN isolated bottle (paths.manualBottle(id))
@@ -394,11 +396,19 @@ public final class GameLibraryViewModel {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id) else { return }
         if launchBlockedByBottles() { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
+        let is32 = WindowsExecutable.is32Bit(game.executablePath)
+        let dxmtConfigured = backend.libDir(for: .dxmt) != nil
         // A 32-bit game on GPTK can't render (GPTK / D3DMetal is 64-bit-only) — refuse before provisioning
         // its bottle and steer to switching this game's backend to DXMT.
-        if game.backend == .gptk, WindowsExecutable.is32Bit(game.executablePath) {
-            setStatus(Self.unsupported32BitMessage(
-                name: game.name, dxmtAvailable: backend.libDir(for: .dxmt) != nil))
+        if game.backend == .gptk, is32 {
+            setStatus(Self.unsupported32BitMessage(name: game.name, dxmtAvailable: dxmtConfigured))
+            return
+        }
+        // A 32-bit game on DXMT needs the DXMT runtime's i386 modules; a 64-bit-only DXMT build would launch
+        // to a silent black screen. Refuse honestly (mirrors `play`) — but only when DXMT IS configured; an
+        // unconfigured DXMT is caught by `BottleResolver.manual` below with its own "install DXMT" message.
+        if game.backend == .dxmt, is32, dxmtConfigured, !backend.dxmtSupports32Bit {
+            setStatus("\(game.name) is a 32-bit game and needs the 32-bit DXMT build — update DXMT in Settings → DXMT.")
             return
         }
         guard await ensureManualBottle(game.id) else { return }
@@ -464,9 +474,11 @@ public final class GameLibraryViewModel {
 
     /// Open `winecfg` for a manual game's OWN bottle (Windows version, libraries — isolated per game).
     public func openManualWinecfg(_ game: ManualGame) async {
-        guard backend.isWineConfigured else { setStatus("No Wine configured."); return }
         guard await ensureManualBottle(game.id) else { return }
-        await orchestrator.runWineTool("winecfg", prefix: paths.manualBottle(game.id), backend: backend)
+        guard let ctx = try? BottleResolver(paths: paths).manualTool(game.id, config: backend) else {
+            setStatus("No Wine configured."); return
+        }
+        await orchestrator.runWineTool("winecfg", prefix: ctx.prefix, wine: ctx.wineBinary)
     }
 
     /// Remove a manual game's bottle directory off the main actor (it can be large once a game is
