@@ -18,23 +18,24 @@
 [Status](STATUS.md) ·
 [Discord](https://discord.gg/kNysBA9VU5)
 
-<img src="docs/images/dashboard.png" width="820" alt="Silo library — a grid of installed Steam games (Bloons TD 6, Bloons TD Battles 2, It Takes Two, Overcooked 2, Split Fiction, Victoria 3), each with cover art, install size, a per-game GPTK or DXMT graphics-backend badge, and a Play button" />
+<img src="docs/images/dashboard.png" width="820" alt="Silo library — a grid of installed Steam games (Bloons TD 6, Bloons TD Battles 2, It Takes Two, Overcooked 2, Split Fiction, Victoria 3), each with cover art, install size, a per-game graphics-backend badge (Automatic, GPTK, or DXMT), and a Play button" />
 
 </div>
 
-Silo stands up a real **Windows Steam client inside a Wine bottle**, and launches your games
-**co-resident with it** on a Metal graphics backend — Apple's D3DMetal, or DXMT for titles it can't
-run — so Steamworks and Steam DRM just work, no emulator, no fakery. It downloads its own Wine,
-imports Apple's Game Porting Toolkit from your `.dmg`, and self-updates from GitHub Releases.
+Silo stands up a real **Windows Steam client inside one shared Wine bottle**, and launches your games
+**co-resident with it** on a Metal graphics backend it picks automatically — Apple's D3DMetal, or DXMT for
+titles it can't run — so Steamworks and Steam DRM just work, no emulator, no fakery. It downloads its own
+Wine, imports Apple's Game Porting Toolkit from your `.dmg`, and self-updates from GitHub Releases.
 
 ## Highlights
 
 - **Real Steam, real DRM.** Steamworks IPC is prefix-scoped, so Silo runs each game in the same
   bottle as a logged-in Windows Steam client — auth tickets, ownership, and online features intact.
   Sign in once; Steam caches the login.
-- **Two graphics backends.** **GPTK / D3DMetal** (Apple's D3D10/11/12 → Metal layer) drives the Steam
-  bottle; **DXMT** (a direct D3D10/11 → Metal layer) is the optional fallback for older titles GPTK
-  can't run — selectable per manual game, each in its own isolated bottle.
+- **Automatic graphics backend.** All Steam games share **one** bottle, and Silo picks the Metal backend
+  per game: **GPTK / D3DMetal** (Apple's D3D10/11/12 → Metal) by default, **DXMT** (a direct D3D10/11 →
+  Metal layer) for 32-bit titles and as the fallback when GPTK can't drive a game — it remembers the switch
+  for next time. Override to a specific backend per game whenever you want; GPTK and DXMT games co-reside.
 - **Non-Steam games too.** Add any `.exe` (or run its installer); each manual game lives in its
   **own isolated Wine prefix** with per-game backend, env flags, and launch options.
 - **Self-contained.** No Homebrew, no external dependencies: Wine comes from Silo's Releases
@@ -49,15 +50,16 @@ imports Apple's Game Porting Toolkit from your `.dmg`, and self-updates from Git
 
 ## How it works
 
-1. **Bottle** — provision a shared Wine prefix per backend, silently install Windows Steam into it,
-   and launch it with the CEF flags that make its UI actually paint under Wine.
-2. **Discovery** — parse the bottle's `appmanifest_*.acf` (+ `libraryfolders.vdf`) into typed games;
-   each Steam game's backend *is* the bottle it was found in.
-3. **Graphics overlay** — inject the backend's modules into the Wine **runtime**'s own `lib/wine`
-   tree (GPTK in place; DXMT on an APFS clone of the runtime), forced builtin at launch so nothing
-   can shadow them. Idempotent, self-repairing.
-4. **Launch** — resolve `(game, backend) → {prefix, runtime}` through one deterministic dispatch
-   point and spawn the game co-resident with its Steam client, streaming to a per-game log.
+1. **Bottle** — provision **one** shared Wine prefix, install Windows Steam into it, and launch it with
+   the CEF flags that make its UI actually paint under Wine. Every Steam game runs co-resident here.
+2. **Discovery** — parse the bottle's `appmanifest_*.acf` (+ `libraryfolders.vdf`) into typed games.
+3. **Backend choice** — per launch, Silo picks GPTK or DXMT (32-bit → DXMT, else GPTK) or honors your
+   per-game override; a silent GPTK failure flips an Automatic game to DXMT for next time.
+4. **Graphics overlay** — inject the chosen backend's modules into the Wine **runtime**'s own `lib/wine`
+   tree (GPTK in place; DXMT on an APFS clone of the runtime), forced builtin at launch so nothing can
+   shadow them. Idempotent, self-repairing.
+5. **Launch** — resolve `(game, backend) → {prefix, runtime}` through one deterministic dispatch point
+   (`BottleResolver`) and spawn the game co-resident with its Steam client, streaming to a per-game log.
 
 Silo builds, tests, and browses a library with **zero runtimes installed** — everything
 runtime-dependent degrades to a guided setup state, never a crash.
@@ -66,18 +68,17 @@ runtime-dependent degrades to a guided setup state, never a crash.
 
 The Library shows a guided setup until the pieces are in place:
 
-1. **Install Wine** — one click; downloads the latest Wine build (~250 MB) from
-   [Releases](https://github.com/mikaelhug/Silo/releases).
-2. **Import GPTK** — pick Apple's Game Porting Toolkit `.dmg`
+1. **Import GPTK** — pick Apple's Game Porting Toolkit `.dmg`
    ([developer.apple.com/games](https://developer.apple.com/games/game-porting-toolkit/), free
    Apple ID required); Silo mounts it and extracts the D3DMetal layer.
-3. **Set up the Steam bottle** — installs Windows Steam; launch it and sign in once.
-4. *(Optional)* **DXMT** — download the DXMT runtime and set up its own Steam bottle for older
-   DX10/11 titles.
+2. **Set up** — one click chains the rest: download Wine (~250 MB) and the DXMT runtime from
+   [Releases](https://github.com/mikaelhug/Silo/releases), install Windows Steam into the shared bottle
+   (with its fonts and VC++ runtimes), then launch Steam and sign in once — Steam caches the login.
 
-Then hit **Play**. Per-game settings cover the executable, performance flags (msync, Metal HUD,
-MetalFX, raytracing), and launch options; Settings (⌘,) manages Wine/GPTK/DXMT versions, bottle
-tools (Retina mode, winecfg/regedit), bottle location, and updates.
+Then hit **Play**. Steam games default to **Automatic** graphics (GPTK/DXMT chosen per game, overridable in
+per-game settings, which also cover the executable, performance flags — msync, Metal HUD, MetalFX,
+raytracing — and launch options). Settings (⌘,) manages Wine/GPTK/DXMT runtime versions, bottle tools
+(Retina mode, winecfg/regedit), bottle location, and updates.
 
 > **Gatekeeper:** the app is ad-hoc signed, so a downloaded build is quarantined until you
 > right-click → Open (or `xattr -dr com.apple.quarantine Silo.app`).

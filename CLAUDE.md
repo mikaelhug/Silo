@@ -5,13 +5,20 @@
 
 ## Mission
 **Silo** is a native macOS (SwiftUI) launcher overlay for Windows Steam games run via Wine + Apple's
-Game Porting Toolkit (GPTK / D3DMetal). Topology = **Single Downloader, Multi-Runtime**:
-- Steam is installed **once** into a single *simple* Master Wine bottle, used only to download games.
-- Each game is **launched in its own isolated Wine prefix** with its own graphics backend + env.
+Game Porting Toolkit (GPTK / D3DMetal) and 3Shain's DXMT. Topology = **one shared Steam bottle +
+isolated manual bottles**:
+- **Steam games** run co-resident in **ONE shared "Steam" bottle** (`SteamBottle`) next to a logged-in
+  Windows Steam client — Steamworks IPC is prefix-scoped, so a game and its client must share a prefix.
+  Each game launches under an **automatically chosen graphics backend** (GPTK ⇄ DXMT, per game, overridable),
+  pinned at launch by runtime + `WINEDLLOVERRIDES` — never baked into the shared prefix, so GPTK and DXMT
+  games co-reside.
+- **Manual (non-Steam) games** each run in their **own isolated Wine prefix** under an explicit per-game backend.
 
-Pipeline: **Discovery** (parse `appmanifest_*.acf`) → **Provision** (seed per-game prefix) →
-**Graphics Linker** (inject GPTK/D3DMetal, wined3d fallback) → **Launch Orchestrator** (detached
-process with `WINEPREFIX` overridden to the isolated prefix).
+Pipeline: **Discovery** (parse `appmanifest_*.acf`) → **Provision** (seed the shared Steam prefix, or a
+manual game's own prefix) → **Backend choice** (`BackendChooser`: 32-bit → DXMT, else GPTK; reactive switch
+to DXMT when GPTK can't drive an `.auto` game) → **Graphics Linker** (overlay GPTK/DXMT into the chosen
+runtime, wined3d fallback) → **Launch Orchestrator** (detached; `BottleResolver` is the one map from
+game → `{prefix, wineBinary, graphics}`).
 
 **Dock tiles (Phase 3):** launches spawn through a generated `.app` wrapper (`DockAppBundle`) whose
 `Contents/MacOS/<name>` is a **symlink to the wine loader**, so macOS names the Dock tile from the
