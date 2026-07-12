@@ -89,3 +89,16 @@ jobs:
           # (discord-release.yml, on release:published) posts.
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
+
+  # Announce on Discord AFTER publishing. A GITHUB_TOKEN-published release does NOT trigger
+  # discord-release.yml's release:published event (GitHub suppresses workflow-triggered events to avoid
+  # recursion), so call it directly here rather than relying on the event. Runs on cheap ubuntu.
+  notify:
+    needs: app
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/discord-release.yml
+    with:
+      tag: ${{ github.ref_name }}

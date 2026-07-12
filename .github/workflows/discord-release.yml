@@ -1,14 +1,29 @@
 name: Announce release on Discord
 
-# Post to Discord whenever a GitHub Release is published (by release.yml on a v* tag, or by hand).
-# Decoupled from the build: runs on cheap ubuntu-latest, not the 30-min macos-26 release job.
+# Post to Discord for a published release. Fires three ways:
+#   - release:published  — a release published BY HAND (GitHub UI, i.e. a user token).
+#   - workflow_call      — invoked by release.yml right after IT publishes. A release published with the
+#                          default GITHUB_TOKEN does NOT emit a release:published that triggers workflows
+#                          (GitHub suppresses workflow-triggered events to avoid recursion), so release.yml
+#                          calls this directly instead of relying on the event.
+#   - workflow_dispatch  — announce a specific tag by hand (e.g. to re-announce a release).
 #
-# The webhook lives in the DISCORD_WEBHOOK repo secret (Settings → Secrets → Actions) — never in
-# this file, since a webhook URL is itself a credential and this repo is public. If the secret is
-# unset the step is a silent no-op, so forks/CI without it don't fail.
+# The webhook lives in the DISCORD_WEBHOOK repo secret (Settings → Secrets → Actions) — never in this
+# file, since a webhook URL is itself a credential and this repo is public. If the secret is unset the
+# step is a silent no-op, so forks/CI without it don't fail.
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to announce (e.g. v0.3.4)"
+        required: true
 
 permissions:
   contents: read
@@ -19,22 +34,37 @@ jobs:
     steps:
       - name: Post release to Discord
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          RELEASE_NAME: ${{ github.event.release.name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_URL: ${{ github.event.release.html_url }}
-          RELEASE_BODY: ${{ github.event.release.body }}
+          # Populated by a release event; empty on workflow_call / workflow_dispatch (we fetch by `tag`).
+          EV_NAME: ${{ github.event.release.name }}
+          EV_TAG: ${{ github.event.release.tag_name }}
+          EV_URL: ${{ github.event.release.html_url }}
+          EV_BODY: ${{ github.event.release.body }}
+          IN_TAG: ${{ inputs.tag }}
         run: |
           [ -n "$DISCORD_WEBHOOK" ] || { echo "DISCORD_WEBHOOK unset — skipping."; exit 0; }
+
+          # A release event carries the release payload; workflow_call/dispatch pass only a tag, so look
+          # the published release up by it.
+          if [ -n "$EV_TAG" ]; then
+            TITLE="${EV_NAME:-$EV_TAG}"; URL="$EV_URL"; BODY="$EV_BODY"
+          else
+            NAME="$(gh release view "$IN_TAG" --json name --jq '.name // empty')"
+            TITLE="${NAME:-$IN_TAG}"
+            URL="$(gh release view "$IN_TAG" --json url --jq '.url')"
+            BODY="$(gh release view "$IN_TAG" --json body --jq '.body')"
+          fi
 
           # Build the payload entirely in jq: --arg JSON-encodes every field (quotes/backticks/
           # newlines are safe), and the truncation uses jq's codepoint-based length/slicing, so a
           # long body can't be split mid-UTF-8 into bytes that break the JSON. Discord caps embed
           # descriptions at 4096 chars — truncate at 3800 and link out to the full notes.
           payload=$(jq -n \
-            --arg title "🚀 ${RELEASE_NAME:-$RELEASE_TAG}" \
-            --arg url "$RELEASE_URL" \
-            --arg body "$RELEASE_BODY" \
+            --arg title "🚀 ${TITLE}" \
+            --arg url "$URL" \
+            --arg body "$BODY" \
             '
             ( if ($body | length) > 3800
               then ($body[0:3800] + "\n\n…[full release notes](" + $url + ")")
