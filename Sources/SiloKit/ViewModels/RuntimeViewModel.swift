@@ -113,7 +113,7 @@ public final class RuntimeViewModel {
             // picks its own newest release.
             let releases = try await manager.availableReleases(repo: repo, limit: kind.releaseLimit)
             guard let release = kind.pickRelease(releases) else {
-                statusMessage = "No \(kind.noun) build published yet (the \(kind.workflowName) CI workflow must run first)."
+                statusMessage = "No \(kind.noun) build published yet."
                 return
             }
             // Already have the latest? Don't re-download — just say so (and adopt it as the default if none

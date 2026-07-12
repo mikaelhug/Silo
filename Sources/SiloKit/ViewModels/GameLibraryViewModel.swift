@@ -95,15 +95,15 @@ public final class GameLibraryViewModel {
     /// app self-update in flight (it relaunches Silo). Sets the status and returns true if refused.
     private func launchBlockedByBottles() -> Bool {
         if isRelocating() {
-            setStatus("Silo is moving your bottles — wait for that to finish before launching.")
+            setStatus("Silo is moving your bottles — try again shortly.")
             return true
         }
         if isUpdating() {
-            setStatus("Silo is installing an update — it'll relaunch in a moment; launch again after.")
+            setStatus("Installing an update — Silo will relaunch shortly.")
             return true
         }
         if paths.bottlesRelocated, !paths.bottlesRootReachable {
-            setStatus("Your bottles drive isn't connected — reconnect it to launch games.")
+            setStatus("Bottles drive not connected.")
             return true
         }
         return false
@@ -220,7 +220,7 @@ public final class GameLibraryViewModel {
     public func uninstall(_ game: SteamApp) async {
         do {
             try await session.sendURL("steam://uninstall/\(game.appID)")
-            setStatus("Asked Steam to uninstall \(game.name). Refresh once it's done.")
+            setStatus("Told Steam to uninstall \(game.name).")
         } catch { setStatus("Couldn't reach Steam: \((error as NSError).localizedDescription)") }
     }
 
@@ -254,7 +254,7 @@ public final class GameLibraryViewModel {
         // would launch to a silent black screen. Refuse honestly. (If DXMT isn't configured at all, the
         // resolver throws `backendNotConfigured` below with its own "install DXMT" message.)
         if is32, chosen == .dxmt, dxmtConfigured, !cfg.dxmtSupports32Bit {
-            setStatus("\(game.name) is a 32-bit game and needs the 32-bit DXMT build — update DXMT in Settings → DXMT.")
+            setStatus("\(game.name) needs the 32-bit DXMT build — update DXMT in Settings.")
             return
         }
         do {
@@ -267,7 +267,7 @@ public final class GameLibraryViewModel {
             // surface why rather than launching against a dead Steam (which fails SteamAPI_Init silently).
             guard await session.ensureRunning() else {
                 let why = session.launchError.map { ": \($0)" } ?? ""
-                setStatus("\(game.name) needs the Steam client, but it couldn't start\(why).")
+                setStatus("\(game.name) needs Steam, which couldn't start\(why).")
                 return
             }
             try await orchestrator.launchInBottle(
@@ -281,8 +281,7 @@ public final class GameLibraryViewModel {
                 setStatus("Launched \(game.name).")
             } catch {
                 // The game IS running, but config.json is unwritable — say so (settings won't stick either).
-                setStatus("Launched \(game.name), but couldn't save its play date: "
-                    + (error as NSError).localizedDescription)
+                setStatus("Launched \(game.name) — play date not saved.")
             }
             // Automatic learns: an AUTO game GPTK can't drive gets remembered as DXMT for next time. The
             // eligibility is RE-checked with fresh state when the failure actually fires (see `watchGraphics`),
@@ -325,7 +324,7 @@ public final class GameLibraryViewModel {
     /// Delete a draft bottle that was provisioned but never added to the library (Add sheet cancel).
     public func discardManualBottle(_ id: UUID) async {
         if await !deleteBottle(id) {
-            setStatus("Couldn't remove the game's bottle — you can delete it manually in Finder: \(paths.manualBottle(id).path)")
+            setStatus("Couldn't remove the bottle. Delete it in Finder: \(paths.manualBottle(id).path)")
         }
     }
 
@@ -337,7 +336,7 @@ public final class GameLibraryViewModel {
         do {
             _ = try await orchestrator.runInstaller(
                 exe: installer, backend: backend, prefix: paths.manualBottle(id), logURL: paths.manualLog(id))
-            setStatus("Running installer… finish it, then choose the installed .exe.")
+            setStatus("Running installer — then choose the installed .exe.")
         } catch { setStatus("Installer failed: \(Self.resolveMessage(error))") }
     }
 
@@ -377,7 +376,7 @@ public final class GameLibraryViewModel {
     /// wineserver ⇒ the game is running; deleting the prefix under it would corrupt/orphan it).
     public func removeManual(_ game: ManualGame) async {
         guard !WineServerProbe.isLive(prefix: paths.manualBottle(game.id)) else {
-            setStatus("\(game.name) is still running — quit it before removing it.")
+            setStatus("\(game.name) is running — quit it first.")
             return
         }
         _ = try? await configStore.removeManualGame(id: game.id)
@@ -408,7 +407,7 @@ public final class GameLibraryViewModel {
         // to a silent black screen. Refuse honestly (mirrors `play`) — but only when DXMT IS configured; an
         // unconfigured DXMT is caught by `BottleResolver.manual` below with its own "install DXMT" message.
         if game.backend == .dxmt, is32, dxmtConfigured, !backend.dxmtSupports32Bit {
-            setStatus("\(game.name) is a 32-bit game and needs the 32-bit DXMT build — update DXMT in Settings → DXMT.")
+            setStatus("\(game.name) needs the 32-bit DXMT build — update DXMT in Settings.")
             return
         }
         guard await ensureManualBottle(game.id) else { return }
@@ -434,8 +433,7 @@ public final class GameLibraryViewModel {
                 setStatus("Launched \(game.name).")
             } catch {
                 // The game IS running, but config.json is unwritable — say so (settings won't stick either).
-                setStatus("Launched \(game.name), but couldn't save its play date: "
-                    + (error as NSError).localizedDescription)
+                setStatus("Launched \(game.name) — play date not saved.")
             }
             watchGraphics(.manual(game.id), log: paths.manualLog(game.id),   // last (see play); manual games
                           name: game.name, backend: game.backend, exe: game.executablePath)   // never auto-learn
@@ -535,9 +533,9 @@ public final class GameLibraryViewModel {
         else { setStatus(fallbackMessage(name: name, backend: .gptk, dxmtMightHelp: dxmtMightHelp)); return }
         do {
             _ = try await configStore.updateGame(appID: appID) { $0.graphics = .dxmt }
-            setStatus("\(name): GPTK / D3DMetal couldn't run this game — Silo will use DXMT the next time you launch it.")
+            setStatus("\(name): GPTK / D3DMetal couldn't run this game — Silo will use DXMT next launch.")
         } catch {   // persist failed — don't promise a switch that didn't stick
-            setStatus("\(name): GPTK / D3DMetal couldn't run this game. Set its graphics to DXMT in the game's settings.")
+            setStatus("\(name): GPTK / D3DMetal couldn't run this game. Set its graphics to DXMT.")
         }
     }
 

@@ -272,12 +272,12 @@ public final class AppEnvironment {
         let booted = FileManager.default.fileExists(
             atPath: ctx.prefix.appendingPathComponent("system.reg").path)
         guard booted else {
-            bottleToolsMessage = "Set up the Steam bottle first — Retina mode applies to its prefix."
+            bottleToolsMessage = "Set up the Steam bottle first."
             return
         }
         do {
             try await wineTools.setRetinaMode(on, prefix: ctx.prefix, wine: ctx.wineBinary)
-            bottleToolsMessage = "Retina mode \(on ? "on" : "off") — applies on the next game launch."
+            bottleToolsMessage = "Retina mode \(on ? "on" : "off") — applies on next launch."
         } catch {
             bottleToolsMessage = "Couldn't update Retina mode: \((error as NSError).localizedDescription)"
         }

@@ -3,6 +3,14 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✂️ Shortened + homogenised user-facing status messages (2026-07-12, `main`; 373 tests green).** Trimmed the
+  verbose, self-explanatory status lines to a consistent house style — progress as `"<Verb>ing …"` ("Creating
+  bottle…", "Downloading Steam client…", "Installing Asian Fonts…"), success as a terse past-tense sentence,
+  errors as `"Couldn't … ."` / `"… failed: <detail>"`. Setup got the biggest cut (dropped the "one-time, this
+  can take a few minutes", the multi-clause ready/paused copy, and the wordy license line — now "Accept the
+  <X> license — ⌘-Tab if it's behind Silo."). Also trimmed the library launch-guard / uninstall / 32-bit /
+  play-date / retina / "no build published" lines. All substrings the tests pin were preserved (no test copy
+  changes). The already-terse per-title graphics-fallback messages were left as-is.
 - **🪟 Setup: REMOVED the installer-window focuser; rely on a ⌘-Tab hint instead (2026-07-12, `main`; 373 tests
   green).** Wine setup windows (Core Fonts EULA, MSVC redist, Steam) open BEHIND Silo, and reliably raising them
   proved unachievable from Silo's side: a `Process`-forked Wine app doesn't self-activate, and macOS's

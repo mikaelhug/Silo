@@ -59,7 +59,7 @@ public final class SteamBottleViewModel {
         // Refuse if the bottles' (relocated) drive is unplugged — provisioning would otherwise create a
         // phantom bottle on the boot disk at the now-missing /Volumes/... path.
         guard bottle.isRootReachable else {
-            status = "Your bottles drive isn't connected. Reconnect it, then set up Steam."
+            status = "Bottles drive not connected."
             return
         }
         guard let wine = wineBinary else { status = "Set up Wine first."; return }
@@ -80,10 +80,10 @@ public final class SteamBottleViewModel {
             status = "Downloading Steam…"
             _ = try await bottle.downloadSteamInstaller()
             // Step 4: create the bottle.
-            status = "Creating the Steam bottle…"
+            status = "Creating bottle…"
             try await bottle.provision(wine: wine)
             // Apply Silo's default Wine DLL overrides (the standard Windows-compatibility set).
-            status = "Configuring the bottle…"
+            status = "Configuring bottle…"
             await bottle.applyWineDefaults(wine: wine)
             // Make sure the background core-font prefetch has finished warming the cache before the component
             // phase consumes it. Surface "Downloading…" ONLY if it's still running (a warm cache — the common
@@ -107,8 +107,8 @@ public final class SteamBottleViewModel {
             // interrupted warm-up leaves just the bootstrapper and must not flip the onboarding gate.
             steamInstalled = bottle.isClientFullyDownloaded
             status = steamInstalled
-                ? "Steam is ready. Launch it and sign in once — it caches the login."
-                : "Steam setup didn't finish downloading its client — check your connection and run Set up again."
+                ? "Steam is ready. Launch it and sign in once."
+                : "Steam client didn't finish downloading. Run Set up again."
             onSteamInstalled?()   // refresh the library's cached readiness (now reflects the warmed client)
         } catch {
             warmingUp = false; warmUpFraction = nil
@@ -120,18 +120,18 @@ public final class SteamBottleViewModel {
     /// (the user chose to stop) with a clear "run Set up again" cue; anything else is a plain failure.
     static func setupFailureMessage(_ error: Error) -> String {
         if case SteamBottle.BottleError.componentCancelled(let component) = error {
-            return "Setup paused — you cancelled the \(component.title) installer. Run Set up again to finish."
+            return "You cancelled the \(component.title) installer. Run Set up again."
         }
         return "Setup failed: \((error as NSError).localizedDescription)"
     }
 
     /// User-facing status for a component-install phase. Pure + testable; user-guided steps ask the user to
-    /// accept the license (the install blocks on the GUI), the rest just narrate progress.
+    /// accept the license (the install blocks on the GUI), the rest just narrate progress. The license window
+    /// can open behind Silo (see the removed focuser), so the guided copy notes the ⌘-Tab escape.
     static func componentStatus(_ component: BottleComponent) -> String {
         component.isUserGuided
-            ? "A \(component.title) license window has opened — if it's behind Silo, press ⌘-Tab (or click it "
-              + "in the Dock) to bring it forward, then accept it to continue…"
-            : "Setting up Steam — installing \(component.title)…"
+            ? "Accept the \(component.title) license — ⌘-Tab if it's behind Silo."
+            : "Installing \(component.title)…"
     }
 
     private func applyComponentPhase(_ component: BottleComponent) {
@@ -144,13 +144,13 @@ public final class SteamBottleViewModel {
         case .downloading(let fraction):
             warmUpFraction = fraction
             if let fraction {
-                status = "Setting up Steam — downloading its client (\(Int(fraction * 100))%)…"
+                status = "Downloading Steam client — \(Int(fraction * 100))%…"
             } else {
-                status = "Setting up Steam — downloading its client (one-time, this can take a few minutes)…"
+                status = "Downloading Steam client…"
             }
         case .finishing:
             warmUpFraction = nil
-            status = "Setting up Steam — finishing up…"
+            status = "Finishing up…"
         }
     }
 
@@ -160,7 +160,7 @@ public final class SteamBottleViewModel {
         busy = true; defer { busy = false }
         do {
             try bottle.resetLogin()
-            status = "Cleared the bottle's saved login. Launch Steam and sign in fresh."
+            status = "Cleared the saved login. Launch Steam to sign in again."
         } catch {
             status = "Couldn't reset login: \(message(error))"
         }
