@@ -111,6 +111,10 @@ public final class SteamClientSession {
 
     func warmUpUpdate(onProgress: @escaping @MainActor (WarmUpPhase) -> Void) async {
         guard let wine = wineBinary, !bottle.isClientFullyDownloaded else { return }
+        // setUp force-quit whatever the interactive installer auto-launched right before calling us; let the
+        // shared wineserver reap those procs before our fresh launch attaches to it (else the launch can race
+        // the msync bootstrap / a half-dead client). Mirrors the settle in `bringUpClientCef`; 0 in tests.
+        try? await Task.sleep(for: .seconds(warmUpForceQuitSettle))
         onProgress(.downloading(fraction: nil))
         bottle.resetLog()   // so `committed` reflects THIS run, not a stale marker from a prior setup
         var elapsed = 0.0

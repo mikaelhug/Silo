@@ -81,7 +81,9 @@ public final class SteamBottleViewModel {
             await bottle.prefetchCoreFonts(); prefetchDone.set(true)
         }
         // The focuser is armed per user-guided step (see `applyComponentPhase`); always disarm on exit.
-        defer { busy = false; focuser?.disarm() }
+        // Cancel the prefetch too: a no-op on the success path (already awaited below), but on an EARLY throw it
+        // stops the detached download from outliving setUp and racing a re-run's prefetch on the same cache.
+        defer { busy = false; focuser?.disarm(); fontsPrefetch.cancel() }
         do {
             // Step 3: download the Steam installer up front so a network failure surfaces before booting.
             status = "Downloading Steam…"

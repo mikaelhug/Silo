@@ -351,6 +351,12 @@ struct SteamBottleTests {
         // A fresh bottle with an UNSTUBBED session (any re-download would fail) still stages + extracts every
         // font — proving installCoreFonts read the warm cache, not the network.
         let (bottle2, fake2, _, _) = make(tmp, session: FakeURLProtocol.makeSession())   // same paths → same cache
+        let siloFonts = paths.steamBottle.appendingPathComponent("drive_c/silo-fonts")
+        fake2.onRun = { inv in   // simulate IExpress extracting a .ttf (so the license font "accepts", no decline-break)
+            guard inv.arguments.contains("/C") else { return }
+            try? FileManager.default.createDirectory(at: siloFonts, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: siloFonts.appendingPathComponent("font.ttf").path, contents: Data())
+        }
         try await bottle2.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
         let fontRuns = fake2.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
         #expect(fontRuns.count == Silo.coreFonts.count)   // all resolved from cache — none skipped for a failed DL
@@ -517,6 +523,20 @@ struct SteamBottleTests {
         #expect(!bottle.isVCRedistInstalled(x86: true))   // NOT marked → the next setup runs it again
     }
 
+    @Test("a non-standard VC-redist exit code is best-effort — unmarked, but does NOT halt setup before Steam")
+    func vcRedistUnknownExitIsBestEffort() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, _, _) = make(tmp, session: session)
+        FakeURLProtocol.stub(Silo.vcRedistX86URL.absoluteString, data: Data("EXE".utf8), session: session)
+        fake.queueResult(ProcessResult(exitCode: 5))   // a weird, non-standard code (Wine can return these even on a completed install)
+
+        // Must NOT throw — only a real 1602/1223 cancel is fatal; an unknown code can't block Steam.
+        try await bottle.installVCRedist(x86: true, wine: URL(fileURLWithPath: "/w/wine64"))
+
+        #expect(!bottle.isVCRedistInstalled(x86: true))   // unmarked (success unconfirmed) → re-prompts next run
+    }
+
     @Test("declining the core-fonts license installs nothing but does NOT fail setup (best-effort; re-prompts)")
     func coreFontsDeclineIsBestEffort() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
@@ -536,9 +556,39 @@ struct SteamBottleTests {
         // Acceptance is NOT recorded, so a resumed Set up re-shows the license.
         let eulaMarker = paths.steamBottle.appendingPathComponent(".silo-installed/corefonts-eula")
         #expect(!FileManager.default.fileExists(atPath: eulaMarker.path))
-        // The first font still ran WITHOUT /Q (the license prompt); the decline just didn't install anything.
+        // The license font ran WITHOUT /Q, and the decline (no .ttf) stopped the loop before any silent font.
         let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
         #expect(fontRuns.first?.arguments.contains("/Q") == false)
+        #expect(fontRuns.count == 1)   // a decline installs NO core fonts (they share one license)
+    }
+
+    @Test("the core-fonts license shows on the first AVAILABLE font when an earlier one fails to download")
+    func coreFontsLicenseOnFirstAvailableFont() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, fake, paths, _) = make(tmp, session: session)
+        // Stub every font EXCEPT the first (andale32) — its download fails on all mirrors.
+        for font in Silo.coreFonts.dropFirst() {
+            FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString,
+                                 data: Data("EXE".utf8), session: session)
+        }
+        let siloFonts = paths.steamBottle.appendingPathComponent("drive_c/silo-fonts")
+        fake.onRun = { inv in   // simulate IExpress extracting a .ttf (so the license font "accepts")
+            guard inv.arguments.contains("/C") else { return }
+            try? FileManager.default.createDirectory(at: siloFonts, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: siloFonts.appendingPathComponent("f.ttf").path, contents: Data())
+        }
+
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+
+        let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
+        // andale32 never downloaded, so the license (no /Q) ran on the next available font — arial32 — not skipped.
+        #expect(fontRuns.first?.arguments.first == "C:\\arial32.exe")
+        #expect(fontRuns.first?.arguments.contains("/Q") == false)                    // it showed the license
+        #expect(fontRuns.dropFirst().allSatisfy { $0.arguments.contains("/Q") })      // the rest silent
+        // Accepted (a .ttf extracted) → the marker is written so a resume won't re-prompt.
+        #expect(FileManager.default.fileExists(
+            atPath: paths.steamBottle.appendingPathComponent(".silo-installed/corefonts-eula").path))
     }
 
     @Test("provisionComponents rethrows a user cancel — setup STOPS before Steam (not best-effort)")

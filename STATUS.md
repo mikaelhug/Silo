@@ -3,6 +3,25 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔎 Setup logical sweep + fixes before the on-device test (2026-07-12, `main`; `swift build` clean, 375
+  tests green).** Two fresh-eyes audits of the whole setup path (`runFullSetup` → `setUp` → `provisionComponents`
+  → warm-up) confirmed the happy path is sound; fixed the defects most likely to bite an on-device run:
+  - **VC-redist no longer hard-fails on a weird Wine exit code (top on-device risk).** It marked success on
+    `{0,3010,1638}` and treated EVERYTHING else — including a non-standard code an actually-completed installer
+    can return under Wine — as a fatal `componentCancelled`, halting setup before Steam and re-failing every
+    run (the SAME exit-code unreliability that just broke Core Fonts). Now only a real cancel (1602/1223) is
+    fatal; any other outcome is best-effort (unmarked, re-prompts, continues to Steam).
+  - **Core-fonts license shows on the first AVAILABLE font**, not a hard-coded index 0 — so a failed download of
+    andale32 no longer silently skips the license while the rest install. And a DECLINE now installs NO core
+    fonts (they share one license) and stops best-effort, instead of installing the rest.
+  - **Warm-up settles after setUp's force-quit** before its fresh launch (reuses `warmUpForceQuitSettle`; 0 in
+    tests), so the update client doesn't race the wineserver reaping the killed installer procs.
+  - **The background font prefetch is cancelled on an early setUp failure** (defer), so it can't outlive setUp
+    and race a re-run's prefetch/install on the same cache.
+  - Tests +2 (VC-redist unknown-code best-effort; license-on-first-available-font). **Deferred NITs** (noted,
+    low-risk): `hasCoreFonts` keys on Arial only (a failed arial32 re-runs the font install each setup — wasteful,
+    not broken); d3dcompiler destroy-before-verify on a resume (self-heals); a config-save failure surfacing a
+    misleading "Set up Wine first." Still shares the Core Fonts path's on-device-unverified caveat.
 - **⚡ Setup: prefetch the core fonts in the background at "Set up" (2026-07-12, `main`; `swift build` clean,
   373 tests green).** Follow-up to the Core Fonts fix — the font installers now download the MOMENT "Set up" is
   pressed, into a persistent `paths.downloadCacheDir` (under `supportDir`, so it works before the prefix exists

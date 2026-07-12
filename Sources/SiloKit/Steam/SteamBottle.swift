@@ -193,27 +193,26 @@ public struct SteamBottle: Sendable {
         // (Silo.enforceMsync), so this can safely share the prefix with a running Steam.
         let extractDir = driveC.appendingPathComponent("silo-fonts")
         defer { try? fileManager.removeItem(at: extractDir) }
-        // The user-guided EULA is shown ONCE. `hasCoreFonts` keys on a LATER font (Arial), so if an earlier
-        // font failed after the EULA was accepted, a resumed Set up re-enters this loop from index 0 — and
-        // must NOT re-prompt the license for a font already accepted. A dedicated marker records acceptance so
-        // index 0 then extracts SILENTLY like the rest.
+        // Show Microsoft's core-fonts LICENSE ONCE — on the FIRST font we actually install (not a hard-coded
+        // index, so a failed download of the first font doesn't silently skip the license). `licensePending`
+        // flips false after that font runs; on a resumed setup the marker already recorded acceptance, so no
+        // font re-prompts. `hasCoreFonts` keys on a later font (Arial), so the marker is what suppresses a
+        // re-prompt when a resumed run re-enters this loop.
         let eulaMarker = markerDir.appendingPathComponent("corefonts-eula")
-        let eulaAccepted = fileManager.fileExists(atPath: eulaMarker.path)
-        for (index, font) in Silo.coreFonts.enumerated() {
+        var licensePending = !fileManager.fileExists(atPath: eulaMarker.path)
+        for font in Silo.coreFonts {
             guard let cachedExe = cached[font] else { continue }
             // Stage the cached installer into drive_c so Wine can run it by its `C:\…` path (the cache copy
-            // stays for resume; the drive_c copy is removed at the end of the iteration).
+            // stays for resume; the drive_c copy is removed once the run is done).
             let exe = driveC.appendingPathComponent("\(font).exe")
             try? fileManager.removeItem(at: exe)
             guard (try? fileManager.copyItem(at: cachedExe, to: exe)) != nil else { continue }
             // Extract each font's `.ttf` into our OWN dir via IExpress extract-only (`/C /T:<dir>`), then copy
-            // it into Fonts. This is reliable under Wine — unlike relying on the installer to self-install, or
-            // on its EXIT CODE, which is NOT trustworthy here (an ACCEPTED core-font installer routinely exits
-            // non-zero under Wine, which previously misfired as a "cancelled" and halted setup). The FIRST font
-            // (once) runs WITHOUT `/Q`, so IExpress shows Microsoft's core-fonts LICENSE for the user to accept;
-            // the rest are silent. Accept vs decline is read from whether the `.ttf` actually extracted — a
-            // decline simply skips that font (best-effort), it never fails the whole setup.
-            let showLicense = (index == 0 && !eulaAccepted)
+            // it into Fonts — reliable under Wine, unlike relying on the installer to self-install or on its
+            // EXIT CODE (an accepted core-font installer routinely exits non-zero under Wine, which previously
+            // misfired as a "cancelled"). The license font runs WITHOUT `/Q` so IExpress shows the EULA; the
+            // rest are silent. Accept vs decline is read from whether the `.ttf` actually extracted.
+            let showLicense = licensePending
             try? fileManager.removeItem(at: extractDir)
             try? fileManager.createDirectory(at: extractDir, withIntermediateDirectories: true)
             var args = ["C:\\\(font).exe", "/T:C:\\silo-fonts", "/C"]
@@ -224,19 +223,20 @@ public struct SteamBottle: Sendable {
                 currentDirectory: prefixDir)
             let ttfs = ((try? fileManager.contentsOfDirectory(at: extractDir, includingPropertiesForKeys: nil)) ?? [])
                 .filter { $0.pathExtension.lowercased() == "ttf" }
+            try? fileManager.removeItem(at: exe)   // drop the drive_c copy (the cache copy stays for resume)
+            if showLicense {
+                licensePending = false
+                // A DECLINE extracts nothing → install NO core fonts (they all share this one license) and
+                // stop, best-effort (never fails setup); the marker stays absent so the next Set up re-prompts.
+                guard !ttfs.isEmpty else { break }
+                try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
+                fileManager.createFile(atPath: eulaMarker.path, contents: Data())
+            }
             for file in ttfs {
                 let dest = fontsDir.appendingPathComponent(file.lastPathComponent)
                 try? fileManager.removeItem(at: dest)
                 try? fileManager.copyItem(at: file, to: dest)
             }
-            // Record the accepted license (so a resumed setup doesn't re-prompt) ONLY once the licensed font
-            // actually extracted — i.e. the user accepted. A decline extracts nothing, leaves the marker
-            // absent, and the next Set up re-shows the license.
-            if showLicense, !ttfs.isEmpty {
-                try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
-                fileManager.createFile(atPath: eulaMarker.path, contents: Data())
-            }
-            try? fileManager.removeItem(at: exe)
         }
     }
 
@@ -470,9 +470,15 @@ public struct SteamBottle: Sendable {
             fileManager.createFile(atPath: vcRedistMarker(x86: x86).path, contents: Data())
             return
         }
-        // Anything else — a user cancel (1602), a failure, or a run that couldn't start — leaves it UNMARKED
-        // and stops setup, so the bottle isn't left half-provisioned (re-prompted on the next Set up run).
-        throw BottleError.componentCancelled(x86 ? .vcRedistX86 : .vcRedistX64)
+        // A user CANCEL is the one reliable "the user declined" signal — the MSVC MSI bootstrapper reports
+        // ERROR_INSTALL_USER_EXIT (1602) / ERROR_CANCELLED (1223) deterministically — so THAT stops setup
+        // (unmarked → the next Set up re-prompts). ANY OTHER outcome is BEST-EFFORT: under Wine an installer
+        // that actually completed can still return a non-standard exit code (the same unreliability the
+        // core-fonts path documents), so a weird code must NOT falsely halt setup before Steam. Leave it
+        // unmarked (re-prompts next run) and continue.
+        if let code = result?.exitCode, [1602, 1223].contains(code) {
+            throw BottleError.componentCancelled(x86 ? .vcRedistX86 : .vcRedistX64)
+        }
     }
 
     // MARK: - Default Wine DLL overrides
