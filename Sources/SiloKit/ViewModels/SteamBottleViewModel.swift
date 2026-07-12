@@ -72,6 +72,11 @@ public final class SteamBottleViewModel {
         }
         guard let wine = wineBinary else { status = "Set up Wine first."; return }
         busy = true
+        // Prefetch the core-font installers in the BACKGROUND from the moment Set up is pressed, so their
+        // (small but sometimes slow-mirror) download overlaps the Steam download + wineboot below instead of
+        // stalling the Core Fonts step. Awaited just before the component phase — a warm cache means no wait
+        // there, and no double-download.
+        let fontsPrefetch = Task.detached { [bottle] in await bottle.prefetchCoreFonts() }
         // The focuser is armed per user-guided step (see `applyComponentPhase`); always disarm on exit.
         defer { busy = false; focuser?.disarm() }
         do {
@@ -84,6 +89,10 @@ public final class SteamBottleViewModel {
             // Apply Silo's default Wine DLL overrides (the standard Windows-compatibility set).
             status = "Configuring the bottle…"
             await bottle.applyWineDefaults(wine: wine)
+            // Make sure the background core-font prefetch has finished warming the cache before the component
+            // phase consumes it (usually already done — it overlapped the steps above).
+            status = "Downloading core fonts…"
+            await fontsPrefetch.value
             // Steps 5–11: the game-dependency component set, in order (fonts → d3dcompiler → MSVC → Steam).
             try await bottle.provisionComponents(wine: wine, onPhase: { [weak self] component in
                 self?.applyComponentPhase(component)
@@ -124,8 +133,7 @@ public final class SteamBottleViewModel {
     /// accept the license (the install blocks on the GUI), the rest just narrate progress.
     static func componentStatus(_ component: BottleComponent) -> String {
         component.isUserGuided
-            ? "Setting up \(component.title) — its license window will open shortly (it may take a moment to "
-              + "download first); accept it to continue…"
+            ? "Accept the \(component.title) license in the window that opens…"
             : "Setting up Steam — installing \(component.title)…"
     }
 

@@ -330,6 +330,32 @@ struct SteamBottleTests {
         #expect(!ranExes.contains("C:\\arial32.exe"))     // wrong digest → dropped, never executed
     }
 
+    @Test("prefetchCoreFonts warms the cache; installCoreFonts then reuses it without re-downloading")
+    func coreFontsPrefetchWarmsCache() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let session = FakeURLProtocol.makeSession()
+        let (bottle, _, paths, _) = make(tmp, session: session)
+        for font in Silo.coreFonts {
+            FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString,
+                                 data: Data("FONT".utf8), session: session)
+        }
+
+        await bottle.prefetchCoreFonts()
+
+        // Every installer is now cached under supportDir — independent of the not-yet-booted prefix.
+        for font in Silo.coreFonts {
+            #expect(FileManager.default.fileExists(
+                atPath: paths.downloadCacheDir.appendingPathComponent("\(font).exe").path))
+        }
+
+        // A fresh bottle with an UNSTUBBED session (any re-download would fail) still stages + extracts every
+        // font — proving installCoreFonts read the warm cache, not the network.
+        let (bottle2, fake2, _, _) = make(tmp, session: FakeURLProtocol.makeSession())   // same paths → same cache
+        try await bottle2.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        let fontRuns = fake2.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
+        #expect(fontRuns.count == Silo.coreFonts.count)   // all resolved from cache — none skipped for a failed DL
+    }
+
     @Test("every core font + both d3dcompiler cabs have a 64-hex pinned SHA-256 (fail-open-on-missing is safe)")
     func pinnedDigestsAreComplete() {
         for font in Silo.coreFonts {

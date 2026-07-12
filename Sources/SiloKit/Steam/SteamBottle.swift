@@ -176,34 +176,13 @@ public struct SteamBottle: Sendable {
         if hasCoreFonts { return }
         try fileManager.createDirectory(at: fontsDir, withIntermediateDirectories: true)
 
-        // Download all installers CONCURRENTLY (independent ~500 KB files); each falls back to the winetricks
-        // GitHub mirror when SourceForge's flaky redirector fails.
-        let session = self.session
-        let coreFontDigests = self.coreFontDigests
-        let downloaded: [String: URL] = await withTaskGroup(of: (font: String, exe: URL)?.self) { group in
+        // Resolve each font's installer from the shared download cache — populated ahead of time in the
+        // BACKGROUND by `prefetchCoreFonts` (kicked off the moment "Set up" is pressed, so the sometimes-slow
+        // mirror download overlaps wineboot instead of stalling here). A cache miss downloads it now;
+        // `cachedCoreFontExe` HTTPS-guards + SHA-verifies each. Concurrent.
+        let cached: [String: URL] = await withTaskGroup(of: (font: String, exe: URL)?.self) { group in
             for font in Silo.coreFonts {
-                let exe = driveC.appendingPathComponent("\(font).exe")
-                group.addTask {
-                    let fm = FileManager.default
-                    for base in [Silo.coreFontsBaseURL, Silo.coreFontsFallbackBaseURL] {
-                        let url = base.appendingPathComponent("\(font).exe")
-                        guard (try? DownloadGuard.requireHTTPS(url)) != nil,
-                              let (tempFile, response) = try? await session.download(from: url),
-                              let http = response as? HTTPURLResponse,
-                              (200..<300).contains(http.statusCode) else { continue }
-                        try? fm.removeItem(at: exe)
-                        guard (try? fm.moveItem(at: tempFile, to: exe)) != nil else { continue }
-                        // Integrity: these .exe are EXECUTED under Wine, so a pinned font is verified against
-                        // its SHA-256 before it's trusted. A tamper/corruption on one mirror falls through to
-                        // the next; if none verifies, the font is dropped (never run). Unpinned (no key) passes.
-                        if let expected = coreFontDigests[font],
-                           (try? FileDigest.sha256(ofFileAt: exe)) != expected {
-                            try? fm.removeItem(at: exe); continue
-                        }
-                        return (font: font, exe: exe)
-                    }
-                    return nil
-                }
+                group.addTask { (await self.cachedCoreFontExe(font)).map { (font: font, exe: $0) } }
             }
             var result: [String: URL] = [:]
             for await item in group { if let item { result[item.font] = item.exe } }
@@ -221,7 +200,12 @@ public struct SteamBottle: Sendable {
         let eulaMarker = markerDir.appendingPathComponent("corefonts-eula")
         let eulaAccepted = fileManager.fileExists(atPath: eulaMarker.path)
         for (index, font) in Silo.coreFonts.enumerated() {
-            guard let exe = downloaded[font] else { continue }
+            guard let cachedExe = cached[font] else { continue }
+            // Stage the cached installer into drive_c so Wine can run it by its `C:\…` path (the cache copy
+            // stays for resume; the drive_c copy is removed at the end of the iteration).
+            let exe = driveC.appendingPathComponent("\(font).exe")
+            try? fileManager.removeItem(at: exe)
+            guard (try? fileManager.copyItem(at: cachedExe, to: exe)) != nil else { continue }
             // Extract each font's `.ttf` into our OWN dir via IExpress extract-only (`/C /T:<dir>`), then copy
             // it into Fonts. This is reliable under Wine — unlike relying on the installer to self-install, or
             // on its EXIT CODE, which is NOT trustworthy here (an ACCEPTED core-font installer routinely exits
@@ -253,6 +237,49 @@ public struct SteamBottle: Sendable {
                 fileManager.createFile(atPath: eulaMarker.path, contents: Data())
             }
             try? fileManager.removeItem(at: exe)
+        }
+    }
+
+    /// The verified, cached `.exe` for a core font — returns the cached file if present + matching its pin,
+    /// else downloads it (SourceForge → winetricks' GitHub mirror), verifies it, and caches it. Returns nil
+    /// only if every mirror fails. This is the single fetch primitive shared by `prefetchCoreFonts` (which
+    /// warms the cache in the background) and `installCoreFonts` (which consumes it) — so a font downloads at
+    /// most once and the source mirror is immaterial once the SHA-256 matches.
+    private func cachedCoreFontExe(_ font: String) async -> URL? {
+        let cacheDir = paths.downloadCacheDir
+        let cached = cacheDir.appendingPathComponent("\(font).exe")
+        let expected = coreFontDigests[font]
+        if fileManager.fileExists(atPath: cached.path),
+           expected == nil || (try? FileDigest.sha256(ofFileAt: cached)) == expected {
+            return cached   // cache hit (present AND unpinned-or-matching)
+        }
+        try? fileManager.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        for base in [Silo.coreFontsBaseURL, Silo.coreFontsFallbackBaseURL] {
+            let url = base.appendingPathComponent("\(font).exe")
+            guard (try? DownloadGuard.requireHTTPS(url)) != nil,
+                  let (tempFile, response) = try? await session.download(from: url),
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { continue }
+            try? fileManager.removeItem(at: cached)
+            guard (try? fileManager.moveItem(at: tempFile, to: cached)) != nil else { continue }
+            // Executed under Wine — verify against the pin before caching; a mismatch falls through to the next
+            // mirror, and an all-mirror failure caches nothing (never returns an unverified file).
+            if let expected, (try? FileDigest.sha256(ofFileAt: cached)) != expected {
+                try? fileManager.removeItem(at: cached); continue
+            }
+            return cached
+        }
+        return nil
+    }
+
+    /// Warm the download cache with the core-font installers — concurrent, HTTPS-guarded, SHA-verified,
+    /// skipping any already cached. Best-effort (never throws). Meant to run in the BACKGROUND from the moment
+    /// "Set up" is pressed so the download overlaps wineboot instead of stalling the Core Fonts step.
+    func prefetchCoreFonts() async {
+        if hasCoreFonts { return }   // already installed → nothing to warm (mirrors installCoreFonts)
+        await withTaskGroup(of: Void.self) { group in
+            for font in Silo.coreFonts {
+                group.addTask { _ = await self.cachedCoreFontExe(font) }
+            }
         }
     }
 
