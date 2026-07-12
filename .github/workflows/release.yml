@@ -84,5 +84,8 @@ jobs:
           files: |
             dist/Silo.zip
             dist/Silo.zip.sha256
-          generate_release_notes: true
+          # Curated notes for the release being tagged (update RELEASE_NOTES.md per release). Preferred
+          # over generate_release_notes so the body is deterministic — and it's what the Discord announce
+          # (discord-release.yml, on release:published) posts.
+          body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
