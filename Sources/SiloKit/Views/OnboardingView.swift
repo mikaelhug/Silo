@@ -64,10 +64,20 @@ struct OnboardingView: View {
                     let message = steam.status.isEmpty
                         ? (runtime.statusMessage ?? env.dxmtRuntime.statusMessage
                             ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
-                    if let message {
-                        Text(message).font(.callout).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center).frame(maxWidth: 540)
+                    VStack(spacing: 6) {
+                        if let message {
+                            Text(message).font(.callout).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        // DXMT is optional (most games use GPTK), but if the required steps finished WITHOUT
+                        // it (a failed/absent download), say so once on this completion screen — otherwise
+                        // it's discovered only when a 32-bit / GPTK-incompatible game is later refused.
+                        if env.setupComplete && !env.dxmtReady {
+                            Text("DXMT isn't installed — optional, but needed for 32-bit and some older titles. Add it anytime in Settings → DXMT.")
+                                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }
                     }
+                    .frame(maxWidth: 540)
                 }
 
                 // Only until GPTK is imported — once the user has pointed Silo at the .dmg (step 2 "Done"),
