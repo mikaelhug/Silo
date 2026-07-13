@@ -197,6 +197,11 @@ Write the exact question into `STATUS.md` → `## BLOCKED`, commit the last gree
 - A material product/legal ambiguity where guessing risks rework.
 - Anything needing SIP disable / Full Disk Access / a TCC prompt the agent can't satisfy headlessly.
 
-## Environment (verified 2026-06-26)
+## Environment (verified 2026-06-26; runtimes added 2026-07-13)
 Swift 6.3.2 (`arm64-apple-macosx26.0`); macOS 26.5.1, Apple Silicon; `xcodebuild` absent;
-`git`/`codesign` present; Wine/GPTK/Whisky/CrossOver/DXVK/Steam-games all absent.
+`git`/`codesign` present. **The dev box now HAS a provisioned Silo bottle + all three runtimes** at
+`~/Library/Application Support/Silo` (`Runtimes/`: `GPTK-4.0_beta_1`, `dxmt-v0.72-cx26.2.0`, `wine-cx-26.2.0`;
+a set-up `SteamBottle`), so on-device launch/log capture is possible here. This does NOT relax constraint #4:
+the build **and** `swift test` must still pass on a machine with ZERO runtimes (everything runtime-dependent
+stays behind a resolver → `.notConfigured`). Whisky/CrossOver/DXVK absent; no game installed in the bottle yet
+(only `Logs/steam-bottle.log` exists — no per-game log until a game is launched through Silo).
