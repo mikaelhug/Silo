@@ -35,23 +35,8 @@ struct MakePlanTests {
         #expect(plan.logURL == log)
     }
 
-    @Test("launchVia spawns the in-bundle symlink and pins WINELOADER/WINESERVER at the real runtime")
-    func launchViaDockWrapper() throws {
-        let symlink = URL(fileURLWithPath: "/support/DockApps/app-220.app/Contents/MacOS/Half-Life 2")
-        let plan = try LaunchOrchestrator.makePlan(
-            config: GameConfig(appID: 220), backend: backend(), gameExe: gameExe, prefix: prefix,
-            logURL: log, launchVia: symlink)
-        // Spawn the wrapper symlink (so the Dock tile is named), NOT the loader directly.
-        #expect(plan.executable == symlink)
-        // …but wine self-locates its runtime via env, since the exec path is now the foreign wrapper.
-        #expect(plan.environment["WINELOADER"] == "/w/bin/wine64")
-        #expect(plan.environment["WINESERVER"] == "/w/bin/wineserver")
-        // The game exe is still argv[0] to the loader.
-        #expect(plan.arguments == [gameExe.path])
-    }
-
-    @Test("no launchVia (default) launches the loader directly and sets no WINELOADER/WINESERVER")
-    func noLaunchViaLeavesLoaderDirect() throws {
+    @Test("makePlan launches the wine loader directly (no WINELOADER/WINESERVER override)")
+    func launchesLoaderDirectly() throws {
         let plan = try LaunchOrchestrator.makePlan(
             config: GameConfig(appID: 220), backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
         #expect(plan.executable.path == "/w/bin/wine64")

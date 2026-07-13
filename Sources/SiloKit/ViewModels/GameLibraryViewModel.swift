@@ -277,7 +277,6 @@ public final class GameLibraryViewModel {
                 app: game, config: config, backend: backend, graphics: chosen,
                 wine: context.wineBinary, prefix: context.prefix,
                 logURL: paths.log(forAppID: game.appID),
-                dock: .init(name: game.name, folder: "app-\(game.appID)", containerDir: paths.dockAppsDir),
                 gameExe: exe)
             do {
                 _ = try await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
@@ -428,9 +427,7 @@ public final class GameLibraryViewModel {
             // The resolved runtime is the backend's variant; feed it to the orchestrator as the launch wine.
             try await orchestrator.launchManualGame(
                 game, backend: backend, graphics: context.graphics,
-                wine: context.wineBinary, prefix: context.prefix, logURL: paths.manualLog(game.id),
-                dock: .init(name: game.name, folder: "manual-\(game.id.uuidString)",
-                            containerDir: paths.dockAppsDir))
+                wine: context.wineBinary, prefix: context.prefix, logURL: paths.manualLog(game.id))
             do {
                 _ = try await configStore.updateManualGame(id: game.id) { $0.lastPlayed = Date() }
                 setStatus("Launched \(game.name).")

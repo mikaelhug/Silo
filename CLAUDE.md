@@ -20,11 +20,12 @@ to DXMT when GPTK can't drive an `.auto` game) → **Graphics Linker** (overlay 
 runtime, wined3d fallback) → **Launch Orchestrator** (detached; `BottleResolver` is the one map from
 game → `{prefix, wineBinary, graphics}`).
 
-**Dock tiles (Phase 3):** launches spawn through a generated `.app` wrapper (`DockAppBundle`) whose
-`Contents/MacOS/<name>` is a **symlink to the wine loader**, so macOS names the Dock tile from the
-wrapper's `CFBundleName` (`[NSBundle mainBundle]` resolves from the *unresolved* invoked path) instead of
-"wine". The loader still self-locates its runtime because it `realpath`s the symlink; `Silo.pinWineLoader`
-sets `WINELOADER`/`WINESERVER` to the real runtime for child processes. Wrappers live in `paths.dockAppsDir`.
+**Dock tiles:** Silo-launched Wine processes show a Dock tile named "wine" (macOS names it after the
+resolved loader binary). A `DockAppBundle` `.app`-wrapper attempt to rename it was **removed 2026-07-13** —
+it couldn't reach Steam's window-owning child processes (the `explorer` desktop + CEF `steamwebhelper`, which
+wine spawns via `WINELOADER`), and a co-located named-loader retry didn't work either (wine resolves the
+loader symlink back to "wine"). Deemed not worth the complexity for a cosmetic tile name. Launches now spawn
+the wine loader directly.
 
 **Process lifecycle (Phase 4):** Silo launches games + the Steam client **detached** and never owns their
 lifecycle — quitting Silo leaves them running (like CrossOver); there is NO per-game Stop button, PID

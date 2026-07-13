@@ -32,10 +32,6 @@ public struct AppPaths: Sendable, Hashable {
     /// start the moment "Set up" is pressed, BEFORE the bottle prefix / its `drive_c` exists. NOT a cache: it's
     /// wiped at the start of every run and removed when setup finishes, so a stale installer is never reused.
     public var setupDownloadsTmp: URL { supportDir.appendingPathComponent("SetupDownloads", isDirectory: true) }
-    /// Generated per-game `.app` wrappers that give each Silo-launched Wine process a correctly named Dock
-    /// tile (see `DockAppBundle`). Under `supportDir` — NOT `bottlesRoot` — so a launch never depends on the
-    /// bottles drive being mounted to find its launcher wrapper.
-    public var dockAppsDir: URL { supportDir.appendingPathComponent("DockApps", isDirectory: true) }
 
     // MARK: - Bottles location
 

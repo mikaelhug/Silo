@@ -3,6 +3,17 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🗑️ Removed the Dock-tile-naming feature (`DockAppBundle`) (2026-07-13, `main`; 382 tests green).** Steam
+  (and games) show a Dock tile named "wine". The Phase-3 `DockAppBundle` `.app`-wrapper (below) never fixed
+  that — it named only the windowless launcher process Silo spawns, while Steam's window-owning children (the
+  `explorer` virtual desktop + CEF `steamwebhelper`, spawned by wine via `WINELOADER`) stayed "wine". A
+  CrossOver-style co-located named-loader retry also failed (wine resolves the loader symlink back to its real
+  name "wine"; the winemac driver is byte-identical to CrossOver's, so it's launch-side, but neither the
+  wrapper nor the named loader reaches the children). Per the user, not worth the complexity for a cosmetic
+  tile — **removed entirely**: deleted `DockAppBundle`(+tests), `Silo.pinWineLoader`, `AppPaths.dockAppsDir`,
+  `LaunchOrchestrator.{DockIdentity,launchVia}`, and the `dock:` params; `launchSteam`/`launchInBottle`/
+  `launchManualGame` now spawn the wine loader directly. Tests that used `WINELOADER` (set only as a wrapper
+  side-effect) as the runtime proxy now assert on the spawn `executable`.
 - **🔎 Switcher hardening: positive engagement + delay-load imports + re-probe UX (2026-07-13, `main`; 388
   tests green).** Three follow-ups from the honest post-Part-A review:
   - **#1 Positive engagement (`GraphicsFallback`):** detection was inference-from-absence. Added

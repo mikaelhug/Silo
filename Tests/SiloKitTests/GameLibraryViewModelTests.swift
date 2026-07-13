@@ -294,7 +294,7 @@ struct GameLibraryViewModelTests {
             $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
                 && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
         })
-        #expect(spawn.environment["WINELOADER"]?.contains("/wine-dxmt/bin/wine64") == true)
+        #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))   // the DXMT variant runtime
         #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
         // The DXMT prefix-loader seeded winemetal.dll into the shared Steam prefix (needed for DXMT to load).
         let wm = paths.steamBottle.appendingPathComponent("drive_c/windows/system32/winemetal.dll")
@@ -360,7 +360,7 @@ struct GameLibraryViewModelTests {
             $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
                 && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
         })
-        #expect(spawn.environment["WINELOADER"]?.contains("/wine-dxmt/bin/wine64") == true)   // DXMT runtime
+        #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))   // the DXMT variant runtime
         #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
     }
 
@@ -396,7 +396,7 @@ struct GameLibraryViewModelTests {
             $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
                 && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
         })
-        let loader = spawn.environment["WINELOADER"] ?? ""
+        let loader = spawn.executable.path
         #expect(!loader.contains("/wine-dxmt/"))                                       // re-probed GPTK, NOT DXMT
         #expect(loader.hasSuffix("/wine/bin/wine64"))                                  // the base (GPTK) wine loader
         #expect(spawn.environment["WINEDLLOVERRIDES"]?.contains("winemetal") != true)  // and NOT DXMT's overrides
@@ -553,10 +553,8 @@ struct GameLibraryViewModelTests {
         await vm.playManual(game)
 
         let spawn = try #require(fake.invocations.last { $0.detached })
-        // Launched via the game's Dock-naming `.app` wrapper (so the tile reads "Old", not "wine")…
-        #expect(spawn.executable.path.hasSuffix("DockApps/manual-\(game.id.uuidString).app/Contents/MacOS/Old"))
-        // …with the cloned DXMT runtime pinned via WINELOADER so wine still self-locates it.
-        #expect(spawn.environment["WINELOADER"]?.contains("/wine-dxmt/bin/wine64") == true)
+        // Launched on the cloned DXMT variant runtime (the loader directly).
+        #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))
         #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
         #expect(spawn.environment["WINEPREFIX"] == paths.manualBottle(game.id).path)   // its own isolated bottle
     }

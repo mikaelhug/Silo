@@ -52,9 +52,7 @@ struct SteamBottleTests {
         _ = try await bottle.launchSteam(wine: URL(fileURLWithPath: "/w/wine64"))
         let call = try #require(fake.lastInvocation)
         #expect(call.detached)
-        // Launched via the generated Steam.app wrapper so the Dock tile reads "Steam", not "wine"…
-        #expect(call.executable.path.hasSuffix("DockApps/Steam.app/Contents/MacOS/Steam"))
-        #expect(call.environment["WINELOADER"] == "/w/wine64")            // …real loader pinned for self-location
+        #expect(call.executable.path == "/w/wine64")                      // the loader directly
         #expect(call.arguments.first == "explorer")                       // virtual desktop (CEF presents)
         #expect(call.arguments.contains { $0.hasPrefix("/desktop=") })
         #expect(call.arguments.contains(paths.steamBottleExe.path))

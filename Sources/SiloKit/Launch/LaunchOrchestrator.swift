@@ -27,27 +27,6 @@ public struct LaunchOrchestrator: Sendable {
         case unsupported32BitOnGPTK(URL)
     }
 
-    /// Identity for a launch's Dock-tile wrapper `.app` (see `DockAppBundle`): the display name, a stable
-    /// unique folder slug (so co-resident games each get their own wrapper), and the dir to write it into.
-    public struct DockIdentity: Sendable, Equatable {
-        public let name: String
-        public let folder: String
-        public let containerDir: URL
-        public init(name: String, folder: String, containerDir: URL) {
-            self.name = name
-            self.folder = folder
-            self.containerDir = containerDir
-        }
-    }
-
-    /// Write the launch's Dock wrapper (best-effort) and return the in-bundle symlink to spawn, or nil to
-    /// launch the loader directly (the tile then falls back to "wine"). Never fails the launch.
-    private func dockLauncher(_ dock: DockIdentity?, loader: URL) -> URL? {
-        guard let dock else { return nil }
-        return try? DockAppBundle(displayName: dock.name, folderName: dock.folder, wineLoader: loader)
-            .write(into: dock.containerDir)
-    }
-
     /// GPTK / D3DMetal is 64-bit-only, so a 32-bit game under it can only fall back to wined3d and fail.
     /// Refuse it up front (the caller surfaces an honest "use DXMT" message) rather than launching into a
     /// guaranteed graphics-init failure. Fails **open**: only a CONFIRMED i386 PE is refused — an
@@ -72,8 +51,7 @@ public struct LaunchOrchestrator: Sendable {
         wine: URL? = nil,
         gameExe: URL,
         prefix: URL,
-        logURL: URL,
-        launchVia: URL? = nil
+        logURL: URL
     ) throws -> LaunchPlan {
         guard let wine = wine ?? backend.wineBinaryPath else {
             throw LaunchError.wineNotConfigured
@@ -112,14 +90,8 @@ public struct LaunchOrchestrator: Sendable {
                 environment["WINEDLLOVERRIDES"], graphics.dllOverrides)
         }
 
-        // Dock-tile naming: when a per-game `.app` wrapper is provided (`DockAppBundle`), spawn its in-bundle
-        // symlink instead of the wine loader directly, so macOS names the Dock tile after the game — not
-        // "wine". The symlink still points at `wine`; pin the real loader/server so it self-locates its
-        // runtime from the foreign wrapper path (see `Silo.pinWineLoader`).
-        if launchVia != nil { Silo.pinWineLoader(&environment, loader: wine) }
-
         return LaunchPlan(
-            executable: launchVia ?? wine,
+            executable: wine,
             arguments: [gameExe.path] + config.customArgs,
             environment: environment,
             currentDirectory: gameExe.deletingLastPathComponent(),
@@ -137,7 +109,7 @@ public struct LaunchOrchestrator: Sendable {
     public func launchInBottle(
         app: SteamApp, config: GameConfig, backend: BackendConfig,
         graphics: GraphicsBackend, wine: URL? = nil, prefix: URL, logURL: URL,
-        dock: DockIdentity? = nil, gameExe: URL? = nil
+        gameExe: URL? = nil
     ) async throws -> Int32 {
         guard let launchWine = wine ?? backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }
         // Reuse the exe the caller already resolved (the VM resolves it once to pick the backend), else
@@ -149,9 +121,7 @@ public struct LaunchOrchestrator: Sendable {
         try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)
         let plan = try Self.makePlan(
             config: config, backend: backend, graphics: graphics, wine: launchWine,
-            gameExe: gameExe, prefix: prefix, logURL: logURL,
-            launchVia: dockLauncher(dock, loader: launchWine)
-        )
+            gameExe: gameExe, prefix: prefix, logURL: logURL)
         return try await spawn(plan)
     }
 
@@ -162,8 +132,7 @@ public struct LaunchOrchestrator: Sendable {
     @discardableResult
     public func launchManualGame(
         _ game: ManualGame, backend: BackendConfig,
-        graphics: GraphicsBackend, wine: URL? = nil, prefix: URL, logURL: URL,
-        dock: DockIdentity? = nil
+        graphics: GraphicsBackend, wine: URL? = nil, prefix: URL, logURL: URL
     ) async throws -> Int32 {
         guard let launchWine = wine ?? backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }
         guard FileManager.default.fileExists(atPath: game.executablePath.path) else {
@@ -173,8 +142,7 @@ public struct LaunchOrchestrator: Sendable {
         try linkGraphics(backendConfig: backend, graphics: graphics, wine: launchWine, prefix: prefix)
         let plan = try Self.makePlan(
             config: game.gameConfig, backend: backend, graphics: graphics, wine: launchWine,
-            gameExe: game.executablePath, prefix: prefix, logURL: logURL,
-            launchVia: dockLauncher(dock, loader: launchWine))
+            gameExe: game.executablePath, prefix: prefix, logURL: logURL)
         return try await spawn(plan)
     }
 
