@@ -63,7 +63,7 @@ struct GPTKManagerViewModelTests {
 
         await vm.importGPTK(from: tmp.url.appendingPathComponent("Bad.dmg"))
 
-        #expect(vm.statusMessage?.hasPrefix("Import failed") == true)
+        #expect(vm.statusMessage?.hasPrefix("Couldn't import") == true)
         #expect(!vm.isImporting)                     // defer reset fired
         #expect(vm.installs.isEmpty)                  // catch path does NOT call refresh()
     }

@@ -32,8 +32,7 @@ public final class BottlesRelocationCoordinator {
     /// destination — a Wine prefix needs POSIX symlinks.
     public func moveBottles(to chosen: URL) async {
         guard !filesystemRejects(chosen) else {
-            message = "That location is exFAT/FAT, which can't hold a Wine bottle (no symlink "
-                + "support). Reformat the drive as APFS or Mac OS Extended, then try again."
+            message = "That drive is exFAT/FAT — Wine bottles need APFS or Mac OS Extended."
             return
         }
         await relocateBottles(to: chosen.appendingPathComponent("Silo Bottles", isDirectory: true))
@@ -57,7 +56,7 @@ public final class BottlesRelocationCoordinator {
         // move), then persist the new location and relaunch into an empty dir while the real bottles sit
         // orphaned on the drive. Refuse until the current root is reachable.
         guard paths.bottlesRootReachable else {
-            message = "Your bottles drive isn't connected — reconnect it before moving bottles."
+            message = "Bottles drive not connected."
             return
         }
         let old = paths.bottlesRoot
@@ -67,7 +66,7 @@ public final class BottlesRelocationCoordinator {
         }
         busy = true
         progress = 0
-        message = "Moving bottles… this can take a while for installed games."
+        message = "Moving bottles… this can take a while."
         defer { busy = false; progress = nil }
 
         let names = AppPaths.bottleDirNames
@@ -86,7 +85,7 @@ public final class BottlesRelocationCoordinator {
                 }
             }.value
         } catch BottleRelocator.RelocateError.sourceBecameActive {
-            message = "A game or Steam started while moving — quit it and try again. Your bottles weren't moved."
+            message = "A game or Steam started mid-move — quit it and try again."
             return
         } catch {
             message = "Couldn't move bottles: \((error as NSError).localizedDescription)"

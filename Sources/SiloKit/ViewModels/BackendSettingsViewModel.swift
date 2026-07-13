@@ -63,7 +63,7 @@ public final class BackendSettingsViewModel {
             statusMessage = "Saved."
             onChange?(config)
         } catch {
-            statusMessage = "Save failed: \((error as NSError).localizedDescription)"
+            statusMessage = "Couldn't save: \((error as NSError).localizedDescription)"
         }
     }
 }

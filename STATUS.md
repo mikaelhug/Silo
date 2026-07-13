@@ -3,6 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✍️ Message review — one consistent voice (2026-07-12, `main`; 373 tests green).** Went over every
+  user-facing status/error string. Unified the error voice to `"Couldn't <verb>: <detail>"` across all VMs
+  (was a mix of that and `"<X> failed:"` — RuntimeVM/GPTKVM/BackendVM/installer now match GameLibrary/relocation;
+  the top-level `"Setup failed:"` outcome is the one intentional exception). Shortened the last verbose lines
+  (the exFAT-drive warning, the mid-move / drive-not-connected relocation messages) and aligned
+  "Bottles drive not connected." everywhere. Progress = `"<Verb>ing …"`, success = terse past tense, prompts =
+  short imperative.
 - **⏬ Setup: download EVERYTHING at "Set up" in the background; dropped the download cache (2026-07-12, `main`;
   373 tests green).** Rebuilt the setup download flow per the user's spec. Previously only core fonts were
   prefetched, so Source Han Sans (~360 MB) only started downloading when its install step arrived — blocking

@@ -337,7 +337,7 @@ public final class GameLibraryViewModel {
             _ = try await orchestrator.runInstaller(
                 exe: installer, backend: backend, prefix: paths.manualBottle(id), logURL: paths.manualLog(id))
             setStatus("Running installer — then choose the installed .exe.")
-        } catch { setStatus("Installer failed: \(Self.resolveMessage(error))") }
+        } catch { setStatus("Couldn't run the installer: \(Self.resolveMessage(error))") }
     }
 
     /// Add a non-Steam game pointing at an absolute `.exe`, provisioning its private bottle. Pass the same
