@@ -295,7 +295,8 @@ public final class AppEnvironment {
     /// Build a per-game settings view model with the game's persisted config, keyed by appID.
     public func makeGameSettings(appID: Int) async -> GameSettingsViewModel {
         let state = await configStore.load()
-        return GameSettingsViewModel(config: state.config(for: appID), configStore: configStore)
+        return GameSettingsViewModel(config: state.config(for: appID), configStore: configStore,
+                                     gptkRuntimeName: state.backend.gptkRuntimeName)
     }
 
     /// A game's launch log (`<appID>.log`).

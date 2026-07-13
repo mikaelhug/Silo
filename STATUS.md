@@ -3,6 +3,18 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🧹 Post-change review sweep (2026-07-13, `main`; 384 tests green).** Two adversarial review agents over the
+  session's changes (switcher + Dock removal). Verdict: Dock removal left NO rot; the PE parser and switcher
+  state machine are bounds-safe / fail-open / correct. Fixed the one real finding + closed a test gap:
+  - **Bug (medium): `GameSettingsViewModel.learnedBackend` misreported a stale hint.** It gated only on
+    `graphics == .auto`, not the runtime match `play` applies — so after a GPTK upgrade the sheet showed
+    "Automatic is using DXMT" while the game actually re-probed GPTK. Now takes the current `gptkRuntimeName`
+    (via `AppEnvironment.makeGameSettings`) and mirrors the launch gate. +test.
+  - **Test gap: legacy VA-format delay import.** `PEFixture.withDelayImports` gained a `legacyVAImageBase`
+    option; new test covers the `nameField &- imageBaseLow` (grAttrs bit0=0) branch.
+  - Tightened the `save()` hint-reset comment (it overclaimed re-probe on an already-Automatic Save).
+  - Accepted by design (not changed): the inert stale hint left in `config.json` (ignored everywhere), the
+    import-dir-not-gated-on-`numDirs` fail-open path, DXMT engagement precedence, and lingering inert monitors.
 - **🗑️ Removed the Dock-tile-naming feature (`DockAppBundle`) (2026-07-13, `main`; 382 tests green).** Steam
   (and games) show a Dock tile named "wine". The Phase-3 `DockAppBundle` `.app`-wrapper (below) never fixed
   that — it named only the windowless launcher process Silo spawns, while Steam's window-owning children (the

@@ -65,9 +65,12 @@ enum PEFixture {
     }
 
     /// A PE whose DLLs are DELAY-loaded: a full 16-entry data-directory table with the delay-import directory
-    /// (index 13) populated with 32-byte `ImgDelayDescr`s in the modern RVA-name format (grAttrs bit 0 = 1).
+    /// (index 13) populated with 32-byte `ImgDelayDescr`s. Modern RVA-name format (grAttrs bit 0 = 1) by
+    /// default; pass `legacyVAImageBase` (PE32 only) to emit the legacy VA-name format (grAttrs bit 0 = 0, the
+    /// name field an absolute VA = ImageBase + RVA) so the `nameField &- imageBaseLow` branch is exercised.
     /// Exercises `WindowsExecutable.importedDLLs`' delay-load walk (the regular import directory is left empty).
-    static func withDelayImports(magic: UInt16, machine: UInt16, imports: [String]) -> Data {
+    static func withDelayImports(magic: UInt16, machine: UInt16, imports: [String],
+                                 legacyVAImageBase: UInt32? = nil) -> Data {
         var b = [UInt8](repeating: 0, count: 0x400)
         func setU16(_ off: Int, _ v: UInt16) { b[off] = UInt8(v & 0xFF); b[off + 1] = UInt8(v >> 8) }
         func setU32(_ off: Int, _ v: UInt32) {
@@ -88,6 +91,7 @@ enum PEFixture {
         setU16(pe + 20, UInt16(sizeOpt))                            // SizeOfOptionalHeader
         setU16(opt, magic)                                          // Magic
         setU32(opt + (magic == 0x20b ? 108 : 92), UInt32(numDirs))  // NumberOfRvaAndSizes
+        if let base = legacyVAImageBase { setU32(opt + 28, base) }  // ImageBase (PE32), for the legacy-VA math
         let dataDirs = opt + dataDirBase
         let delayOff = 0x200
         setU32(dataDirs + 13 * 8, UInt32(delayOff))                 // delay-import dir RVA (index 13)
@@ -101,8 +105,13 @@ enum PEFixture {
         var nameOff = 0x300
         for (i, dll) in imports.enumerated() {
             let d = delayOff + i * 32
-            setU32(d, 1)                                            // grAttrs: RVA name format
-            setU32(d + 4, UInt32(nameOff))                         // rvaDLLName
+            if let base = legacyVAImageBase {
+                setU32(d, 0)                                        // grAttrs: legacy VA name format
+                setU32(d + 4, base &+ UInt32(nameOff))             // rvaDLLName as an absolute VA
+            } else {
+                setU32(d, 1)                                        // grAttrs: RVA name format
+                setU32(d + 4, UInt32(nameOff))                     // rvaDLLName
+            }
             setStr(nameOff, dll)
             nameOff += dll.utf8.count + 1
         }

@@ -72,12 +72,26 @@ struct ViewModelTests {
         let store = ConfigStore(paths: paths)
         _ = try await store.saveGame(GameConfig(appID: 220, graphics: .auto,
                                                 learnedBackend: .dxmt, learnedUnderRuntime: "GPTK-old"))
-        let vm = GameSettingsViewModel(config: await store.load().config(for: 220), configStore: store)
+        let vm = GameSettingsViewModel(config: await store.load().config(for: 220), configStore: store,
+                                       gptkRuntimeName: "GPTK-old")   // hint learned under the CURRENT runtime
         #expect(vm.learnedBackend == .dxmt)                        // sheet surfaces the learned routing
         await vm.reprobeGPTK()
         #expect(vm.learnedBackend == nil)                          // row clears in-sheet
         let saved = await store.load().config(for: 220)
         #expect(saved.learnedBackend == nil && saved.learnedUnderRuntime == nil && saved.graphics == .auto)
+    }
+
+    @Test("learnedBackend hides a hint learned under a SUPERSEDED GPTK runtime (matches the launch re-probe)")
+    func gameSettingsHidesStaleLearnedAfterGPTKUpgrade() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let store = ConfigStore(paths: paths)
+        _ = try await store.saveGame(GameConfig(appID: 220, graphics: .auto,
+                                                learnedBackend: .dxmt, learnedUnderRuntime: "GPTK-old"))
+        // The box now runs GPTK-new → play re-probes GPTK, so the sheet must NOT claim DXMT.
+        let vm = GameSettingsViewModel(config: await store.load().config(for: 220), configStore: store,
+                                       gptkRuntimeName: "GPTK-new")
+        #expect(vm.learnedBackend == nil)
     }
 
     @Test("learnedBackend is nil for a user-pinned game (a pin is not a learned hint)")

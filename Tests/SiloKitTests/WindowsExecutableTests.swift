@@ -32,6 +32,15 @@ struct WindowsExecutableTests {
         #expect(WindowsExecutable.importedDLLs(of: x64) == ["d3d12.dll", "kernel32.dll"])
     }
 
+    @Test("importedDLLs reads a LEGACY VA-format delay import (grAttrs bit0=0 → name field minus ImageBase)")
+    func delayImportsLegacyVA() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // PE32 (0x10b) so ImageBase is read; the descriptor's name field is an absolute VA = ImageBase + RVA.
+        let x86 = try write(PEFixture.withDelayImports(magic: 0x10b, machine: 0x014c,
+                                                       imports: ["D3D9.dll"], legacyVAImageBase: 0x400000), tmp, "legacy.exe")
+        #expect(WindowsExecutable.importedDLLs(of: x86) == ["d3d9.dll"])
+    }
+
     @Test("fails OPEN: a non-PE / unreadable file returns nil (never false-positives a 32-bit refusal)")
     func failsOpen() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
