@@ -41,10 +41,12 @@ enum WindowsExecutable {
     static func is32Bit(_ url: URL) -> Bool { machine(of: url) == .i386 }
 
     /// The set of DLL names a PE statically imports, lowercased (e.g. `"d3d11.dll"`) — a hint at the graphics
-    /// API a game needs. Walks the PE import directory (data directory 1). **Fail-open**: any parse/bounds
-    /// issue returns whatever was collected so far (empty on early failure) — never blocks a launch, and an
-    /// EMPTY result means "unknown" (many games load Direct3D dynamically via `LoadLibrary`, so absence of a
-    /// d3d import is NOT proof it doesn't use one). Memory-maps the file so a large `.exe` isn't read whole.
+    /// API a game needs. Walks BOTH the PE import directory (data directory 1) AND the delay-load import
+    /// directory (index 13) — many titles delay-load `d3d12`/`d3d9`, so the delay table carries graphics-API
+    /// names the regular table doesn't. **Fail-open**: any parse/bounds issue returns whatever was collected
+    /// so far (empty on early failure) — never blocks a launch, and an EMPTY result means "unknown" (many
+    /// games load Direct3D dynamically via `LoadLibrary`, so absence of a d3d import is NOT proof it doesn't
+    /// use one). Memory-maps the file so a large `.exe` isn't read whole.
     static func importedDLLs(of url: URL) -> Set<String> {
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return [] }
         let n = data.count
@@ -72,9 +74,6 @@ enum WindowsExecutable {
             case 0x20b: dataDirs = optHdr + 112
             default: return []
             }
-            // Import directory = data directory index 1 (RVA, size).
-            guard let importRVA = u32(dataDirs + 8), importRVA != 0 else { return [] }
-
             // Section table (right after the optional header) → RVA→file-offset mapping.
             let sectionsStart = optHdr + sizeOptHdr
             struct Section { let va: UInt32; let vsize: UInt32; let rawSize: UInt32; let rawPtr: UInt32 }
@@ -101,18 +100,36 @@ enum WindowsExecutable {
                 while i < n, raw[i] != 0, bytes.count < max { bytes.append(raw[i]); i += 1 }
                 return bytes.isEmpty ? nil : String(decoding: bytes, as: UTF8.self)
             }
+            // NumberOfRvaAndSizes gates which data directories exist (index 13 only if > 13); ImageBase (PE32)
+            // backs the legacy-VA delay-import fallback below.
+            let numDirs = Int(u32(magic == 0x10b ? optHdr + 92 : optHdr + 108) ?? 0)
+            let imageBaseLow = magic == 0x10b ? (u32(optHdr + 28) ?? 0) : 0
 
-            // Walk IMAGE_IMPORT_DESCRIPTORs (20 bytes each) until the all-zero terminator.
-            guard var desc = fileOffset(importRVA) else { return [] }
             var names: Set<String> = []
-            for _ in 0..<2048 {
-                guard let origFirstThunk = u32(desc), let nameRVA = u32(desc + 12),
-                      let firstThunk = u32(desc + 16) else { break }
-                if origFirstThunk == 0, nameRVA == 0, firstThunk == 0 { break }   // terminator
-                if nameRVA != 0, let off = fileOffset(nameRVA), let name = cString(at: off) {
-                    names.insert(name.lowercased())
+            // Import directory = data directory index 1: 20-byte IMAGE_IMPORT_DESCRIPTORs, name RVA at +12.
+            if let importRVA = u32(dataDirs + 8), importRVA != 0, var desc = fileOffset(importRVA) {
+                for _ in 0..<2048 {
+                    guard let origFirstThunk = u32(desc), let nameRVA = u32(desc + 12),
+                          let firstThunk = u32(desc + 16) else { break }
+                    if origFirstThunk == 0, nameRVA == 0, firstThunk == 0 { break }   // terminator
+                    if nameRVA != 0, let off = fileOffset(nameRVA), let name = cString(at: off) {
+                        names.insert(name.lowercased())
+                    }
+                    desc += 20
                 }
-                desc += 20
+            }
+            // Delay-load import directory = data directory index 13: 32-byte ImgDelayDescr, name at +4. Modern
+            // linkers store an RVA (grAttrs bit 0 = 1); the legacy format stores a VA → subtract ImageBase.
+            if numDirs > 13, let delayRVA = u32(dataDirs + 13 * 8), delayRVA != 0, var desc = fileOffset(delayRVA) {
+                for _ in 0..<2048 {
+                    guard let attrs = u32(desc), let nameField = u32(desc + 4), let hmod = u32(desc + 8) else { break }
+                    if attrs == 0, nameField == 0, hmod == 0 { break }   // all-zero terminator
+                    let nameRVA = (attrs & 1) == 1 ? nameField : nameField &- imageBaseLow
+                    if nameRVA != 0, let off = fileOffset(nameRVA), let name = cString(at: off) {
+                        names.insert(name.lowercased())
+                    }
+                    desc += 32
+                }
             }
             return names
         }

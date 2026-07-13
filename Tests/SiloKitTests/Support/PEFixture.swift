@@ -64,6 +64,51 @@ enum PEFixture {
         return Data(b)                                             // trailing all-zero import descriptor terminates
     }
 
+    /// A PE whose DLLs are DELAY-loaded: a full 16-entry data-directory table with the delay-import directory
+    /// (index 13) populated with 32-byte `ImgDelayDescr`s in the modern RVA-name format (grAttrs bit 0 = 1).
+    /// Exercises `WindowsExecutable.importedDLLs`' delay-load walk (the regular import directory is left empty).
+    static func withDelayImports(magic: UInt16, machine: UInt16, imports: [String]) -> Data {
+        var b = [UInt8](repeating: 0, count: 0x400)
+        func setU16(_ off: Int, _ v: UInt16) { b[off] = UInt8(v & 0xFF); b[off + 1] = UInt8(v >> 8) }
+        func setU32(_ off: Int, _ v: UInt32) {
+            b[off] = UInt8(v & 0xFF); b[off + 1] = UInt8((v >> 8) & 0xFF)
+            b[off + 2] = UInt8((v >> 16) & 0xFF); b[off + 3] = UInt8((v >> 24) & 0xFF)
+        }
+        func setStr(_ off: Int, _ s: String) { for (i, c) in Array(s.utf8).enumerated() { b[off + i] = c } }
+        b[0] = 0x4D; b[1] = 0x5A                                     // "MZ"
+        let pe = 0x40
+        setU32(0x3C, UInt32(pe))                                    // e_lfanew
+        b[pe] = 0x50; b[pe + 1] = 0x45                              // "PE\0\0"
+        setU16(pe + 4, machine)                                     // COFF Machine
+        setU16(pe + 6, 1)                                           // NumberOfSections
+        let opt = pe + 24
+        let dataDirBase = magic == 0x20b ? 112 : 96
+        let numDirs = 16
+        let sizeOpt = dataDirBase + numDirs * 8                     // full 16 data directories
+        setU16(pe + 20, UInt16(sizeOpt))                            // SizeOfOptionalHeader
+        setU16(opt, magic)                                          // Magic
+        setU32(opt + (magic == 0x20b ? 108 : 92), UInt32(numDirs))  // NumberOfRvaAndSizes
+        let dataDirs = opt + dataDirBase
+        let delayOff = 0x200
+        setU32(dataDirs + 13 * 8, UInt32(delayOff))                 // delay-import dir RVA (index 13)
+        setU32(dataDirs + 13 * 8 + 4, UInt32(32 * (imports.count + 1)))
+        let sec = opt + sizeOpt
+        setStr(sec, ".didat")
+        setU32(sec + 8, 0x200)                                      // VirtualSize
+        setU32(sec + 12, UInt32(delayOff))                         // VirtualAddress == PointerToRawData
+        setU32(sec + 16, 0x200)                                     // SizeOfRawData
+        setU32(sec + 20, UInt32(delayOff))                         // PointerToRawData
+        var nameOff = 0x300
+        for (i, dll) in imports.enumerated() {
+            let d = delayOff + i * 32
+            setU32(d, 1)                                            // grAttrs: RVA name format
+            setU32(d + 4, UInt32(nameOff))                         // rvaDLLName
+            setStr(nameOff, dll)
+            nameOff += dll.utf8.count + 1
+        }
+        return Data(b)                                             // trailing all-zero descriptor terminates
+    }
+
     /// Write `data` to a file under `tmp` and return its URL.
     static func write(_ data: Data, into tmp: TempDir, _ name: String) throws -> URL {
         let url = tmp.url.appendingPathComponent(name)

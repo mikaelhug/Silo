@@ -67,4 +67,14 @@ struct BackendChooserTests {
         #expect(BackendChooser.dxmtMightHelp(exe: try pe("d9x.exe", ["d3d9.dll", "d3d10core.dll"]))) // has D3D10
         #expect(BackendChooser.dxmtMightHelp(exe: try pe("none.exe", ["kernel32.dll"])))             // dynamic → try
     }
+
+    @Test("dxmtMightHelp catches a DELAY-loaded d3d12 → DXMT can't help (no wasted reroute)")
+    func mightHelpDelayLoadedD3D12() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // A title that delay-loads d3d12 (common) — the delay directory is the only place the name appears.
+        let exe = try PEFixture.write(
+            PEFixture.withDelayImports(magic: 0x20b, machine: 0x8664, imports: ["d3d12.dll"]), into: tmp, "dl12.exe")
+        #expect(WindowsExecutable.importedDLLs(of: exe) == ["d3d12.dll"])
+        #expect(!BackendChooser.dxmtMightHelp(exe: exe))   // needs D3D12 → DXMT is pointless
+    }
 }

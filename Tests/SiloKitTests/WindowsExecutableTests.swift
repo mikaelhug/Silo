@@ -24,6 +24,14 @@ struct WindowsExecutableTests {
         #expect(!WindowsExecutable.is32Bit(try write(PEFixture.header(machine: 0x8664), tmp, "x64.exe")))
     }
 
+    @Test("importedDLLs reads DELAY-loaded DLLs too (index-13 directory), lowercased")
+    func delayImportsRead() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let x64 = try write(PEFixture.withDelayImports(magic: 0x20b, machine: 0x8664,
+                                                       imports: ["D3D12.dll", "kernel32.dll"]), tmp, "delay.exe")
+        #expect(WindowsExecutable.importedDLLs(of: x64) == ["d3d12.dll", "kernel32.dll"])
+    }
+
     @Test("fails OPEN: a non-PE / unreadable file returns nil (never false-positives a 32-bit refusal)")
     func failsOpen() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
