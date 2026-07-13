@@ -3,6 +3,27 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **⏬ Setup: download EVERYTHING at "Set up" in the background; dropped the download cache (2026-07-12, `main`;
+  373 tests green).** Rebuilt the setup download flow per the user's spec. Previously only core fonts were
+  prefetched, so Source Han Sans (~360 MB) only started downloading when its install step arrived — blocking
+  there for minutes while the status misleadingly read "Installing Asian Fonts…".
+  - **New `SetupDownloads`** (`Sources/SiloKit/Steam/SetupDownloads.swift`): the moment "Set up" is pressed,
+    `SteamBottleViewModel.setUp` calls `bottle.startSetupDownloads()`, which kicks off EVERY component's
+    artifacts (core fonts, SHS, d3dcompiler cabs, MSVC redist) concurrently into a fresh temp dir — so the slow
+    ones overlap the Steam download + wineboot + the earlier install steps. It skips components already
+    installed (a re-run doesn't re-download 360 MB), and SHA-verifies the pinned artifacts (core fonts, cabs).
+  - **Download separated from install:** `installCoreFonts`/`installSourceHanSans`/`installD3DCompiler47`/
+    `installVCRedist` now `await` their artifact from `SetupDownloads` and install it (staging into `drive_c`
+    where Wine needs a `C:\…` path), instead of downloading inline. `provisionComponents` awaits each step's
+    download, narrating **`.downloading`** ("Downloading <X>…") when it's still in flight, then **`.installing`**
+    — exactly the "show downloading instead of a slow installing" the user asked for.
+  - **Cache removed:** deleted the persistent `AppPaths.downloadCacheDir` + `cachedCoreFontExe`/`prefetchCoreFonts`
+    (the user found it needlessly complex + prone to stale installers). The temp dir is wiped at the start of
+    every run and removed on `cleanup()` — always fresh, never a stale installer.
+  - `LockedBox.mutate` added (atomic Set insert). Tests: install methods take a `downloads`; a direct
+    `SetupDownloads` test (fetch + SHA-verify + temp cleanup) replaces the old cache test; also fixed a
+    pre-existing latent test that did a real 20 s network download (now fully stubbed → suite runs in ~1 s).
+    **On-device-unverified** (shares the setup path caveat).
 - **✂️ Shortened + homogenised user-facing status messages (2026-07-12, `main`; 373 tests green).** Trimmed the
   verbose, self-explanatory status lines to a consistent house style — progress as `"<Verb>ing …"` ("Creating
   bottle…", "Downloading Steam client…", "Installing Asian Fonts…"), success as a terse past-tense sentence,

@@ -44,9 +44,11 @@ struct AppEnvironmentUpdateTests {
         #expect(env.gameLibrary.loadState == .notReady)   // no bottle yet
         #expect(!env.steamReady)
 
-        // Put a warmed Steam client in the bottle out-of-band, then run the VM's setUp: it sees the client
-        // already present (no download) and the success path fires onSteamInstalled → library reload.
+        // Put a warmed Steam client + all component markers in the bottle out-of-band, then run the VM's
+        // setUp: every component is already satisfied so it does NO downloads (no real network), and the
+        // success path fires onSteamInstalled → library reload.
         paths.createWarmedSteamClient()
+        paths.createComponentMarkers()
         env.steamBottleVM.updateWine(URL(fileURLWithPath: "/w/wine64"))
         await env.steamBottleVM.setUp()
         #expect(env.steamBottleVM.steamInstalled)

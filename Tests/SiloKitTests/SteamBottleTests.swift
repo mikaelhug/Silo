@@ -267,7 +267,7 @@ struct SteamBottleTests {
             }
         }
 
-        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
 
         // First font ran USER-GUIDED (bare — no /Q); every subsequent font ran silent (/Q).
         let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
@@ -280,7 +280,7 @@ struct SteamBottleTests {
         #expect(bottle.hasCoreFonts)
         // Idempotent: a second run does no downloads/runs (the marker short-circuits it).
         let runsBefore = fake.invocations.count
-        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
         #expect(fake.invocations.count == runsBefore)
     }
 
@@ -300,7 +300,7 @@ struct SteamBottleTests {
         FileManager.default.createFile(
             atPath: markerDir.appendingPathComponent("corefonts-eula").path, contents: Data())
 
-        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
 
         // EVERY font — including the first (Andale) — ran SILENT (/Q): no license re-prompt on resume.
         let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
@@ -323,43 +323,34 @@ struct SteamBottleTests {
         FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("arial32.exe").absoluteString,
                              data: stub, session: session)
 
-        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
 
         let ranExes = Set(fake.invocations.compactMap { $0.arguments.first(where: { $0.hasSuffix(".exe") }) })
         #expect(ranExes.contains("C:\\andale32.exe"))    // matching digest → executed
         #expect(!ranExes.contains("C:\\arial32.exe"))     // wrong digest → dropped, never executed
     }
 
-    @Test("prefetchCoreFonts warms the cache; installCoreFonts then reuses it without re-downloading")
-    func coreFontsPrefetchWarmsCache() async throws {
+    @Test("SetupDownloads fetches + SHA-verifies each artifact into a fresh temp dir, cleaned up on demand")
+    func setupDownloadsFetchesVerifiesAndCleansUp() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
-        let (bottle, _, paths, _) = make(tmp, session: session)
+        let good = Data("FONT".utf8)
         for font in Silo.coreFonts {
             FakeURLProtocol.stub(Silo.coreFontsBaseURL.appendingPathComponent("\(font).exe").absoluteString,
-                                 data: Data("FONT".utf8), session: session)
+                                 data: good, session: session)
         }
+        // andale32 pinned to the stub's real digest (kept); arial32 to a wrong one (dropped by verification).
+        let digests = ["andale32": sha256Hex(good), "arial32": String(repeating: "0", count: 64)]
+        let tempDir = tmp.url.appendingPathComponent("dl")
+        let downloads = SetupDownloads(session: session, tempDir: tempDir,
+                                       coreFontDigests: digests, d3dCabDigests: [:])
 
-        await bottle.prefetchCoreFonts()
-
-        // Every installer is now cached under supportDir — independent of the not-yet-booted prefix.
-        for font in Silo.coreFonts {
-            #expect(FileManager.default.fileExists(
-                atPath: paths.downloadCacheDir.appendingPathComponent("\(font).exe").path))
-        }
-
-        // A fresh bottle with an UNSTUBBED session (any re-download would fail) still stages + extracts every
-        // font — proving installCoreFonts read the warm cache, not the network.
-        let (bottle2, fake2, _, _) = make(tmp, session: FakeURLProtocol.makeSession())   // same paths → same cache
-        let siloFonts = paths.steamBottle.appendingPathComponent("drive_c/silo-fonts")
-        fake2.onRun = { inv in   // simulate IExpress extracting a .ttf (so the license font "accepts", no decline-break)
-            guard inv.arguments.contains("/C") else { return }
-            try? FileManager.default.createDirectory(at: siloFonts, withIntermediateDirectories: true)
-            FileManager.default.createFile(atPath: siloFonts.appendingPathComponent("font.ttf").path, contents: Data())
-        }
-        try await bottle2.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
-        let fontRuns = fake2.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
-        #expect(fontRuns.count == Silo.coreFonts.count)   // all resolved from cache — none skipped for a failed DL
+        let files = await downloads.coreFontFiles()
+        #expect(files["andale32"] != nil)          // verified → kept
+        #expect(files["arial32"] == nil)           // wrong digest → dropped, never returned
+        #expect(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent("andale32.exe").path))
+        downloads.cleanup()
+        #expect(!FileManager.default.fileExists(atPath: tempDir.path))   // temp dir removed — no persistent cache
     }
 
     @Test("every core font + both d3dcompiler cabs have a 64-hex pinned SHA-256 (fail-open-on-missing is safe)")
@@ -393,7 +384,7 @@ struct SteamBottleTests {
             FileManager.default.createFile(atPath: extractDir.appendingPathComponent("\(pack)-Regular.otf").path, contents: Data("OTF".utf8))
         }
 
-        try await bottle.installSourceHanSans()
+        try await bottle.installSourceHanSans(downloads: bottle.startSetupDownloads())
 
         let tarRuns = fake.invocations.filter { $0.executable.path == "/usr/bin/tar" && $0.arguments.first == "-xf" }
         #expect(tarRuns.count == Silo.sourceHanSansPacks.count)   // one extract per pack
@@ -402,7 +393,7 @@ struct SteamBottleTests {
         #expect(bottle.hasSourceHanSans)
         // Idempotent: second run does nothing.
         let runsBefore = fake.invocations.count
-        try await bottle.installSourceHanSans()
+        try await bottle.installSourceHanSans(downloads: bottle.startSetupDownloads())
         #expect(fake.invocations.count == runsBefore)
     }
 
@@ -421,7 +412,7 @@ struct SteamBottleTests {
         }
         fake.onRun = { _ in }
 
-        try await bottle.installSourceHanSans()
+        try await bottle.installSourceHanSans(downloads: bottle.startSetupDownloads())
 
         // Only the 3 remaining packs were extracted (the marked one was skipped).
         let tarRuns = fake.invocations.filter { $0.executable.path == "/usr/bin/tar" }
@@ -439,7 +430,7 @@ struct SteamBottleTests {
         }
         fake.onRun = { _ in }   // tar exits 0 but extracts NOTHING (truncated/misformatted archive)
 
-        try await bottle.installSourceHanSans()
+        try await bottle.installSourceHanSans(downloads: bottle.startSetupDownloads())
 
         // No .otf copied ⇒ no per-pack marker ⇒ not "installed", so a later Set up retries it.
         #expect(!bottle.hasSourceHanSans)
@@ -469,7 +460,7 @@ struct SteamBottleTests {
             FileManager.default.createFile(atPath: dir.appendingPathComponent(member).path, contents: Data(count: 600_000))
         }
 
-        try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
 
         // Both DLLs landed (renamed from the member id → canonical name).
         #expect(FileManager.default.fileExists(atPath: sys32.appendingPathComponent("d3dcompiler_47.dll").path))
@@ -485,7 +476,7 @@ struct SteamBottleTests {
         })
         // Idempotent.
         let runsBefore = fake.invocations.count
-        try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
         #expect(fake.invocations.count == runsBefore)
     }
 
@@ -497,7 +488,7 @@ struct SteamBottleTests {
         FakeURLProtocol.stub(Silo.vcRedistX64URL.absoluteString, data: Data("EXE".utf8), session: session)
         // The installer run returns the fake's default exit 0 → a success → the Silo marker is written.
 
-        try await bottle.installVCRedist(x86: false, wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installVCRedist(x86: false, wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
 
         let run = try #require(fake.invocations.last { $0.arguments.first?.hasSuffix("vc_redist.x64.exe") == true })
         #expect(run.arguments.count == 1)                    // just the installer path — no /install /quiet
@@ -505,7 +496,7 @@ struct SteamBottleTests {
         #expect(bottle.isVCRedistInstalled(x86: false))      // marked done (exit 0), NOT via msvcp140.dll
         // Idempotent.
         let runsBefore = fake.invocations.count
-        try await bottle.installVCRedist(x86: false, wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installVCRedist(x86: false, wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
         #expect(fake.invocations.count == runsBefore)
     }
 
@@ -518,7 +509,7 @@ struct SteamBottleTests {
         fake.queueResult(ProcessResult(exitCode: 1602))   // user cancelled the bootstrapper
 
         await #expect(throws: SteamBottle.BottleError.componentCancelled(.vcRedistX86)) {
-            try await bottle.installVCRedist(x86: true, wine: URL(fileURLWithPath: "/w/wine64"))
+            try await bottle.installVCRedist(x86: true, wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
         }
         #expect(!bottle.isVCRedistInstalled(x86: true))   // NOT marked → the next setup runs it again
     }
@@ -532,7 +523,7 @@ struct SteamBottleTests {
         fake.queueResult(ProcessResult(exitCode: 5))   // a weird, non-standard code (Wine can return these even on a completed install)
 
         // Must NOT throw — only a real 1602/1223 cancel is fatal; an unknown code can't block Steam.
-        try await bottle.installVCRedist(x86: true, wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installVCRedist(x86: true, wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
 
         #expect(!bottle.isVCRedistInstalled(x86: true))   // unmarked (success unconfirmed) → re-prompts next run
     }
@@ -550,7 +541,7 @@ struct SteamBottleTests {
 
         // Best-effort: the (unreliable-under-Wine) installer exit code is no longer treated as a cancel, so
         // this must NOT throw — a declined font is simply skipped, it doesn't halt the whole setup.
-        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
 
         #expect(!bottle.hasCoreFonts)                                    // nothing extracted ⇒ nothing installed
         // Acceptance is NOT recorded, so a resumed Set up re-shows the license.
@@ -579,7 +570,7 @@ struct SteamBottleTests {
             FileManager.default.createFile(atPath: siloFonts.appendingPathComponent("f.ttf").path, contents: Data())
         }
 
-        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"))
+        try await bottle.installCoreFonts(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
 
         let fontRuns = fake.invocations.filter { $0.arguments.first?.hasSuffix(".exe") == true }
         // andale32 never downloaded, so the license (no /Q) ran on the next available font — arial32 — not skipped.
@@ -615,7 +606,7 @@ struct SteamBottleTests {
         fake.queueResult(ProcessResult(exitCode: 1602))   // user cancels the x86 redist
 
         await #expect(throws: SteamBottle.BottleError.componentCancelled(.vcRedistX86)) {
-            try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64")) { _ in }
+            try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads()) { _, _ in }
         }
         // The terminal Steam component never installed — provisioning stopped at the cancel.
         #expect(!fake.invocations.contains { $0.arguments.first?.hasSuffix("SteamSetup.exe") == true })
@@ -672,8 +663,8 @@ struct SteamBottleTests {
         FakeURLProtocol.stub(Silo.steamInstallerURL.absoluteString, data: Data("X".utf8), session: session)
 
         let phases = LockedBox<[BottleComponent]>([])
-        try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64")) { component in
-            phases.set(phases.value + [component])
+        try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads()) { component, phase in
+            if phase == .installing { phases.set(phases.value + [component]) }
         }
 
         // msync is always satisfied (launch-time env var) → skipped, never a phase, zero process work.
@@ -701,8 +692,8 @@ struct SteamBottleTests {
         FakeURLProtocol.stub(Silo.vcRedistX64URL.absoluteString, data: Data("X".utf8), session: session)
 
         let phases = LockedBox<[BottleComponent]>([])
-        try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64")) { component in
-            phases.set(phases.value + [component])
+        try await bottle.provisionComponents(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads()) { component, phase in
+            if phase == .installing { phases.set(phases.value + [component]) }
         }
 
         #expect(!phases.value.contains(.coreFonts))    // Arial.TTF present → skipped

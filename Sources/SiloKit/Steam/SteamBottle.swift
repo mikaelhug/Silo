@@ -169,25 +169,16 @@ public struct SteamBottle: Sendable {
     /// **user-guided** (no flags) so the user sees + accepts the "core fonts for the Web" EULA once (blocks
     /// until closed); the rest extract silently (`/T /C /Q`) and are copied into `windows/Fonts`. Best-effort
     /// per font: a failed download/extract is skipped, never aborting setup.
-    func installCoreFonts(wine: URL?) async throws {
+    func installCoreFonts(wine: URL?, downloads: SetupDownloads) async throws {
         guard let wine else { throw BottleError.wineNotConfigured }
         let driveC = prefixDir.appendingPathComponent("drive_c")
         let fontsDir = driveC.appendingPathComponent("windows/Fonts")
         if hasCoreFonts { return }
         try fileManager.createDirectory(at: fontsDir, withIntermediateDirectories: true)
 
-        // Resolve each font's installer from the shared download cache — populated ahead of time in the
-        // BACKGROUND by `prefetchCoreFonts` (kicked off the moment "Set up" is pressed, so the sometimes-slow
-        // mirror download overlaps wineboot instead of stalling here). A cache miss downloads it now;
-        // `cachedCoreFontExe` HTTPS-guards + SHA-verifies each. Concurrent.
-        let cached: [String: URL] = await withTaskGroup(of: (font: String, exe: URL)?.self) { group in
-            for font in Silo.coreFonts {
-                group.addTask { (await self.cachedCoreFontExe(font)).map { (font: font, exe: $0) } }
-            }
-            var result: [String: URL] = [:]
-            for await item in group { if let item { result[item.font] = item.exe } }
-            return result
-        }
+        // The installers were downloaded (+ SHA-verified) in the background from the moment "Set up" was
+        // pressed; await that here — a warm set returns instantly, else the caller already showed "Downloading…".
+        let cached = await downloads.coreFontFiles()   // font → local .exe (missing entries just skipped)
 
         // Install sequentially in fixed order. The msync env attaches each run to the bottle's ONE wineserver
         // (Silo.enforceMsync), so this can safely share the prefix with a running Steam.
@@ -240,47 +231,14 @@ public struct SteamBottle: Sendable {
         }
     }
 
-    /// The verified, cached `.exe` for a core font — returns the cached file if present + matching its pin,
-    /// else downloads it (SourceForge → winetricks' GitHub mirror), verifies it, and caches it. Returns nil
-    /// only if every mirror fails. This is the single fetch primitive shared by `prefetchCoreFonts` (which
-    /// warms the cache in the background) and `installCoreFonts` (which consumes it) — so a font downloads at
-    /// most once and the source mirror is immaterial once the SHA-256 matches.
-    private func cachedCoreFontExe(_ font: String) async -> URL? {
-        let cacheDir = paths.downloadCacheDir
-        let cached = cacheDir.appendingPathComponent("\(font).exe")
-        let expected = coreFontDigests[font]
-        if fileManager.fileExists(atPath: cached.path),
-           expected == nil || (try? FileDigest.sha256(ofFileAt: cached)) == expected {
-            return cached   // cache hit (present AND unpinned-or-matching)
-        }
-        try? fileManager.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        for base in [Silo.coreFontsBaseURL, Silo.coreFontsFallbackBaseURL] {
-            let url = base.appendingPathComponent("\(font).exe")
-            guard (try? DownloadGuard.requireHTTPS(url)) != nil,
-                  let (tempFile, response) = try? await session.download(from: url),
-                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { continue }
-            try? fileManager.removeItem(at: cached)
-            guard (try? fileManager.moveItem(at: tempFile, to: cached)) != nil else { continue }
-            // Executed under Wine — verify against the pin before caching; a mismatch falls through to the next
-            // mirror, and an all-mirror failure caches nothing (never returns an unverified file).
-            if let expected, (try? FileDigest.sha256(ofFileAt: cached)) != expected {
-                try? fileManager.removeItem(at: cached); continue
-            }
-            return cached
-        }
-        return nil
-    }
-
-    /// Warm the download cache with the core-font installers — concurrent, HTTPS-guarded, SHA-verified,
-    /// skipping any already cached. Best-effort (never throws). Meant to run in the BACKGROUND from the moment
-    /// "Set up" is pressed so the download overlaps wineboot instead of stalling the Core Fonts step.
-    func prefetchCoreFonts() async {
-        if hasCoreFonts { return }   // already installed → nothing to warm (mirrors installCoreFonts)
-        await withTaskGroup(of: Void.self) { group in
-            for font in Silo.coreFonts {
-                group.addTask { _ = await self.cachedCoreFontExe(font) }
-            }
-        }
+    /// Start the background download of every component's artifacts (core fonts, Source Han Sans, d3dcompiler
+    /// cabs, MSVC redist) for one setup run. Call the MOMENT "Set up" is pressed so the slow ones overlap
+    /// wineboot + the earlier install steps; hand the result to `provisionComponents`. No cache — a fresh temp
+    /// dir per run (see `SetupDownloads`).
+    func startSetupDownloads() -> SetupDownloads {
+        let satisfied = Set(BottleComponent.allCases.filter { isSatisfied($0) })   // a re-run skips done work
+        return SetupDownloads(session: session, tempDir: paths.setupDownloadsTmp,
+                              coreFontDigests: coreFontDigests, d3dCabDigests: d3dCabDigests, skip: satisfied)
     }
 
     // MARK: - Game-dependency components (Asian fonts, d3dcompiler_47, MSVC redist)
@@ -310,7 +268,7 @@ public struct SteamBottle: Sendable {
     /// wine, no EULA — OFL). Downloads the pending packs' ZIPs, extracts each with bsdtar, and copies every
     /// `.otf` into `windows/Fonts` (Wine auto-registers dropped fonts). Best-effort per pack; a per-pack
     /// marker makes the ~360 MB set resumable.
-    func installSourceHanSans() async throws {
+    func installSourceHanSans(downloads: SetupDownloads) async throws {
         if hasSourceHanSans { return }
         let driveC = prefixDir.appendingPathComponent("drive_c")
         let fontsDir = driveC.appendingPathComponent("windows/Fonts")
@@ -320,27 +278,9 @@ public struct SteamBottle: Sendable {
         let pending = Silo.sourceHanSansPacks.filter {
             !fileManager.fileExists(atPath: markerDir.appendingPathComponent($0).path)
         }
-        // Download the pending packs concurrently (each ~90 MB, independent).
-        let session = self.session
-        let downloaded: [String: URL] = await withTaskGroup(of: (pack: String, zip: URL)?.self) { group in
-            for pack in pending {
-                let zip = driveC.appendingPathComponent("\(pack).zip")
-                group.addTask {
-                    let fm = FileManager.default
-                    let url = Silo.sourceHanSansBaseURL.appendingPathComponent("\(pack).zip")
-                    guard (try? DownloadGuard.requireHTTPS(url)) != nil,
-                          let (tempFile, response) = try? await session.download(from: url),
-                          let http = response as? HTTPURLResponse,
-                          (200..<300).contains(http.statusCode) else { return nil }
-                    try? fm.removeItem(at: zip)
-                    guard (try? fm.moveItem(at: tempFile, to: zip)) != nil else { return nil }
-                    return (pack: pack, zip: zip)
-                }
-            }
-            var result: [String: URL] = [:]
-            for await item in group { if let item { result[item.pack] = item.zip } }
-            return result
-        }
+        // The ~360 MB packs were downloaded in the background from the moment "Set up" was pressed; await
+        // that here (a warm set returns instantly, else the caller already showed "Downloading…").
+        let downloaded = await downloads.sourceHanSansFiles()   // pack → local .zip (missing entries just skipped)
 
         // Extract + copy sequentially, in the fixed pack order, marking each on success.
         let extractDir = driveC.appendingPathComponent("silo-shs")
@@ -386,29 +326,23 @@ public struct SteamBottle: Sendable {
     /// builtin (vkd3d-shader-backed) drives shader compilation for the vast majority of titles; the native
     /// file is kept for the odd app that loads it by explicit path and for dependency detection. Best-effort
     /// per ABI.
-    func installD3DCompiler47(wine: URL?) async throws {
+    func installD3DCompiler47(wine: URL?, downloads: SetupDownloads) async throws {
         guard let wine else { throw BottleError.wineNotConfigured }
         if hasD3DCompiler47 { return }
         let driveC = prefixDir.appendingPathComponent("drive_c")
         try? fileManager.createDirectory(at: driveC, withIntermediateDirectories: true)
-        // (url, member, unix dest dir, windows dest dir)
-        let targets: [(url: URL, member: String, unixDir: String, winDir: String)] = [
-            (Silo.d3dCompiler47X64CabURL, Silo.d3dCompiler47X64Member, "windows/system32", "windows\\system32"),
-            (Silo.d3dCompiler47X86CabURL, Silo.d3dCompiler47X86Member, "windows/syswow64", "windows\\syswow64"),
+        let cabs = await downloads.d3dCabFiles()   // member → local .cab (already SHA-verified)
+        // (member, unix dest dir, windows dest dir)
+        let targets: [(member: String, unixDir: String, winDir: String)] = [
+            (Silo.d3dCompiler47X64Member, "windows/system32", "windows\\system32"),
+            (Silo.d3dCompiler47X86Member, "windows/syswow64", "windows\\syswow64"),
         ]
-        for (url, member, unixDir, winDir) in targets {
+        for (member, unixDir, winDir) in targets {
+            guard let src = cabs[member] else { continue }
+            // Stage the downloaded cab into drive_c so `wine expand` can reach it by its `C:\…` path.
             let cab = driveC.appendingPathComponent("\(member).cab")
-            guard (try? DownloadGuard.requireHTTPS(url)) != nil,
-                  let (tempFile, response) = try? await session.download(from: url),
-                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { continue }
             try? fileManager.removeItem(at: cab)
-            guard (try? fileManager.moveItem(at: tempFile, to: cab)) != nil else { continue }
-            // Integrity: verify the cab against its pinned SHA-256 before expanding a DLL that games load.
-            // A tampered/corrupt cab is dropped (skip this ABI). Unpinned (no key) passes (tests inject `[:]`).
-            if let expected = d3dCabDigests[member],
-               (try? FileDigest.sha256(ofFileAt: cab)) != expected {
-                try? fileManager.removeItem(at: cab); continue
-            }
+            guard (try? fileManager.copyItem(at: src, to: cab)) != nil else { continue }
             let destDir = driveC.appendingPathComponent(unixDir)
             try? fileManager.createDirectory(at: destDir, withIntermediateDirectories: true)
             // `wine expand <cab> -F:<member> C:\windows\<dir>` extracts the single member (named `member`)
@@ -446,18 +380,15 @@ public struct SteamBottle: Sendable {
     /// until the window closes. Marks it done only on a success exit code (0 = ok, 3010 = ok + reboot,
     /// 1638 = a newer version already present); a user cancel (1602) or error leaves it UNMARKED so the next
     /// setup re-prompts. Best-effort otherwise.
-    func installVCRedist(x86: Bool, wine: URL?) async throws {
+    func installVCRedist(x86: Bool, wine: URL?, downloads: SetupDownloads) async throws {
         guard let wine else { throw BottleError.wineNotConfigured }
         if isVCRedistInstalled(x86: x86) { return }
-        let url = x86 ? Silo.vcRedistX86URL : Silo.vcRedistX64URL
+        guard let src = await downloads.vcRedistFile(x86: x86) else { return }   // download failed → best-effort skip
         let driveC = prefixDir.appendingPathComponent("drive_c")
         try? fileManager.createDirectory(at: driveC, withIntermediateDirectories: true)
         let installer = driveC.appendingPathComponent("vc_redist.\(x86 ? "x86" : "x64").exe")
-        guard (try? DownloadGuard.requireHTTPS(url)) != nil,
-              let (tempFile, response) = try? await session.download(from: url),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
         try? fileManager.removeItem(at: installer)
-        guard (try? fileManager.moveItem(at: tempFile, to: installer)) != nil else { return }
+        guard (try? fileManager.copyItem(at: src, to: installer)) != nil else { return }
         // User-guided: no `/install /quiet /norestart` → the bootstrapper shows the license + Install button.
         let result = try? await runner.run(
             executable: wine, arguments: [installer.path],
@@ -530,13 +461,13 @@ public struct SteamBottle: Sendable {
         }
     }
 
-    private func install(_ component: BottleComponent, wine: URL) async throws {
+    private func install(_ component: BottleComponent, wine: URL, downloads: SetupDownloads) async throws {
         switch component {
-        case .coreFonts:     try await installCoreFonts(wine: wine)
-        case .sourceHanSans: try await installSourceHanSans()
-        case .d3dcompiler47: try await installD3DCompiler47(wine: wine)
-        case .vcRedistX86:   try await installVCRedist(x86: true, wine: wine)
-        case .vcRedistX64:   try await installVCRedist(x86: false, wine: wine)
+        case .coreFonts:     try await installCoreFonts(wine: wine, downloads: downloads)
+        case .sourceHanSans: try await installSourceHanSans(downloads: downloads)
+        case .d3dcompiler47: try await installD3DCompiler47(wine: wine, downloads: downloads)
+        case .vcRedistX86:   try await installVCRedist(x86: true, wine: wine, downloads: downloads)
+        case .vcRedistX64:   try await installVCRedist(x86: false, wine: wine, downloads: downloads)
         case .msync:         break                   // env-only; nothing to install
         case .steamClient:   try await runSteamInstaller(wine: wine, userGuided: true)
         }
@@ -544,17 +475,23 @@ public struct SteamBottle: Sendable {
 
     /// Install the game-dependency component set into the (already-booted) bottle, in `BottleComponent`'s
     /// fixed declared order: Core Fonts → Source Han Sans → d3dcompiler_47 → MSVC x86 → MSVC x64 → msync →
-    /// Steam. Satisfied components are skipped (resumable). `onPhase` fires before each component installs
-    /// (so the UI can narrate the user-guided steps). Best-effort per component — a failed font/redist is
-    /// skipped — EXCEPT the terminal `.steamClient`, whose failure is fatal (mirrors `installSteam`).
+    /// Steam. `downloads` is the background artifact fetch started at "Set up" — each step awaits only its own
+    /// artifact. Satisfied components are skipped (resumable). `onPhase` fires `.downloading` when a step's
+    /// download is still in flight, then `.installing` (so the UI can narrate correctly). Best-effort per
+    /// component — a failed font/redist is skipped — EXCEPT the terminal `.steamClient`, whose failure is fatal.
     func provisionComponents(
-        wine: URL, onPhase: @escaping @MainActor @Sendable (BottleComponent) -> Void
+        wine: URL, downloads: SetupDownloads,
+        onPhase: @escaping @MainActor @Sendable (BottleComponent, ComponentPhase) -> Void
     ) async throws {
         for component in BottleComponent.allCases {
             if isSatisfied(component) { continue }
-            await onPhase(component)
+            // Download still running when its step arrives → narrate "Downloading…" and wait; a warm one skips
+            // straight to the install.
+            if !downloads.isReady(component) { await onPhase(component, .downloading) }
+            await downloads.awaitComponent(component)
+            await onPhase(component, .installing)
             do {
-                try await install(component, wine: wine)
+                try await install(component, wine: wine, downloads: downloads)
             } catch {
                 // A user cancel of a license-bearing installer is fatal — stop rather than build a
                 // half-provisioned bottle (it re-prompts next run, since nothing was marked). The terminal

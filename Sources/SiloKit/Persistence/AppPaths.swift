@@ -28,10 +28,10 @@ public struct AppPaths: Sendable, Hashable {
     public var configFile: URL { supportDir.appendingPathComponent("config.json") }
     /// Scratch dir for downloaded app-update archives (the inline updater stages the `.zip` here).
     public var updatesDir: URL { supportDir.appendingPathComponent("Updates", isDirectory: true) }
-    /// Cache for setup DOWNLOADS (core-font installers, …) — under `supportDir` so a prefetch can run the
-    /// moment "Set up" is pressed, BEFORE the bottle prefix / its `drive_c` exists, and so the files survive
-    /// across runs (resumable). Distinct from the prefix, which is created later by `wineboot`.
-    public var downloadCacheDir: URL { supportDir.appendingPathComponent("DownloadCache", isDirectory: true) }
+    /// Temp dir for a setup run's artifact downloads (`SetupDownloads`) — under `supportDir` so downloads can
+    /// start the moment "Set up" is pressed, BEFORE the bottle prefix / its `drive_c` exists. NOT a cache: it's
+    /// wiped at the start of every run and removed when setup finishes, so a stale installer is never reused.
+    public var setupDownloadsTmp: URL { supportDir.appendingPathComponent("SetupDownloads", isDirectory: true) }
     /// Generated per-game `.app` wrappers that give each Silo-launched Wine process a correctly named Dock
     /// tile (see `DockAppBundle`). Under `supportDir` — NOT `bottlesRoot` — so a launch never depends on the
     /// bottles drive being mounted to find its launcher wrapper.

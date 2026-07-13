@@ -64,17 +64,12 @@ public final class SteamBottleViewModel {
         }
         guard let wine = wineBinary else { status = "Set up Wine first."; return }
         busy = true
-        // Prefetch the core-font installers in the BACKGROUND from the moment Set up is pressed, so their
-        // (small but sometimes slow-mirror) download overlaps the Steam download + wineboot below instead of
-        // stalling the Core Fonts step. `prefetchDone` lets the wait below surface a "Downloading…" status
-        // ONLY if it's still running when we get there — a warm cache (the common case) skips that flash.
-        let prefetchDone = LockedBox(false)
-        let fontsPrefetch = Task.detached { [bottle, prefetchDone] in
-            await bottle.prefetchCoreFonts(); prefetchDone.set(true)
-        }
-        // Cancel the prefetch on exit: a no-op on the success path (already awaited below), but on an EARLY
-        // throw it stops the detached download from outliving setUp and racing a re-run's prefetch on the cache.
-        defer { busy = false; fontsPrefetch.cancel() }
+        // Kick off EVERY component's download in the BACKGROUND the moment Set up is pressed, so the slow ones
+        // (Asian fonts, ~360 MB) overlap the Steam download + wineboot + earlier install steps below instead of
+        // stalling their own step. `provisionComponents` awaits only the component it's about to install, and
+        // narrates "Downloading…" for one whose download hasn't finished by then.
+        let downloads = bottle.startSetupDownloads()
+        defer { busy = false; downloads.cleanup() }
         do {
             // Step 3: download the Steam installer up front so a network failure surfaces before booting.
             status = "Downloading Steam…"
@@ -85,14 +80,9 @@ public final class SteamBottleViewModel {
             // Apply Silo's default Wine DLL overrides (the standard Windows-compatibility set).
             status = "Configuring bottle…"
             await bottle.applyWineDefaults(wine: wine)
-            // Make sure the background core-font prefetch has finished warming the cache before the component
-            // phase consumes it. Surface "Downloading…" ONLY if it's still running (a warm cache — the common
-            // case, it overlapped the steps above — goes straight through with no flash).
-            if !prefetchDone.value { status = "Downloading core fonts…" }
-            await fontsPrefetch.value
             // Steps 5–11: the game-dependency component set, in order (fonts → d3dcompiler → MSVC → Steam).
-            try await bottle.provisionComponents(wine: wine, onPhase: { [weak self] component in
-                self?.applyComponentPhase(component)
+            try await bottle.provisionComponents(wine: wine, downloads: downloads, onPhase: { [weak self] component, phase in
+                self?.applyComponentPhase(component, phase)
             })
             // The user-guided Steam installer may auto-launch Steam with no CEF wrapper/virtual-desktop env
             // (→ black window) AND an untracked client. Kill whatever it spawned before the controlled warm-up.
@@ -133,8 +123,8 @@ public final class SteamBottleViewModel {
             : "Installing \(component.title)…"
     }
 
-    private func applyComponentPhase(_ component: BottleComponent) {
-        status = Self.componentStatus(component)
+    private func applyComponentPhase(_ component: BottleComponent, _ phase: ComponentPhase) {
+        status = phase == .downloading ? "Downloading \(component.title)…" : Self.componentStatus(component)
     }
 
     /// Map a warm-up phase to the UI status text + progress fraction.
