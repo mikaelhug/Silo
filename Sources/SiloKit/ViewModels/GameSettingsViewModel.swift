@@ -13,6 +13,28 @@ public final class GameSettingsViewModel {
         self.configStore = configStore
     }
 
+    /// Whether Automatic is currently routing this game to a reactively-learned backend (so the sheet can
+    /// explain why "Automatic" is on DXMT and offer to re-probe GPTK). A user pin (`.gptk`/`.dxmt`) is not a
+    /// learned hint, so it never shows here.
+    public var learnedBackend: GraphicsBackend? {
+        config.graphics == .auto ? config.learnedBackend : nil
+    }
+
+    /// Discard a reactively-learned backend hint so the next Automatic launch re-probes GPTK (e.g. after a
+    /// GPTK update that may now run the title). Persists immediately — independent of Save — and clears the
+    /// in-sheet config so the row disappears.
+    public func reprobeGPTK() async {
+        do {
+            _ = try await configStore.updateGame(appID: config.appID) {
+                $0.learnedBackend = nil; $0.learnedUnderRuntime = nil
+            }
+            config.learnedBackend = nil; config.learnedUnderRuntime = nil
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't save: \((error as NSError).localizedDescription)"
+        }
+    }
+
     /// Persist the edited config. Returns whether it saved — callers only dismiss on success.
     @discardableResult
     public func save() async -> Bool {

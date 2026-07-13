@@ -50,6 +50,15 @@ struct GameSettingsSheet: View {
                 Picker("Graphics", selection: $vm.config.graphics) {
                     ForEach(GraphicsChoice.allCases) { Text($0.displayName).tag($0) }
                 }
+                if let learned = vm.learnedBackend {
+                    HStack {
+                        Text("Automatic is using \(learned.displayName) — GPTK couldn't run this game.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Re-probe GPTK") { Task { await vm.reprobeGPTK() } }
+                            .controlSize(.small)
+                    }
+                }
             } header: {
                 Text("Graphics")
             } footer: {

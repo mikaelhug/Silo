@@ -92,7 +92,8 @@ struct GraphicsFallbackTests {
         var fired = false
         monitor.start(url: log, backend: .gptk) { fired = true }
         #expect(monitor.isObserving)               // armed — no fallback signature in the log yet
-        try await Task.sleep(for: .milliseconds(250))
+        // Poll for the autoStop task to release the fd (bounded; avoids a fixed-sleep flake under load).
+        for _ in 0..<200 where monitor.isObserving { try await Task.sleep(for: .milliseconds(5)) }
         #expect(!monitor.isObserving)              // auto-released the fd once the window elapsed
         #expect(!fired)                            // a healthy launch never fires the fallback callback
     }

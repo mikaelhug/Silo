@@ -65,6 +65,32 @@ struct ViewModelTests {
         #expect(saved.learnedBackend == .dxmt)                     // the learned routing survives
     }
 
+    @Test("reprobeGPTK discards a learned hint immediately so the next Automatic launch re-tries GPTK")
+    func gameSettingsReprobeGPTK() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let store = ConfigStore(paths: paths)
+        _ = try await store.saveGame(GameConfig(appID: 220, graphics: .auto,
+                                                learnedBackend: .dxmt, learnedUnderRuntime: "GPTK-old"))
+        let vm = GameSettingsViewModel(config: await store.load().config(for: 220), configStore: store)
+        #expect(vm.learnedBackend == .dxmt)                        // sheet surfaces the learned routing
+        await vm.reprobeGPTK()
+        #expect(vm.learnedBackend == nil)                          // row clears in-sheet
+        let saved = await store.load().config(for: 220)
+        #expect(saved.learnedBackend == nil && saved.learnedUnderRuntime == nil && saved.graphics == .auto)
+    }
+
+    @Test("learnedBackend is nil for a user-pinned game (a pin is not a learned hint)")
+    func gameSettingsLearnedBackendNilWhenPinned() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let store = ConfigStore(paths: paths)
+        // A learned hint alongside an explicit pin must NOT surface (choose ignores it anyway).
+        let vm = GameSettingsViewModel(
+            config: GameConfig(appID: 220, graphics: .dxmt, learnedBackend: .dxmt), configStore: store)
+        #expect(vm.learnedBackend == nil)
+    }
+
     @Test("GameSettings save failure returns false + surfaces errorMessage (sheet must NOT dismiss)")
     func gameSettingsSaveFails() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
