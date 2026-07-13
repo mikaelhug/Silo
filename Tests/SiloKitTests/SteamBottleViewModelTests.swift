@@ -122,11 +122,14 @@ struct SteamBottleViewModelTests {
 
     @Test("componentStatus tells the user a license needs accepting only for the user-guided components")
     func componentStatusText() {
-        for guided in [BottleComponent.coreFonts, .vcRedistX86, .steamClient] {
+        for guided in [BottleComponent.coreFonts, .vcRedistX86] {    // license-bearing steps
             let s = SteamBottleViewModel.componentStatus(guided).lowercased()
             #expect(s.contains("license") && s.contains("accept"))   // narrates the license the user must accept
         }
         #expect(SteamBottleViewModel.componentStatus(.vcRedistX86).contains("Visual C++"))
+        // Steam is an installer wizard, not a license to accept.
+        let steam = SteamBottleViewModel.componentStatus(.steamClient).lowercased()
+        #expect(!steam.contains("license") && steam.contains("steam") && steam.contains("install"))
         let shs = SteamBottleViewModel.componentStatus(.sourceHanSans)
         #expect(!shs.lowercased().contains("license"))               // headless step — no license narration
         #expect(shs.contains("Asian Fonts"))

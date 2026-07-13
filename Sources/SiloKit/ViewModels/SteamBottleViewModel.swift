@@ -118,7 +118,8 @@ public final class SteamBottleViewModel {
     /// User-facing status for a component-install phase. Pure + testable; user-guided steps ask the user to
     /// accept the license (the install blocks on the GUI), the rest just narrate progress.
     static func componentStatus(_ component: BottleComponent) -> String {
-        component.isUserGuided
+        if component == .steamClient { return "Installing Steam — follow its installer…" }   // a wizard, not a license
+        return component.isUserGuided
             ? "Accept the \(component.title) license…"
             : "Installing \(component.title)…"
     }
