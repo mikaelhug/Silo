@@ -18,10 +18,13 @@
   - **#4 Re-probe UX (`GameSettingsSheet`):** a learned-DXMT game shows as "Automatic," so the sheet now
     surfaces "Automatic is using DXMT — GPTK couldn't run this game." + a **Re-probe GPTK** button
     (`GameSettingsViewModel.reprobeGPTK`) that clears the hint immediately (no two-step dance).
-  - **Deferred (large/data-gated):** avoiding the wasted first GPTK launch = a per-title compat DB
-    ([[silo-compat-profiles]], no 64-bit data yet); perf-based "which backend is faster" = a telemetry/
-    benchmark harness (the user deferred the CrossOver comparison earlier). Part B on-device signature capture
-    still pending (needs one real game launch through Silo).
+  - **#5 resolved by POLICY (user, 2026-07-13):** "GPTK can be considered always faster than DXMT — use it
+    unless it doesn't work." So there's no perf-ranking to build; GPTK is the defined-preferred backend and
+    DXMT is strictly a fallback (32-bit, or a proven GPTK failure). Made explicit in `BackendChooser`'s doc;
+    the switcher already implements it. **#2 skipped (user):** avoiding the wasted first GPTK launch would
+    need a per-title compat DB with no 64-bit data to seed it.
+  - **Still pending:** Part B on-device signature capture (real DXMT-failure + reconfirm the DXMT-engaged
+    string) needs one real game launch through Silo.
 - **🧠 Automatic backend switcher: learned-hint split + GPTK re-probe (2026-07-13, `main`; 381 tests green).**
   Part A of the switcher-improvement plan. The reactive GPTK→DXMT downgrade previously overwrote the user's
   `graphics = .auto` with `.dxmt` — permanent, indistinguishable from a manual pin in the settings UI, and a

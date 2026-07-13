@@ -2,12 +2,14 @@ import Foundation
 
 /// Resolves a per-game `GraphicsChoice` to a concrete `GraphicsBackend` at launch — the "Automatic" brain.
 ///
-/// The automatic strategy is intentionally conservative: **GPTK first** (Apple's proven layer, and the only
-/// one that covers D3D12), except where GPTK structurally can't run the game (32-bit — Apple ships no i386
-/// D3DMetal → DXMT). GPTK titles that fail to engage are learned reactively (`GameLibraryViewModel` records a
-/// `learnedBackend` hint — kept separate from the user's `.auto` so it stays re-evaluable), which `choose`
-/// consults for the next launch, so Automatic adapts without a per-title database. DirectX 9 / OpenGL titles
-/// need neither backend — they run on Wine's own wined3d/GL under whatever runtime is active.
+/// **Policy (decided 2026-07-13): GPTK is treated as always the faster/preferred backend, so it is used
+/// unless it structurally can't (32-bit — Apple ships no i386 D3DMetal → DXMT) or is proven not to run the
+/// game.** DXMT is strictly a fallback, never a co-equal choice — there is no per-title "which is faster"
+/// ranking because GPTK is defined to win. GPTK titles that fail to engage are learned reactively
+/// (`GameLibraryViewModel` records a `learnedBackend` hint — kept separate from the user's `.auto` so it stays
+/// re-evaluable and re-probes GPTK after a runtime upgrade), which `choose` consults for the next launch, so
+/// Automatic adapts without a per-title database. DirectX 9 / OpenGL titles need neither backend — they run on
+/// Wine's own wined3d/GL under whatever runtime is active.
 ///
 /// `choose` is pure (takes the pre-computed bitness + learned hint); `dxmtMightHelp` reads the import table.
 enum BackendChooser {
