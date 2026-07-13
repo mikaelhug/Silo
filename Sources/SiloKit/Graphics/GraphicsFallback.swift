@@ -8,9 +8,24 @@ import Foundation
 /// Detection is a pure parse over the game's launch log, so it unit-tests with fixture text and no runtime.
 public enum GraphicsFallback: Sendable {
     public enum Status: Sendable, Equatable {
+        case engaged    // POSITIVE proof the requested backend created its device — a later stray wined3d
+                        // line is then noise, not a fallback. Only DXMT logs such a line; GPTK/D3DMetal
+                        // success is SILENT (a healthy GPTK launch is confirmed only by the absence of the
+                        // fallback signatures below), so a GPTK launch never reaches `.engaged`.
         case fallback   // the backend didn't engage — wine's own wined3d was left driving d3d1x (and, for
                         // the titles this happens to, then fails to create the device)
         case unknown    // no decisive signal (a working launch, a d3d9/OpenGL game, or not yet logged)
+    }
+
+    /// Signatures that POSITIVELY confirm the backend created its Metal device. GPTK/D3DMetal prints nothing
+    /// on success (its only proof is the *absence* of the fallback signatures), so it has none. DXMT logs its
+    /// device creation, which lets a DXMT launch be confirmed rather than merely "not-yet-failed" — so a
+    /// later benign wined3d line can't produce a false fallback. (Exact DXMT string to reconfirm on-device.)
+    static func engagementSignatures(_ backend: GraphicsBackend) -> [String] {
+        switch backend {
+        case .gptk: []
+        case .dxmt: ["DXMT: created Metal device"]
+        }
     }
 
     /// Signatures that mean wine's own `wined3d` was left driving d3d1x — i.e. the requested backend did
@@ -37,7 +52,12 @@ public enum GraphicsFallback: Sendable {
     }
 
     /// Classify a launch-log tail for the backend the game was launched under. Pure; case-insensitive.
+    /// Positive confirmation wins: if the backend logged that it created its device, a later benign wined3d
+    /// line is treated as noise, not a fallback.
     public static func classify(_ log: String, backend: GraphicsBackend = .gptk) -> Status {
+        for signature in engagementSignatures(backend) where log.range(of: signature, options: .caseInsensitive) != nil {
+            return .engaged
+        }
         let signatures = wined3dFallbackSignatures + loaderFailureSignatures(backend)
         for signature in signatures where log.range(of: signature, options: .caseInsensitive) != nil {
             return .fallback
@@ -92,10 +112,20 @@ final class GraphicsFallbackMonitor {
     func stop() { watch = nil; onFallback = nil; autoStop?.cancel(); autoStop = nil }
 
     private func check(_ tail: String) {
-        guard !fired, GraphicsFallback.classify(tail, backend: backend) == .fallback else { return }
-        fired = true
-        let callback = onFallback
-        stop()
-        callback?()
+        guard !fired else { return }
+        switch GraphicsFallback.classify(tail, backend: backend) {
+        case .engaged:
+            // Confirmed engaged — tear the watch down so a later benign wined3d line can't fire a false
+            // fallback. `fired` also stops `start` from arming a watch after an immediate engaged tail.
+            fired = true
+            stop()
+        case .fallback:
+            fired = true
+            let callback = onFallback
+            stop()
+            callback?()
+        case .unknown:
+            break
+        }
     }
 }

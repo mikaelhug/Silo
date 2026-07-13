@@ -56,15 +56,30 @@ struct GraphicsFallbackTests {
         #expect(GraphicsFallback.classify(log, backend: .dxmt) == .fallback)
     }
 
-    @Test("a healthy DXMT launch that merely loads winemetal is NOT flagged (no bare-substring false positive)")
-    func healthyDXMTNotFlagged() {
+    @Test("a DXMT launch that created its Metal device is POSITIVELY confirmed as engaged")
+    func dxmtEngagedConfirmed() {
         let log = """
         msync: up and running.
         trace:module:load_builtin_dll Loaded L"C:\\\\windows\\\\system32\\\\winemetal.dll"
         DXMT: created Metal device "Apple M4 Pro"
         == application started
         """
-        #expect(GraphicsFallback.classify(log, backend: .dxmt) == .unknown)
+        #expect(GraphicsFallback.classify(log, backend: .dxmt) == .engaged)
+    }
+
+    @Test("positive engagement WINS over a later stray wined3d line (no false fallback)")
+    func engagedBeatsStrayFallbackLine() {
+        let log = """
+        DXMT: created Metal device "Apple M4 Pro"
+        05c4:err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications.
+        """
+        #expect(GraphicsFallback.classify(log, backend: .dxmt) == .engaged)
+    }
+
+    @Test("GPTK/D3DMetal success is SILENT — no engagement signature, so a healthy GPTK launch is .unknown")
+    func gptkHasNoEngagementSignal() {
+        // The same DXMT device line means nothing under GPTK (GPTK has no positive signature) → not .engaged.
+        #expect(GraphicsFallback.classify(#"DXMT: created Metal device "Apple M4 Pro""#, backend: .gptk) == .unknown)
     }
 
     @MainActor
@@ -80,5 +95,23 @@ struct GraphicsFallbackTests {
         try await Task.sleep(for: .milliseconds(250))
         #expect(!monitor.isObserving)              // auto-released the fd once the window elapsed
         #expect(!fired)                            // a healthy launch never fires the fallback callback
+    }
+
+    @MainActor
+    @Test("a confirmed-engaged DXMT launch tears the watch down without firing a false fallback")
+    func monitorStopsOnEngagedWithoutFiring() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let log = try tmp.write("game.log", #"DXMT: created Metal device "Apple M4 Pro"\#n"#)
+        let monitor = GraphicsFallbackMonitor()
+        var fired = false
+        monitor.start(url: log, backend: .dxmt) { fired = true }
+        #expect(!monitor.isObserving)              // the immediate tail check saw engagement → torn down
+        #expect(!fired)                            // engaged is NOT a fallback — the callback never fires
+        // A later stray wined3d line must not resurrect a fallback (the watch is already gone).
+        let h = try FileHandle(forWritingTo: log); h.seekToEndOfFile()
+        h.write(Data("05c4:err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications.".utf8))
+        try? h.close()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!fired)
     }
 }
