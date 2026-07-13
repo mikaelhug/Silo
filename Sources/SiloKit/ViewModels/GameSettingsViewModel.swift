@@ -27,6 +27,10 @@ public final class GameSettingsViewModel {
             _ = try await configStore.updateGame(appID: appID) {
                 $0.envFlags = envFlags
                 $0.presence = presence
+                // A deliberate change to the graphics choice retires any reactively-learned hint, so switching
+                // back to Automatic genuinely re-probes GPTK (and a pin isn't quietly overridden by a stale
+                // learned DXMT). An unrelated Save leaves the hint — and the learned routing — intact.
+                if $0.graphics != graphics { $0.learnedBackend = nil; $0.learnedUnderRuntime = nil }
                 $0.graphics = graphics
                 $0.executableRelativePath = exePath
                 $0.customArgs = args

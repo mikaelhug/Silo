@@ -3,6 +3,25 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🧠 Automatic backend switcher: learned-hint split + GPTK re-probe (2026-07-13, `main`; 381 tests green).**
+  Part A of the switcher-improvement plan. The reactive GPTK→DXMT downgrade previously overwrote the user's
+  `graphics = .auto` with `.dxmt` — permanent, indistinguishable from a manual pin in the settings UI, and a
+  GPTK runtime upgrade never re-tried GPTK. It now records a SEPARATE, re-evaluable hint:
+  - **`GameConfig.learnedBackend` + `learnedUnderRuntime`** (new, tolerant-decode, `encodeIfPresent`): `.auto`
+    survives, the sheet still shows "Automatic." `BackendChooser.choose(_:is32Bit:learned:)` consults the hint
+    only for a 64-bit Automatic launch (explicit pin wins; 32-bit → DXMT regardless).
+  - **GPTK re-probe:** `play` drops a stale hint when `config.learnedUnderRuntime != backend.gptkRuntimeName`
+    (a GPTK upgrade may fix the title), so GPTK is re-tried; `learnDXMT`→`learnBackend` stamps the current
+    `gptkRuntimeName` when it learns. Thrash is impossible (a learned game gets `chosen == .dxmt` → not eligible
+    to re-learn).
+  - **Hint reset:** `GameSettingsViewModel.save` retires the hint only when the user actually changes the
+    graphics picker (an unrelated Save keeps it).
+  - Full offline state-machine coverage: `BackendChooser`/`GameConfig`/`GameLibraryViewModel`/`ViewModel` tests
+    (rewrote `autoReactiveSwitchToDXMT` to assert `.auto` preserved + `learnedBackend == .dxmt`; +7 new cases).
+  - **Part B deferred (on-device capture):** real DXMT-specific failure + positive "GPTK engaged" log
+    signatures for `GraphicsFallback`. The box has a working bottle + all 3 runtimes but **no per-game log yet**
+    (only `steam-bottle.log`, where the Steam client runs wined3d/Vulkan — confirming a game needs its
+    `d3d11=builtin` override to make the wined3d signal trustworthy). Capture needs one real game launch.
 - **✂️ Setup: dropped the warm-up progress % (2026-07-13, `main`; 373 tests green).** The "Steam is updating
   itself — N%…" counter was parsed out of Steam's own updater log (`Downloading update (X of Y KB)`), but the
   fraction was unreliable and not worth the complexity — removed the whole mechanism. `WarmUpPhase.downloading`

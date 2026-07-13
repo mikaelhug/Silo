@@ -243,7 +243,10 @@ public final class GameLibraryViewModel {
             let exe = orchestrator.resolvedExecutable(app: game, config: config)
             return (exe, exe.map { WindowsExecutable.is32Bit($0) } ?? false)
         }.value
-        let chosen = BackendChooser.choose(config.graphics, is32Bit: is32)
+        // A learned hint only counts if it was learned under the CURRENT GPTK runtime — a GPTK upgrade may
+        // fix the title, so a stale hint is dropped (passed as nil) and GPTK is re-probed.
+        let learned = config.learnedUnderRuntime == cfg.gptkRuntimeName ? config.learnedBackend : nil
+        let chosen = BackendChooser.choose(config.graphics, is32Bit: is32, learned: learned)
         // A 32-bit game under an EXPLICIT GPTK choice is a dead end (Apple ships no i386 D3DMetal). Automatic
         // routes 32-bit to DXMT, so this is only reachable when the user pinned GPTK. Refuse with a DXMT steer.
         if config.graphics == .gptk, is32 {
@@ -519,20 +522,26 @@ public final class GameLibraryViewModel {
         name: String, backend graphics: GraphicsBackend, exe: URL?, autoLearnAppID: Int?) async {
         let dxmtMightHelp = await Task.detached { exe.map { BackendChooser.dxmtMightHelp(exe: $0) } ?? true }.value
         if graphics == .gptk, dxmtMightHelp, let appID = autoLearnAppID, backend.libDir(for: .dxmt) != nil {
-            await learnDXMT(appID: appID, name: name, dxmtMightHelp: dxmtMightHelp)
+            await learnBackend(appID: appID, name: name, dxmtMightHelp: dxmtMightHelp)
         } else {
             setStatus(fallbackMessage(name: name, backend: graphics, dxmtMightHelp: dxmtMightHelp))
         }
     }
 
-    /// Persist `.dxmt` for an `.auto` Steam game GPTK couldn't drive, so the next launch uses it — but only
-    /// after RE-reading current state, so a backend the user pinned (or a DXMT uninstalled) since launch is
-    /// never clobbered, and the "will use DXMT next time" line is shown only if the write actually stuck.
-    private func learnDXMT(appID: Int, name: String, dxmtMightHelp: Bool) async {
+    /// Record a `.dxmt` LEARNED hint (not the user's `graphics`) for an `.auto` Steam game GPTK couldn't
+    /// drive, so the next launch uses DXMT while `.auto` — and the settings UI — stay intact. The hint is
+    /// stamped with the current GPTK runtime so a later GPTK upgrade re-probes GPTK. Re-reads current state
+    /// first, so a backend the user pinned (or a DXMT uninstalled) since launch is never clobbered, and the
+    /// "will use DXMT next time" line is shown only if the write actually stuck.
+    private func learnBackend(appID: Int, name: String, dxmtMightHelp: Bool) async {
         guard await configStore.load().config(for: appID).graphics == .auto, backend.libDir(for: .dxmt) != nil
         else { setStatus(fallbackMessage(name: name, backend: .gptk, dxmtMightHelp: dxmtMightHelp)); return }
+        let runtime = backend.gptkRuntimeName   // captured out of the @Sendable mutate closure
         do {
-            _ = try await configStore.updateGame(appID: appID) { $0.graphics = .dxmt }
+            _ = try await configStore.updateGame(appID: appID) {
+                $0.learnedBackend = .dxmt
+                $0.learnedUnderRuntime = runtime
+            }
             setStatus("\(name): GPTK / D3DMetal couldn't run this game — Silo will use DXMT next launch.")
         } catch {   // persist failed — don't promise a switch that didn't stick
             setStatus("\(name): GPTK / D3DMetal couldn't run this game. Set its graphics to DXMT.")

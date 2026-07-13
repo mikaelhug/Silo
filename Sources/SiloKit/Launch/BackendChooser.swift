@@ -4,22 +4,27 @@ import Foundation
 ///
 /// The automatic strategy is intentionally conservative: **GPTK first** (Apple's proven layer, and the only
 /// one that covers D3D12), except where GPTK structurally can't run the game (32-bit — Apple ships no i386
-/// D3DMetal → DXMT). GPTK titles that fail to engage are learned reactively (`GameLibraryViewModel` persists
-/// `.dxmt` for next time), so Automatic adapts without a per-title database. DirectX 9 / OpenGL titles need
-/// neither backend — they run on Wine's own wined3d/GL under whatever runtime is active.
+/// D3DMetal → DXMT). GPTK titles that fail to engage are learned reactively (`GameLibraryViewModel` records a
+/// `learnedBackend` hint — kept separate from the user's `.auto` so it stays re-evaluable), which `choose`
+/// consults for the next launch, so Automatic adapts without a per-title database. DirectX 9 / OpenGL titles
+/// need neither backend — they run on Wine's own wined3d/GL under whatever runtime is active.
 ///
-/// `choose` is pure (takes the pre-computed bitness); `dxmtMightHelp` reads the game binary's import table.
+/// `choose` is pure (takes the pre-computed bitness + learned hint); `dxmtMightHelp` reads the import table.
 enum BackendChooser {
     /// DLLs whose translation DXMT provides (so a GPTK failure on one of these is worth retrying on DXMT).
     private static let dxmtTranslatable: Set<String> = ["d3d11.dll", "d3d10.dll", "d3d10core.dll", "d3d10_1.dll"]
     /// DLLs no current backend but GPTK can translate — DXMT is pointless for these.
     private static let d3d12: Set<String> = ["d3d12.dll", "d3d12core.dll"]
 
-    /// The backend a launch should use for `choice`, given the game's bitness (from `WindowsExecutable`).
-    static func choose(_ choice: GraphicsChoice, is32Bit: Bool) -> GraphicsBackend {
-        if let explicit = choice.explicitBackend { return explicit }
-        // Automatic: GPTK is 64-bit-only, so a 32-bit game must use DXMT; everything else starts on GPTK.
-        return is32Bit ? .dxmt : .gptk
+    /// The backend a launch should use for `choice`, given the game's bitness (from `WindowsExecutable`) and
+    /// any reactively-`learned` hint. A user's explicit pin always wins; a 32-bit Automatic game must use
+    /// DXMT (GPTK is 64-bit-only), which moots the hint; a 64-bit Automatic game uses the learned hint if one
+    /// exists, else GPTK. Pure — the caller supplies bitness and a runtime-validated hint (a stale hint from a
+    /// superseded GPTK runtime is passed as `nil` so GPTK is re-probed).
+    static func choose(_ choice: GraphicsChoice, is32Bit: Bool, learned: GraphicsBackend? = nil) -> GraphicsBackend {
+        if let explicit = choice.explicitBackend { return explicit }   // a user pin always wins
+        if is32Bit { return .dxmt }                                    // GPTK is 64-bit-only; learned is moot
+        return learned ?? .gptk                                        // 64-bit Automatic: learned hint, else GPTK
     }
 
     /// Whether reactively switching a GPTK-failed game to DXMT could plausibly help. Fail-**open**: an exe

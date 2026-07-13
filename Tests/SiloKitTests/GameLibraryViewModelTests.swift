@@ -78,7 +78,7 @@ struct GameLibraryViewModelTests {
 
     /// A library VM with BOTH runtimes configured (real base wine + DXMT source trees so the DXMT variant can
     /// clone/overlay), + its fake runner + paths — for exercising the Automatic backend routing.
-    private func makeDXMTReady(_ tmp: TempDir, i386: Bool = true)
+    private func makeDXMTReady(_ tmp: TempDir, i386: Bool = true, gptkRuntime: String? = nil)
         throws -> (GameLibraryViewModel, FakeProcessRunner, AppPaths) {
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
@@ -94,6 +94,7 @@ struct GameLibraryViewModelTests {
         }
         try tmp.makeDir("dxmt/lib/wine/x86_64-unix"); try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WM")
         var backend = BackendConfig(); backend.wineBinaryPath = wine; backend.dxmtLibDirPath = dxmtLib
+        backend.gptkRuntimeName = gptkRuntime   // stamps the learned hint; a change invalidates a stale hint
         let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
         session.updateWine(backend.wineBinaryPath); session.readinessTimeout = 0
         let vm = GameLibraryViewModel(
@@ -118,6 +119,11 @@ struct GameLibraryViewModelTests {
     /// The persisted graphics choice for a Steam game (reads config.json back).
     private func persistedGraphics(_ paths: AppPaths, _ appID: Int) async -> GraphicsChoice {
         await ConfigStore(paths: paths).load().config(for: appID).graphics
+    }
+
+    /// The persisted LEARNED backend hint for a Steam game (distinct from the user's choice).
+    private func persistedLearned(_ paths: AppPaths, _ appID: Int) async -> GraphicsBackend? {
+        await ConfigStore(paths: paths).load().config(for: appID).learnedBackend
     }
 
     @Test("load discovers games installed in the bottle's Steam library")
@@ -310,26 +316,106 @@ struct GameLibraryViewModelTests {
         })
     }
 
-    @Test("Automatic reactively remembers DXMT after a 64-bit game fails under GPTK")
+    /// Append `text` to a game's launch log the moment its detached spawn is recorded — the seam a launch
+    /// uses to simulate wine writing a graphics signature to `paths.log(forAppID:)`.
+    private func logOnLaunch(_ fake: FakeProcessRunner, _ log: URL, _ text: String) {
+        fake.onRun = { inv in
+            guard inv.detached, inv.logURL == log, let h = try? FileHandle(forWritingTo: log) else { return }
+            h.seekToEndOfFile(); h.write(Data(text.utf8)); try? h.close()
+        }
+    }
+    private static let gptkFailSignature = #"Assertion failed: (GFXTHandle && "Failed to dlopen D3DMetal")"#
+    private static let wined3dFallbackSignature =
+        "err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications."
+
+    @Test("Automatic reactively LEARNS DXMT after a 64-bit GPTK failure — without clobbering the user's .auto")
     func autoReactiveSwitchToDXMT() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (vm, fake, paths) = try makeDXMTReady(tmp)
         try installSteam(paths)
         let game = try installedGamePE(paths, appID: 220, name: "HL2", dir: "HL2", machine: 0x8664)  // 64-bit → GPTK
-        // The game writes the GPTK-didn't-engage signature to its log as it spawns.
-        let log = paths.log(forAppID: 220)
-        fake.onRun = { inv in
-            guard inv.detached, inv.logURL == log, let h = try? FileHandle(forWritingTo: log) else { return }
-            h.seekToEndOfFile()
-            h.write(Data(#"Assertion failed: (GFXTHandle && "Failed to dlopen D3DMetal")"#.utf8))
-            try? h.close()
-        }
+        logOnLaunch(fake, paths.log(forAppID: 220), Self.gptkFailSignature)
 
-        await vm.play(game)   // launches on GPTK; the monitor detects the failure and persists DXMT
+        await vm.play(game)   // launches on GPTK; the monitor detects the failure and LEARNS DXMT
 
-        for _ in 0..<200 where await persistedGraphics(paths, 220) != .dxmt { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await persistedGraphics(paths, 220) == .dxmt)          // Automatic learned: use DXMT next time
+        for _ in 0..<200 where await persistedLearned(paths, 220) != .dxmt { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await persistedLearned(paths, 220) == .dxmt)          // learned: use DXMT next time
+        #expect(await persistedGraphics(paths, 220) == .auto)         // ...but the user's .auto is UNTOUCHED
         #expect(vm.statusMessage?.contains("use DXMT") == true)
+    }
+
+    @Test("A learned DXMT hint routes a 64-bit Automatic game straight to DXMT (no wasted GPTK launch)")
+    func autoLearnedDXMTUsedNextLaunch() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = try makeDXMTReady(tmp)
+        try installSteam(paths)
+        // The state a prior GPTK failure leaves behind: .auto preserved, DXMT learned.
+        _ = try await ConfigStore(paths: paths).saveGame(
+            GameConfig(appID: 220, graphics: .auto, learnedBackend: .dxmt))
+        let game = try installedGamePE(paths, appID: 220, name: "HL2", dir: "HL2", machine: 0x8664)
+
+        await vm.play(game)
+
+        let spawn = try #require(fake.invocations.last {
+            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
+                && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
+        })
+        #expect(spawn.environment["WINELOADER"]?.contains("/wine-dxmt/bin/wine64") == true)   // DXMT runtime
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+    }
+
+    @Test("A learned-DXMT game that ALSO fails on DXMT gets an honest message — no thrash back to GPTK")
+    func learnedDXMTThenDXMTFailsHonestNoThrash() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = try makeDXMTReady(tmp)
+        try installSteam(paths)
+        _ = try await ConfigStore(paths: paths).saveGame(
+            GameConfig(appID: 220, graphics: .auto, learnedBackend: .dxmt))
+        let game = try installedGamePE(paths, appID: 220, name: "HL2", dir: "HL2", machine: 0x8664)
+        logOnLaunch(fake, paths.log(forAppID: 220), Self.wined3dFallbackSignature)   // DXMT falls to wined3d too
+
+        await vm.play(game)
+
+        try await waitUntil { vm.statusMessage?.contains("DXMT couldn't drive this game's graphics") == true }
+        #expect(await persistedGraphics(paths, 220) == .auto)         // no thrash: both the choice and the
+        #expect(await persistedLearned(paths, 220) == .dxmt)          // learned hint are left untouched
+    }
+
+    @Test("A learned hint from an OLD GPTK runtime is ignored — a GPTK upgrade re-probes GPTK")
+    func staleLearnedIgnoredAfterGPTKUpgrade() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = try makeDXMTReady(tmp, gptkRuntime: "GPTK-new")   // box now runs GPTK-new
+        try installSteam(paths)
+        _ = try await ConfigStore(paths: paths).saveGame(
+            GameConfig(appID: 220, graphics: .auto, learnedBackend: .dxmt, learnedUnderRuntime: "GPTK-old"))
+        let game = try installedGamePE(paths, appID: 220, name: "HL2", dir: "HL2", machine: 0x8664)
+
+        await vm.play(game)   // stale hint dropped → GPTK is re-probed (no fail signature written, so it "runs")
+
+        let spawn = try #require(fake.invocations.last {
+            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
+                && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
+        })
+        let loader = spawn.environment["WINELOADER"] ?? ""
+        #expect(!loader.contains("/wine-dxmt/"))                                       // re-probed GPTK, NOT DXMT
+        #expect(loader.hasSuffix("/wine/bin/wine64"))                                  // the base (GPTK) wine loader
+        #expect(spawn.environment["WINEDLLOVERRIDES"]?.contains("winemetal") != true)  // and NOT DXMT's overrides
+    }
+
+    @Test("A pinned-GPTK game never auto-learns — a GPTK failure only surfaces an honest message")
+    func pinnedGPTKGameNeverLearns() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = try makeDXMTReady(tmp)
+        try installSteam(paths)
+        _ = try await ConfigStore(paths: paths).saveGame(GameConfig(appID: 220, graphics: .gptk))   // user pin
+        let game = try installedGamePE(paths, appID: 220, name: "HL2", dir: "HL2", machine: 0x8664)
+        logOnLaunch(fake, paths.log(forAppID: 220), Self.gptkFailSignature)
+
+        await vm.play(game)
+
+        try await waitUntil { vm.statusMessage?.contains("Switch this game's graphics to DXMT") == true }
+        #expect(await persistedLearned(paths, 220) == nil)            // pinned → never auto-learns
+        #expect(await persistedGraphics(paths, 220) == .gptk)         // the pin is untouched
     }
 
     @Test("the status line self-clears after its visible window (a stale 'Launched …' doesn't linger)")

@@ -49,4 +49,27 @@ struct GameConfigTests {
         #expect(decoded.appID == 220)
         #expect(decoded.graphics == .auto)
     }
+
+    @Test("learned hint persists independently of graphics; absent → nil; nil isn't encoded")
+    func learnedFieldsCodec() throws {
+        var c = GameConfig(appID: 220)
+        #expect(c.learnedBackend == nil && c.learnedUnderRuntime == nil)   // defaults
+        c.learnedBackend = .dxmt
+        c.learnedUnderRuntime = "GPTK-4.0_beta_1"
+        let encoded = try JSONEncoder().encode(c)
+        let back = try JSONDecoder().decode(GameConfig.self, from: encoded)
+        #expect(back.learnedBackend == .dxmt && back.learnedUnderRuntime == "GPTK-4.0_beta_1")
+
+        // A nil hint is omitted from the JSON (encodeIfPresent), so an untouched config stays clean.
+        let cleanJSON = String(decoding: try JSONEncoder().encode(GameConfig(appID: 1)), as: UTF8.self)
+        #expect(!cleanJSON.contains("learnedBackend"))
+
+        // The split is the whole point: `.auto` survives alongside a learned `.dxmt` — the hint is NOT the
+        // user's choice. An old config with no learned keys decodes both as nil.
+        let split = Data(#"{"appID":220,"graphics":"auto","learnedBackend":"dxmt","learnedUnderRuntime":"GPTK-4.0_beta_1"}"#.utf8)
+        let d = try JSONDecoder().decode(GameConfig.self, from: split)
+        #expect(d.graphics == .auto && d.learnedBackend == .dxmt && d.learnedUnderRuntime == "GPTK-4.0_beta_1")
+        let noLearned = try JSONDecoder().decode(GameConfig.self, from: Data(#"{"appID":220}"#.utf8))
+        #expect(noLearned.learnedBackend == nil && noLearned.learnedUnderRuntime == nil)
+    }
 }

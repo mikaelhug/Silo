@@ -31,16 +31,26 @@ struct BackendChooserTests {
 
     // MARK: - choose() (pure — bitness in, backend out)
 
-    @Test("explicit choices are honored regardless of bitness")
+    @Test("explicit choices are honored regardless of bitness — and win over a learned hint")
     func chooseExplicit() {
         #expect(BackendChooser.choose(.gptk, is32Bit: true) == .gptk)
         #expect(BackendChooser.choose(.dxmt, is32Bit: false) == .dxmt)
+        // A user's pin always beats a reactively-learned hint (which only applies to `.auto`).
+        #expect(BackendChooser.choose(.gptk, is32Bit: false, learned: .dxmt) == .gptk)
     }
 
     @Test("auto: 64-bit → GPTK, 32-bit → DXMT")
     func chooseAuto() {
         #expect(BackendChooser.choose(.auto, is32Bit: false) == .gptk)
         #expect(BackendChooser.choose(.auto, is32Bit: true) == .dxmt)   // GPTK is 64-bit-only
+    }
+
+    @Test("auto: a learned hint is consulted only for a 64-bit launch")
+    func chooseLearnedConsulted64BitAutoOnly() {
+        #expect(BackendChooser.choose(.auto, is32Bit: false, learned: .dxmt) == .dxmt)  // 64-bit auto uses the hint
+        #expect(BackendChooser.choose(.auto, is32Bit: false, learned: nil) == .gptk)    // no hint → GPTK default
+        #expect(BackendChooser.choose(.auto, is32Bit: false, learned: .gptk) == .gptk)  // defensive: hint agrees
+        #expect(BackendChooser.choose(.auto, is32Bit: true, learned: .dxmt) == .dxmt)   // 32-bit: DXMT regardless
     }
 
     // MARK: - dxmtMightHelp()

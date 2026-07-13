@@ -35,6 +35,36 @@ struct ViewModelTests {
         #expect(saved.graphics == .dxmt)                        // regression guard: save() drops nothing
     }
 
+    @Test("GameSettings save retires a learned hint when the user changes the graphics choice")
+    func gameSettingsClearsLearnedOnGraphicsChange() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let store = ConfigStore(paths: paths)
+        // A game Automatic previously downgraded: .auto preserved, DXMT learned under some GPTK runtime.
+        _ = try await store.saveGame(GameConfig(appID: 220, graphics: .auto,
+                                                learnedBackend: .dxmt, learnedUnderRuntime: "GPTK-old"))
+        let vm = GameSettingsViewModel(config: await store.load().config(for: 220), configStore: store)
+        vm.config.graphics = .gptk                                  // the user deliberately pins GPTK
+        #expect(await vm.save())
+        let saved = await store.load().config(for: 220)
+        #expect(saved.graphics == .gptk)
+        #expect(saved.learnedBackend == nil && saved.learnedUnderRuntime == nil)   // stale hint retired
+    }
+
+    @Test("GameSettings save keeps a learned hint when the graphics choice is unchanged")
+    func gameSettingsKeepsLearnedWhenGraphicsUnchanged() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let store = ConfigStore(paths: paths)
+        _ = try await store.saveGame(GameConfig(appID: 220, graphics: .auto, learnedBackend: .dxmt))
+        let vm = GameSettingsViewModel(config: await store.load().config(for: 220), configStore: store)
+        vm.config.customArgs = ["-novid"]                          // an unrelated edit; graphics stays .auto
+        #expect(await vm.save())
+        let saved = await store.load().config(for: 220)
+        #expect(saved.customArgs == ["-novid"])
+        #expect(saved.learnedBackend == .dxmt)                     // the learned routing survives
+    }
+
     @Test("GameSettings save failure returns false + surfaces errorMessage (sheet must NOT dismiss)")
     func gameSettingsSaveFails() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
