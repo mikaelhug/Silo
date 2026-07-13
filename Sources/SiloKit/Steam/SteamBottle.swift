@@ -67,7 +67,7 @@ public struct SteamBottle: Sendable {
     /// The FULL client is downloaded: `steamui.dll` AND a CEF `steamwebhelper.exe` (the login UI) both
     /// present. A fresh bootstrapper has neither; the first-run self-update brings both. NB: Steam extracts
     /// these files WHILE the update is still downloading, so their presence alone is NOT "the update is
-    /// done" — the warm-up ALSO waits for `updateState().committed` before shutting Steam down, or the
+    /// done" — the warm-up ALSO waits for `isUpdateCommitted()` before shutting Steam down, or the
     /// incomplete update rolls back.
     var isClientFullyDownloaded: Bool {
         Self.hasWarmedClient(paths: paths, fileManager: fileManager)
@@ -86,31 +86,21 @@ public struct SteamBottle: Sendable {
         return dirs.contains { fileManager.fileExists(atPath: $0.appendingPathComponent("steamwebhelper.exe").path) }
     }
 
-    /// Steam's updater state parsed from its log in ONE read: the latest download progress (for a real %)
-    /// and whether the update has COMMITTED. Steam logs `Update complete` only after downloading,
-    /// extracting, and committing the NTFS transaction (verified in a real run) — that's the definitive
-    /// "the client is installed" signal the warm-up waits for before shutting Steam down; interrupting any
-    /// EARLIER rolls the half-applied update all the way back. Reads the WHOLE log (not a tail): Wine spams
-    /// thousands of `msync_init Failed` lines that would push the progress lines out of any fixed window.
-    /// Truncate the bottle's Steam log. The warm-up calls this before its first launch so `updateState()`'s
-    /// `committed` reflects only THIS run — the log lives outside the client dir and persists across setups,
-    /// so a stale `Update complete` from a prior run would otherwise fire the warm-up's completion instantly.
+    /// Truncate the bottle's Steam log. The warm-up calls this before its first launch so
+    /// `isUpdateCommitted()` reflects only THIS run — the log lives outside the client dir and persists across
+    /// setups, so a stale `Update complete` from a prior run would otherwise fire the warm-up's completion
+    /// instantly.
     func resetLog() {
         try? Data().write(to: log)
     }
 
-    func updateState() -> (progress: (done: Int, total: Int)?, committed: Bool) {
-        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return (nil, false) }
-        let committed = text.contains("Update complete")
-        for line in text.split(separator: "\n").reversed() where line.contains("Downloading update (") {
-            guard let open = line.range(of: "("),
-                  let ofR = line.range(of: " of ", range: open.upperBound..<line.endIndex),
-                  let kbR = line.range(of: " KB", range: ofR.upperBound..<line.endIndex) else { continue }
-            let done = Int(line[open.upperBound..<ofR.lowerBound].filter(\.isNumber))
-            let total = Int(line[ofR.upperBound..<kbR.lowerBound].filter(\.isNumber))
-            if let done, let total, total > 0 { return ((done, total), committed) }
-        }
-        return (nil, committed)
+    /// Whether Steam's updater has COMMITTED the client, read from its log. Steam logs `Update complete` only
+    /// after downloading, extracting, and committing the NTFS transaction (verified in a real run) — that's
+    /// the definitive "the client is installed" signal the warm-up waits for before shutting Steam down;
+    /// interrupting any EARLIER rolls the half-applied update all the way back.
+    func isUpdateCommitted() -> Bool {
+        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return false }
+        return text.contains("Update complete")
     }
 
     // MARK: - Provision + install

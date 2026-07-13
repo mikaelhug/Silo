@@ -263,10 +263,8 @@ struct SteamBottleControls: View {
         Button("Reveal Bottle in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([env.paths.steamBottle])
         }
-        if bottle.warmingUp, let fraction = bottle.warmUpFraction {
-            ProgressView(value: fraction)          // real download % from Steam's own progress
-        } else if bottle.busy {
-            ProgressView().controlSize(.small)     // indeterminate (install/other work)
+        if bottle.busy {
+            ProgressView().controlSize(.small)     // indeterminate (warm-up / install / other work)
         }
         if !bottle.status.isEmpty {
             Text(bottle.status).font(.caption).foregroundStyle(.secondary)

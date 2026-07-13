@@ -46,8 +46,6 @@ public final class SteamBottleViewModel {
     /// True while the one-time Steam client self-update runs during setup (drives a progress indicator in
     /// the UI). The download can take a few minutes, so we show it's working.
     public private(set) var warmingUp = false
-    /// Download progress of the warm-up, 0…1 when Steam reports it (real % bar), else nil (indeterminate).
-    public private(set) var warmUpFraction: Double?
 
     /// Provision the bottle in the fixed order: download Steam → create the bottle →
     /// install the component set (Core Fonts, Asian fonts, d3dcompiler_47, MSVC x86/x64, msync, then the
@@ -91,7 +89,7 @@ public final class SteamBottleViewModel {
             // steamwebhelper against the now-settled CEF dir.
             warmingUp = true
             await session.warmUpUpdate { [weak self] phase in self?.applyWarmUp(phase) }
-            warmingUp = false; warmUpFraction = nil
+            warmingUp = false
             try? bottle.installWebHelperWrapper(wine: wine)
             // Report "ready" only if the client actually WARMED (steamui.dll + webhelper). A failed or
             // interrupted warm-up leaves just the bootstrapper and must not flip the onboarding gate.
@@ -101,7 +99,7 @@ public final class SteamBottleViewModel {
                 : "Steam client didn't finish downloading. Run Set up again."
             onSteamInstalled?()   // refresh the library's cached readiness (now reflects the warmed client)
         } catch {
-            warmingUp = false; warmUpFraction = nil
+            warmingUp = false
             status = Self.setupFailureMessage(error)
         }
     }
@@ -128,19 +126,11 @@ public final class SteamBottleViewModel {
         status = phase == .downloading ? "Downloading \(component.title)…" : Self.componentStatus(component)
     }
 
-    /// Map a warm-up phase to the UI status text + progress fraction.
+    /// Map a warm-up phase to the UI status text.
     private func applyWarmUp(_ phase: SteamClientSession.WarmUpPhase) {
         switch phase {
-        case .downloading(let fraction):
-            warmUpFraction = fraction
-            if let fraction {
-                status = "Steam is updating itself — \(Int(fraction * 100))%…"
-            } else {
-                status = "Steam is updating itself…"
-            }
-        case .finishing:
-            warmUpFraction = nil
-            status = "Finishing up…"
+        case .downloading: status = "Steam is updating itself…"
+        case .finishing:   status = "Finishing up…"
         }
     }
 

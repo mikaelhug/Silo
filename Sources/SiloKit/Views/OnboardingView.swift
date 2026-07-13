@@ -36,21 +36,13 @@ struct OnboardingView: View {
                 .frame(maxWidth: 540)
 
                 if env.setupBusy {
-                    // A blue progress bar — with the active phase's status under it — instead of the changing
-                    // per-step text. Determinate during the Steam client download (a real %), an animated
-                    // indeterminate bar otherwise. NB: use a value-less `ProgressView()` for the indeterminate
-                    // case — `ProgressView(value: nil)` renders a STATIC (non-animating) linear bar (same
-                    // split as GeneralSettingsView's bottle progress).
+                    // A blue indeterminate progress bar — with the active phase's status under it — instead of
+                    // the changing per-step text. NB: use a value-less `ProgressView()`; `ProgressView(value:
+                    // nil)` renders a STATIC (non-animating) linear bar.
                     VStack(spacing: 10) {
-                        Group {
-                            if let fraction = steam.warmUpFraction {
-                                ProgressView(value: fraction)   // real % from Steam's own download progress
-                            } else {
-                                ProgressView()                  // indeterminate → animates left-to-right
-                            }
-                        }
-                        .progressViewStyle(.linear)
-                        .tint(.blue)
+                        ProgressView()                          // indeterminate → animates left-to-right
+                            .progressViewStyle(.linear)
+                            .tint(.blue)
                         // The active phase's status (esp. "Accept the license for …") so a license/installer
                         // window that pops up has context — it was previously hidden behind the bare bar.
                         if let phase = setupPhaseText() {

@@ -85,11 +85,10 @@ public final class SteamClientSession {
 
     // MARK: - Warm-up (fold Steam's first-run self-update into setup)
 
-    /// Phases of the one-time warm-up, surfaced to the UI so the user knows what the wait is. `downloading`
-    /// carries a 0…1 fraction when known (parsed from Steam's own progress log) for a real progress bar.
+    /// Phases of the one-time warm-up, surfaced to the UI so the user knows what the wait is.
     public enum WarmUpPhase: Sendable, Equatable {
-        case downloading(fraction: Double?)   // downloading the real client (steamui.dll + CEF)
-        case finishing                        // download committed + quiet; shutting Steam back down
+        case downloading   // downloading the real client (steamui.dll + CEF)
+        case finishing     // download committed + quiet; shutting Steam back down
     }
 
     /// Fold Steam's first-run self-update into setup so the user's FIRST real launch lands on the login
@@ -101,7 +100,7 @@ public final class SteamClientSession {
     /// go quiet while the client is present — restarting Steam if it exits mid-way, then shuts it down so
     /// the caller can wrap the steamwebhelper against a settled CEF dir. Idempotent — a no-op once the client
     /// is present. Best-effort: never throws (a slow download just means setup took longer; re-running setup
-    /// resumes). `onProgress` reports phases (with a real % during download).
+    /// resumes). `onProgress` reports the phase.
     var warmUpPollInterval: Double = 2
     var warmUpTimeout: Double = 1200             // 20 min overall failsafe (best-effort)
     var warmUpMaxRelaunches = 3                  // resume attempts if Steam dies BEFORE committing
@@ -115,7 +114,7 @@ public final class SteamClientSession {
         // shared wineserver reap those procs before our fresh launch attaches to it (else the launch can race
         // the msync bootstrap / a half-dead client). Mirrors the settle in `bringUpClientCef`; 0 in tests.
         try? await Task.sleep(for: .seconds(warmUpForceQuitSettle))
-        onProgress(.downloading(fraction: nil))
+        onProgress(.downloading)
         bottle.resetLog()   // so `committed` reflects THIS run, not a stale marker from a prior setup
         var elapsed = 0.0
         var pid = try? await bottle.launchForUpdate(wine: wine)
@@ -124,16 +123,11 @@ public final class SteamClientSession {
             try? await Task.sleep(for: .seconds(warmUpPollInterval))
             elapsed += warmUpPollInterval
 
-            // Steam's updater state (progress + committed) in one log read.
-            let state = bottle.updateState()
-            onProgress(.downloading(fraction: state.progress.map {
-                $0.total > 0 ? Double($0.done) / Double($0.total) : 0 }))
-
             // COMMITTED: Steam's updater downloaded + installed + committed the client (logged "Update
             // complete"). Only now is it safe to shut Steam down — earlier interrupts a half-applied update
             // and Steam rolls it all back. This is the ONE reliable "done" signal (a single launch does the
             // whole download→install→commit; the files appear mid-download, so their presence alone lies).
-            if state.committed && bottle.isClientFullyDownloaded {
+            if bottle.isUpdateCommitted() && bottle.isClientFullyDownloaded {
                 onProgress(.finishing)
                 // The download is committed, but the client creates its runtime CEF dir (e.g. cef.win64 —
                 // the one Steam's login UI actually uses) only on its FIRST full run, a beat AFTER the

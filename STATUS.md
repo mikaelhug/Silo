@@ -3,6 +3,13 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **✂️ Setup: dropped the warm-up progress % (2026-07-13, `main`; 373 tests green).** The "Steam is updating
+  itself — N%…" counter was parsed out of Steam's own updater log (`Downloading update (X of Y KB)`), but the
+  fraction was unreliable and not worth the complexity — removed the whole mechanism. `WarmUpPhase.downloading`
+  no longer carries a fraction; `SteamBottle.updateState()` → `isUpdateCommitted() -> Bool` (kept the one
+  reliable signal — the `Update complete` marker the warm-up waits on); `SteamBottleViewModel.warmUpFraction`
+  gone; both progress bars (onboarding + General settings) are now plain indeterminate. Status reads simply
+  "Steam is updating itself…". No behaviour change to the warm-up's completion logic.
 - **✍️ Message review — one consistent voice (2026-07-12, `main`; 373 tests green).** Went over every
   user-facing status/error string. Unified the error voice to `"Couldn't <verb>: <detail>"` across all VMs
   (was a mix of that and `"<X> failed:"` — RuntimeVM/GPTKVM/BackendVM/installer now match GameLibrary/relocation;
