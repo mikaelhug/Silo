@@ -1,12 +1,11 @@
-# Silo 0.3.6
+# Silo 0.3.7
 
-A setup reliability and polish release — first-run setup is faster, more robust, and clearer.
+A graphics-backend release — Automatic is now self-correcting and honest, with better failure detection, plus internal cleanup.
 
 ## Highlights
-- **Fixed Core Fonts setup.** An accepted font license was misread as a cancel, halting setup right after the first installer. Setup now runs straight through.
-- **Faster setup.** Every component's files (fonts, runtimes, MSVC redist) now download in the background the moment you press **Set up**, overlapping the Steam install and bottle creation instead of stalling each step in turn. The stale-installer download cache is gone — downloads are always fresh.
-- **Clearer status messages.** Reviewed every user-facing line for one consistent, minimal voice. Setup now says what's actually happening ("Installing Steam — follow its installer…", "Steam is updating itself…") instead of misleading or verbose copy, and the unreliable update percentage is gone.
-- **Internal cleanups.** Removed the window-focus workaround that didn't reliably work across macOS versions.
+- **Smarter, honest Automatic graphics.** When Automatic learns a game needs DXMT (because GPTK couldn't run it), it no longer overwrites your choice — the setting stays **Automatic** and the learned backend is remembered separately, so it can re-try GPTK on its own after you update the graphics runtime. A game's graphics settings also gain a **Re-probe GPTK** button to force that retry.
+- **Better backend detection.** Silo now positively confirms DXMT engaged (rather than only inferring failure), so it won't warn about a fallback when DXMT actually worked; and it reads delay-loaded Direct3D imports, so it picks the right backend for more titles.
+- **Cleanup.** Removed a non-functional Dock-tile-naming attempt (Silo-launched processes were never actually renamed), simplifying launches; fixed a settings screen that could misreport the active backend right after a runtime update.
 
 ---
 
