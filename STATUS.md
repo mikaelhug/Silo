@@ -3,6 +3,25 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔎 Switcher hardening: positive engagement + delay-load imports + re-probe UX (2026-07-13, `main`; 388
+  tests green).** Three follow-ups from the honest post-Part-A review:
+  - **#1 Positive engagement (`GraphicsFallback`):** detection was inference-from-absence. Added
+    `Status.engaged` + backend-keyed `engagementSignatures` — DXMT logs `DXMT: created Metal device`, so a DXMT
+    launch is now POSITIVELY confirmed (engagement wins over a later stray wined3d line; the monitor tears its
+    watch down on engagement → no false "DXMT couldn't drive"). GPTK/D3DMetal success is SILENT in winediag
+    (no positive line exists), so a healthy GPTK launch stays `.unknown` — documented, not faked. (Exact DXMT
+    string to reconfirm on-device.)
+  - **#3 Delay-load imports (`WindowsExecutable`):** `importedDLLs` walked only the regular import directory,
+    so a title that DELAY-loads `d3d12`/`d3d9` (common) looked import-less and `dxmtMightHelp` fell through to
+    its permissive path. Now also walks the delay-load directory (index 13, 32-byte `ImgDelayDescr`, RVA name
+    format + legacy-VA fallback), gated on `NumberOfRvaAndSizes`. `PEFixture.withDelayImports` + tests.
+  - **#4 Re-probe UX (`GameSettingsSheet`):** a learned-DXMT game shows as "Automatic," so the sheet now
+    surfaces "Automatic is using DXMT — GPTK couldn't run this game." + a **Re-probe GPTK** button
+    (`GameSettingsViewModel.reprobeGPTK`) that clears the hint immediately (no two-step dance).
+  - **Deferred (large/data-gated):** avoiding the wasted first GPTK launch = a per-title compat DB
+    ([[silo-compat-profiles]], no 64-bit data yet); perf-based "which backend is faster" = a telemetry/
+    benchmark harness (the user deferred the CrossOver comparison earlier). Part B on-device signature capture
+    still pending (needs one real game launch through Silo).
 - **🧠 Automatic backend switcher: learned-hint split + GPTK re-probe (2026-07-13, `main`; 381 tests green).**
   Part A of the switcher-improvement plan. The reactive GPTK→DXMT downgrade previously overwrote the user's
   `graphics = .auto` with `.dxmt` — permanent, indistinguishable from a manual pin in the settings UI, and a
