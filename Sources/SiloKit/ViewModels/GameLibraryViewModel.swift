@@ -335,6 +335,15 @@ public final class GameLibraryViewModel {
         } catch { setStatus("Couldn't run the installer: \(Self.resolveMessage(error))") }
     }
 
+    /// The launchable shortcuts an installer wrote into a manual bottle (off-main FS scan). Empty until the
+    /// user finishes the installer's wizard — it runs detached, so nothing exists the instant `runInstaller`
+    /// returns. Powers the post-install "add these games" picker so an entry inherits the installer's own
+    /// correct target + args + working dir instead of the user guessing an `.exe`.
+    public func installedShortcuts(inBottle id: UUID) async -> [DiscoveredShortcut] {
+        let prefix = paths.manualBottle(id)
+        return await Task.detached { BottleShortcuts.discover(inBottle: prefix) }.value
+    }
+
     /// Add a non-Steam game pointing at an absolute `.exe`, provisioning its bottle. `bottleID` defaults to
     /// the game's own `id` (a portable game owns its bottle 1:1); pass a shared `bottleID` when several games
     /// come from ONE installer so they co-reside in that install's prefix. Pass the pre-Add installer's draft

@@ -34,7 +34,7 @@ struct ManualGameSettingsSheet: View {
                         if let installer = chooseExecutable(
                             message: "Choose a setup .exe or .msi to run in this game's bottle.",
                             installer: true) {
-                            Task { await env.gameLibrary.runInstaller(installer, forBottle: game.id) }
+                            Task { await env.gameLibrary.runInstaller(installer, forBottle: game.bottleID) }
                         }
                     }
                     Button("Show bottle in Finder") {

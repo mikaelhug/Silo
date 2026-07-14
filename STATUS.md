@@ -3,6 +3,27 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔎 Add-via-installer now infers games from the installer's own Start-Menu shortcuts (2026-07-14, `main`;
+  417 tests green).** The failure that motivated this: a user ran an installer, then hand-picked a bare `.exe`
+  (`Browser.exe`) that needs args + a working dir it couldn't know — blank window. CrossOver "just works"
+  because it never asks you to pick an exe: it launches the installer's `.lnk` (`wine --start …`), which
+  carries target + `WORKING_DIR` + `ARGUMENTS`. Silo now reads those shortcuts itself (keeps its direct-exec
+  launch model + per-game log/backend control, unlike delegating to `wine start`). New pieces:
+  - **`ShellLink`** (`PE/ShellLink.swift`) — clean-room MS-SHLLINK parser (target via LinkInfo `LocalBasePath`,
+    NAME/WORKING_DIR/ARGUMENTS/ICON from StringData), Foundation-only, bounds-safe → `nil` on junk (mirrors
+    `PEIcon`). Fixture = the real `GravityMark 1.89.lnk`.
+  - **`BottleShortcuts`** (`Launch/BottleShortcuts.swift`) — scans a bottle's Start-Menu/Desktop for `.lnk`s,
+    maps `C:\…` → `drive_c` host paths, filters uninstallers (Uninstall*/msiexec/Inno `unins*`), dedups.
+  - **`ManualGame`** decouples identity from bottle: `bottleID` (tolerant-decoded → defaults to `id`) so N
+    shortcuts from ONE install share ONE prefix (N library entries, not N installs); `workingDirectory` (URL?)
+    honored by `makePlan` (cwd override). Bottle deletion is now **ref-counted** (only when the last entry
+    using it is removed). `addManualGame` gained `bottleID`/`workingDirectory`/`customArgs`.
+  - **Add sheet**: after the installer's wizard, a "Find installed games" scan lists the discovered shortcuts
+    as multi-select toggles (target+args shown); adding creates one `ManualGame` per pick, all sharing the
+    install bottle. **Installer-path only** — a directly-chosen ready-to-run `.exe` is unchanged (no scanning).
+  - Fixed a latent bug: the settings-sheet "Run Installer in this bottle" used `game.id` not `game.bottleID`.
+  On-device-unverified: the SwiftUI picker end-to-end (parser + discovery are unit-tested against the real
+  `.lnk`; the resolved launch = exactly what `run_browser.bat` runs).
 - **🧩 Installer picker accepts `.msi` — and the launch path actually runs it (2026-07-14, `main`; 407 tests
   green).** The "Run Installer" pickers (Add-manual-game + manual-game settings) restricted `NSOpenPanel` to
   the `exe` UTType, so `.msi` packages were greyed out. And even a selected `.msi` couldn't run: `makePlan`

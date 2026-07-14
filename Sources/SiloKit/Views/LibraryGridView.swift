@@ -140,6 +140,11 @@ struct AddGameSheet: View {
     /// The graphics-backend choice for this game — Automatic by default (Silo picks GPTK, or DXMT for 32-bit
     /// and problem titles); overridable to an explicit backend.
     @State private var graphics: GraphicsChoice = .auto
+    /// Shortcuts found in the bottle after the installer's wizard finishes (target + args + working dir the
+    /// installer itself recorded), and which of them the user chose to add. All share this one bottle.
+    @State private var discovered: [DiscoveredShortcut] = []
+    @State private var selectedShortcutIDs: Set<String> = []
+    @State private var scanned = false
 
     var body: some View {
         NavigationStack {
@@ -201,12 +206,58 @@ struct AddGameSheet: View {
                     }
                     .disabled(working)
                     if ranInstaller {
-                        Label("Installer launched — finish its setup window, then choose the game's .exe above.",
+                        Label("Installer launched — finish its setup window, then find the installed games below.",
                               systemImage: "arrow.up.forward.circle")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } header: {
                     Text("Installer (only if needed)")
+                }
+
+                // After the installer's wizard finishes, scan the bottle for the shortcuts it created and let
+                // the user add them directly — each inherits the installer's own target + args + working dir
+                // (no guessing an .exe). Multiple shortcuts become multiple library entries in THIS one bottle.
+                if ranInstaller {
+                    Section {
+                        Button {
+                            Task {
+                                working = true
+                                discovered = await env.gameLibrary.installedShortcuts(inBottle: draftID)
+                                selectedShortcutIDs = Set(discovered.map(\.id))
+                                scanned = true
+                                working = false
+                            }
+                        } label: {
+                            Label(scanned ? "Rescan for installed games" : "Find installed games",
+                                  systemImage: "magnifyingglass")
+                        }
+                        .disabled(working)
+                        ForEach(discovered) { shortcut in
+                            Toggle(isOn: Binding(
+                                get: { selectedShortcutIDs.contains(shortcut.id) },
+                                set: { on in
+                                    if on { selectedShortcutIDs.insert(shortcut.id) }
+                                    else { selectedShortcutIDs.remove(shortcut.id) }
+                                }
+                            )) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(shortcut.name)
+                                    Text(shortcut.executable.lastPathComponent
+                                         + (shortcut.arguments.isEmpty ? ""
+                                            : " " + shortcut.arguments.joined(separator: " ")))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                            }
+                        }
+                        if scanned && discovered.isEmpty {
+                            Text("No installed games found yet — finish the installer, then rescan, or choose "
+                                 + "the .exe above.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Installed games")
+                    }
                 }
 
                 if working {
@@ -230,16 +281,30 @@ struct AddGameSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        guard let chosenExe else { return }
                         Task {
                             working = true
-                            let game = await env.gameLibrary.addManualGame(
-                                id: draftID, name: name, executable: chosenExe, graphics: graphics)
-                            working = false
-                            if game != nil { dismiss() }
+                            let selected = discovered.filter { selectedShortcutIDs.contains($0.id) }
+                            if !selected.isEmpty {
+                                // N shortcuts → N library entries co-resident in this one install bottle.
+                                for s in selected {
+                                    _ = await env.gameLibrary.addManualGame(
+                                        bottleID: draftID, name: s.name, executable: s.executable,
+                                        workingDirectory: s.workingDirectory, graphics: graphics,
+                                        customArgs: s.arguments)
+                                }
+                                working = false
+                                dismiss()
+                            } else if let chosenExe {
+                                let game = await env.gameLibrary.addManualGame(
+                                    id: draftID, name: name, executable: chosenExe, graphics: graphics)
+                                working = false
+                                if game != nil { dismiss() }
+                            } else {
+                                working = false
+                            }
                         }
                     }
-                    .disabled(chosenExe == nil || working)
+                    .disabled(working || (chosenExe == nil && selectedShortcutIDs.isEmpty))
                 }
             }
         }
