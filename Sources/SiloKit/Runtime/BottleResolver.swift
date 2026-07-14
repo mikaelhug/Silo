@@ -48,9 +48,11 @@ public struct BottleResolver: Sendable {
         try context(backend: backend, prefix: paths.steamBottle, config: config)
     }
 
-    /// Resolve a manual game's launch context: its OWN isolated bottle under its chosen backend's variant.
-    public func manual(_ game: ManualGame, config: BackendConfig) throws -> LaunchContext {
-        try context(backend: game.backend, prefix: paths.manualBottle(game.id), config: config)
+    /// Resolve a manual game's launch context: its OWN isolated bottle under the `backend` the caller resolved
+    /// (from the game's `graphics` choice via `BackendChooser` — no default, mirroring `steam(backend:)`, so a
+    /// manual launch can't silently land on GPTK either).
+    public func manual(_ game: ManualGame, backend: GraphicsBackend, config: BackendConfig) throws -> LaunchContext {
+        try context(backend: backend, prefix: paths.manualBottle(game.id), config: config)
     }
 
     /// The prefix + runtime for a prefix-wide maintenance tool (winecfg / regedit / retina). Distinct from a

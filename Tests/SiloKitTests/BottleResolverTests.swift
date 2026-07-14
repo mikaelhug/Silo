@@ -82,8 +82,8 @@ struct BottleResolverTests {
     func manualDXMT() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (config, paths) = try fixtures(tmp)
-        let game = ManualGame(name: "Old", executablePath: URL(fileURLWithPath: "/g/old.exe"), backend: .dxmt)
-        let ctx = try BottleResolver(paths: paths).manual(game, config: config)
+        let game = ManualGame(name: "Old", executablePath: URL(fileURLWithPath: "/g/old.exe"), graphics: .dxmt)
+        let ctx = try BottleResolver(paths: paths).manual(game, backend: .dxmt, config: config)
 
         #expect(ctx.graphics == .dxmt)
         #expect(ctx.prefix == paths.manualBottle(game.id))
@@ -105,9 +105,9 @@ struct BottleResolverTests {
     func dxmtNotConfigured() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (config, paths) = try fixtures(tmp, dxmt: false)   // wine + GPTK only
-        let game = ManualGame(name: "Old", executablePath: URL(fileURLWithPath: "/g/old.exe"), backend: .dxmt)
+        let game = ManualGame(name: "Old", executablePath: URL(fileURLWithPath: "/g/old.exe"), graphics: .dxmt)
         #expect(throws: BottleResolver.ResolveError.backendNotConfigured(.dxmt)) {
-            try BottleResolver(paths: paths).manual(game, config: config)
+            try BottleResolver(paths: paths).manual(game, backend: .dxmt, config: config)
         }
     }
 

@@ -47,15 +47,16 @@ struct ManualGameSettingsSheet: View {
                 }
 
                 Section {
-                    Picker("Graphics", selection: $game.backend) {
-                        ForEach(GraphicsBackend.allCases) { Text($0.displayName).tag($0) }
+                    Picker("Graphics", selection: $game.graphics) {
+                        ForEach(GraphicsChoice.allCases) { Text($0.displayName).tag($0) }
                     }
-                    Text(game.backend.recommendedFor)
+                    Text(game.graphics.recommendedFor)
                         .font(.caption).foregroundStyle(.secondary)
                 } header: {
                     Text("Graphics Backend")
                 } footer: {
-                    Text("The translation layer this game runs under. Switching takes effect next launch.")
+                    Text("Automatic picks the backend per game — 32-bit games use DXMT, others use GPTK / "
+                         + "D3DMetal. Using DXMT requires installing it in Settings → DXMT. Takes effect next launch.")
                 }
 
                 PerformanceFlagsSection(flags: $game.envFlags)

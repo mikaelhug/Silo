@@ -92,4 +92,22 @@ public enum GraphicsChoice: String, Codable, Sendable, CaseIterable, Identifiabl
         case .dxmt: GraphicsBackend.dxmt.displayName
         }
     }
+
+    /// Compact label for a library badge/chip (Steam and manual cards both show the per-game choice).
+    public var badge: String {
+        switch self {
+        case .auto: "Auto"
+        case .gptk: GraphicsBackend.gptk.badge
+        case .dxmt: GraphicsBackend.dxmt.badge
+        }
+    }
+
+    /// One-line guidance shown next to the picker.
+    public var recommendedFor: String {
+        switch self {
+        case .auto: "Recommended — Silo picks the backend per game"
+        case .gptk: GraphicsBackend.gptk.recommendedFor
+        case .dxmt: GraphicsBackend.dxmt.recommendedFor
+        }
+    }
 }

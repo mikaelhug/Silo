@@ -548,8 +548,8 @@ struct GameLibraryViewModelTests {
             provisioner: WinePrefixProvisioner(runner: fake))
 
         let exe = try tmp.write("Games/Old/old.exe", "MZ")
-        let game = try #require(await vm.addManualGame(name: "Old", executable: exe, backend: .dxmt))
-        #expect(game.backend == .dxmt)
+        let game = try #require(await vm.addManualGame(name: "Old", executable: exe, graphics: .dxmt))
+        #expect(game.graphics == .dxmt)
         await vm.playManual(game)
 
         let spawn = try #require(fake.invocations.last { $0.detached })
@@ -557,6 +557,43 @@ struct GameLibraryViewModelTests {
         #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))
         #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
         #expect(spawn.environment["WINEPREFIX"] == paths.manualBottle(game.id).path)   // its own isolated bottle
+    }
+
+    @Test("Automatic routes a 32-bit manual game to DXMT — the default choice, no 32-bit-on-GPTK refusal")
+    func autoManual32BitRoutesToDXMT() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, _) = try makeDXMTReady(tmp, i386: true)         // wine + DXMT (both ABIs)
+        let dir = tmp.url.appendingPathComponent("Games/Old32", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let exe = dir.appendingPathComponent("old32.exe")
+        try PEFixture.header(machine: 0x014c).write(to: exe)          // a 32-bit (i386) PE
+        let game = try #require(await vm.addManualGame(name: "Old32", executable: exe))   // default .auto
+        #expect(game.graphics == .auto)
+
+        await vm.playManual(game)
+
+        let spawn = try #require(fake.invocations.last { $0.detached })
+        #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))      // Automatic sent 32-bit → DXMT
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(vm.statusMessage == "Launched Old32.")                        // launched, NOT refused
+    }
+
+    @Test("Automatic routes a 64-bit manual game to GPTK — never DXMT")
+    func autoManual64BitRoutesToGPTK() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, _) = try makeDXMTReady(tmp)                     // DXMT installed but GPTK is preferred
+        let dir = tmp.url.appendingPathComponent("Games/New64", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let exe = dir.appendingPathComponent("new64.exe")
+        try PEFixture.header(machine: 0x8664).write(to: exe)          // a 64-bit (amd64) PE
+        let game = try #require(await vm.addManualGame(name: "New64", executable: exe))   // default .auto
+
+        await vm.playManual(game)
+
+        let spawn = try #require(fake.invocations.last { $0.detached })
+        #expect(spawn.executable.path.hasSuffix("/wine/bin/wine64"))          // base runtime (GPTK), not the DXMT clone
+        #expect(!spawn.executable.path.contains("wine-dxmt"))
+        #expect(vm.statusMessage == "Launched New64.")
     }
 
     @Test("playManual refuses a 32-bit game on DXMT when the installed DXMT has no i386 build")
@@ -567,7 +604,7 @@ struct GameLibraryViewModelTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let exe = dir.appendingPathComponent("oc2.exe")
         try PEFixture.header(machine: 0x014c).write(to: exe)       // a 32-bit (i386) PE
-        let game = try #require(await vm.addManualGame(name: "OC2", executable: exe, backend: .dxmt))
+        let game = try #require(await vm.addManualGame(name: "OC2", executable: exe, graphics: .dxmt))
 
         await vm.playManual(game)
 

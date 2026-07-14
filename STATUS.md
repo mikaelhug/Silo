@@ -3,6 +3,18 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🎛️ Manual games now use the Automatic graphics backend too (2026-07-14, `main`; 402 tests green).** Manual
+  (non-Steam) games previously took an explicit `GraphicsBackend` (`.gptk`/`.dxmt`, no Automatic) — a
+  deliberate asymmetry, now reversed per the user. `ManualGame.backend: GraphicsBackend` → `graphics:
+  GraphicsChoice` (default `.auto`), resolved forward by the SAME `BackendChooser.choose` `play` uses (32-bit →
+  DXMT, else GPTK). `BottleResolver.manual` now takes the resolved backend explicitly (like `steam(backend:)`);
+  `playManual` mirrors `play`'s resolution + 32-bit refusals. The settings sheet + Add sheet use the shared
+  `GraphicsChoice` picker (Automatic/GPTK/DXMT); `BackendTag` shows `Auto`/`GPTK`/`DXMT`. **Kept SIMPLE per the
+  user: forward Automatic only — manual games do NOT get the reactive learned-DXMT hint** (that machinery stays
+  Steam-only; a GPTK failure on an Automatic manual game surfaces the honest "switch to DXMT" message rather
+  than auto-rerouting). Tolerant Codable migrates an old explicit `backend` → the matching explicit choice;
+  a config with neither key → `.auto`. Bonus UX win: a 32-bit manual game added with the default now routes to
+  DXMT automatically instead of the old default-GPTK → refusal. Tests: migration + both Automatic-split paths.
 - **🔗 Re-added "Create Desktop Shortcut" — as a deep-link, for BOTH game kinds (2026-07-14, `main`; 399 tests
   green).** The old (removed 2026-07-10) shortcut snapshotted a `LaunchPlan` into a standalone `.app` that
   `exec`'d wine directly — which went stale, needed DXMT prefix pre-seeding (`prepareGraphics`), read "wine"

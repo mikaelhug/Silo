@@ -347,12 +347,12 @@ public final class GameLibraryViewModel {
     /// to the exe's filename.
     @discardableResult
     public func addManualGame(
-        id: UUID = UUID(), name: String, executable: URL, backend graphics: GraphicsBackend = .gptk
+        id: UUID = UUID(), name: String, executable: URL, graphics: GraphicsChoice = .auto
     ) async -> ManualGame? {
         guard await ensureManualBottle(id) else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmed.isEmpty ? executable.deletingPathExtension().lastPathComponent : trimmed
-        let game = ManualGame(id: id, name: finalName, executablePath: executable, backend: graphics)
+        let game = ManualGame(id: id, name: finalName, executablePath: executable, graphics: graphics)
         do {
             _ = try await configStore.saveManualGame(game)
             manualGames = sortedManual(manualGames + [game])
@@ -390,25 +390,30 @@ public final class GameLibraryViewModel {
               + paths.manualBottle(game.id).path)
     }
 
-    /// Launch a manual game in its OWN bottle under its chosen backend (GPTK or DXMT; no Steam needed).
-    /// Boots the bottle first, then routes through `BottleResolver` so the game runs on the right runtime —
-    /// GPTK in place, or DXMT's cloned+overlaid variant. The clone/overlay runs off the main actor.
+    /// Launch a manual game in its OWN bottle under its resolved backend (Automatic / GPTK / DXMT; no Steam
+    /// needed). Resolves the `graphics` choice with `BackendChooser` exactly like `play` does for Steam games
+    /// (32-bit → DXMT, else GPTK), boots the bottle, then routes through `BottleResolver` so the game runs on
+    /// the right runtime — GPTK in place, or DXMT's cloned+overlaid variant. The clone/overlay runs off-main.
     public func playManual(_ game: ManualGame) async {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id) else { return }
         if launchBlockedByBottles() { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
         let is32 = WindowsExecutable.is32Bit(game.executablePath)
         let dxmtConfigured = backend.libDir(for: .dxmt) != nil
-        // A 32-bit game on GPTK can't render (GPTK / D3DMetal is 64-bit-only) — refuse before provisioning
-        // its bottle and steer to switching this game's backend to DXMT.
-        if game.backend == .gptk, is32 {
+        // Manual games don't carry a learned hint (that reactive machinery is Steam-only), so Automatic here
+        // is the pure forward choice: 32-bit → DXMT, else GPTK.
+        let chosen = BackendChooser.choose(game.graphics, is32Bit: is32)
+        // A 32-bit game under an EXPLICIT GPTK pin is a dead end (Apple ships no i386 D3DMetal). Automatic
+        // routes 32-bit to DXMT, so this only fires when the user pinned GPTK — refuse before provisioning
+        // the bottle and steer to Automatic/DXMT.
+        if game.graphics == .gptk, is32 {
             setStatus(Self.unsupported32BitMessage(name: game.name, dxmtAvailable: dxmtConfigured))
             return
         }
-        // A 32-bit game on DXMT needs the DXMT runtime's i386 modules; a 64-bit-only DXMT build would launch
-        // to a silent black screen. Refuse honestly (mirrors `play`) — but only when DXMT IS configured; an
-        // unconfigured DXMT is caught by `BottleResolver.manual` below with its own "install DXMT" message.
-        if game.backend == .dxmt, is32, dxmtConfigured, !backend.dxmtSupports32Bit {
+        // A 32-bit game routed to DXMT needs the DXMT runtime's i386 modules; a 64-bit-only DXMT build would
+        // launch to a silent black screen. Refuse honestly (mirrors `play`) — but only when DXMT IS configured;
+        // an unconfigured DXMT is caught by `BottleResolver.manual` below with its own "install DXMT" message.
+        if is32, chosen == .dxmt, dxmtConfigured, !backend.dxmtSupports32Bit {
             setStatus("\(game.name) needs the 32-bit DXMT build — update DXMT in Settings.")
             return
         }
@@ -417,14 +422,14 @@ public final class GameLibraryViewModel {
         let context: LaunchContext
         do {
             context = try await Task.detached { [paths] in
-                try BottleResolver(paths: paths).manual(game, config: cfg)
+                try BottleResolver(paths: paths).manual(game, backend: chosen, config: cfg)
             }.value
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
             return
         }
         do {
-            // The resolved runtime is the backend's variant; feed it to the orchestrator as the launch wine.
+            // The resolved runtime is the chosen backend's variant; feed it to the orchestrator as the launch wine.
             try await orchestrator.launchManualGame(
                 game, backend: backend, graphics: context.graphics,
                 wine: context.wineBinary, prefix: context.prefix, logURL: paths.manualLog(game.id))
@@ -435,8 +440,10 @@ public final class GameLibraryViewModel {
                 // The game IS running, but config.json is unwritable — say so (settings won't stick either).
                 setStatus("Launched \(game.name) — play date not saved.")
             }
-            watchGraphics(.manual(game.id), log: paths.manualLog(game.id),   // last (see play); manual games
-                          name: game.name, backend: game.backend, exe: game.executablePath)   // never auto-learn
+            // Watch the ACTUALLY-chosen backend engage; manual games never auto-learn (no reactive reroute) —
+            // an Automatic manual game GPTK can't drive surfaces the honest "switch to DXMT" fallback message.
+            watchGraphics(.manual(game.id), log: paths.manualLog(game.id),
+                          name: game.name, backend: chosen, exe: game.executablePath)
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
         }

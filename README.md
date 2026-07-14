@@ -37,7 +37,8 @@ Wine, imports Apple's Game Porting Toolkit from your `.dmg`, and self-updates fr
   Metal layer) for 32-bit titles and as the fallback when GPTK can't drive a game — it remembers the switch
   for next time. Override to a specific backend per game whenever you want; GPTK and DXMT games co-reside.
 - **Non-Steam games too.** Add any `.exe` (or run its installer); each manual game lives in its
-  **own isolated Wine prefix** with per-game backend, env flags, and launch options.
+  **own isolated Wine prefix** with the same **Automatic** graphics backend as Steam games (or an
+  explicit override), plus per-game env flags and launch options.
 - **Desktop shortcuts.** Right-click any game (Steam or non-Steam) → *Create Desktop Shortcut* for a
   double-clickable launcher that plays it through Silo — same backend, same bottle, Steam client and all —
   straight from the Desktop, Spotlight, or Launchpad.

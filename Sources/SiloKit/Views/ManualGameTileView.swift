@@ -22,7 +22,7 @@ struct ManualGameTileView: View {
             ManualGameArtwork(exe: game.executablePath)
         } subtitle: {
             Text("Non-Steam game").font(.caption).foregroundStyle(.secondary)
-            BackendTag(backend: game.backend)
+            BackendTag(choice: game.graphics)
         } menuItems: {
             menuItems()
         }

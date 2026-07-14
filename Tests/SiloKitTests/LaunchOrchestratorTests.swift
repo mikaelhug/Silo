@@ -292,7 +292,7 @@ struct LaunchPipelineTests {
         try tmp.makeDir("Games/OC2")
         let exe = tmp.url.appendingPathComponent("Games/OC2/oc2.exe")
         try makePE(machine: 0x014c).write(to: exe)                       // a real 32-bit (i386) PE
-        let game = ManualGame(name: "OC2", executablePath: exe, backend: .gptk)
+        let game = ManualGame(name: "OC2", executablePath: exe, graphics: .gptk)
         let log = tmp.url.appendingPathComponent("m.log")
 
         // GPTK refuses it up front (D3DMetal is 64-bit-only) — no spawn.
@@ -318,7 +318,7 @@ struct LaunchPipelineTests {
         try tmp.makeDir("Games/G")
         let exe = tmp.url.appendingPathComponent("Games/G/g.exe")
         try makePE(machine: 0x8664).write(to: exe)                       // 64-bit (amd64) PE
-        let game = ManualGame(name: "G", executablePath: exe, backend: .gptk)
+        let game = ManualGame(name: "G", executablePath: exe, graphics: .gptk)
 
         let pid = try await orchestrator.launchManualGame(
             game, backend: backend, graphics: .gptk, prefix: tmp.url, logURL: tmp.url.appendingPathComponent("m.log"))

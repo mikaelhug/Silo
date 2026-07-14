@@ -137,8 +137,9 @@ struct AddGameSheet: View {
     @State private var ranInstaller = false
     @State private var bottleCreated = false   // a bottle was provisioned this session (cancel → discard)
     @State private var working = false
-    /// The graphics backend this game's isolated bottle runs under (GPTK default; DXMT for older/problem titles).
-    @State private var backend: GraphicsBackend = .gptk
+    /// The graphics-backend choice for this game — Automatic by default (Silo picks GPTK, or DXMT for 32-bit
+    /// and problem titles); overridable to an explicit backend.
+    @State private var graphics: GraphicsChoice = .auto
 
     var body: some View {
         NavigationStack {
@@ -171,12 +172,12 @@ struct AddGameSheet: View {
                 }
 
                 Section {
-                    Picker("Graphics", selection: $backend) {
-                        ForEach(GraphicsBackend.allCases) { option in
+                    Picker("Graphics", selection: $graphics) {
+                        ForEach(GraphicsChoice.allCases) { option in
                             Text(option.displayName).tag(option)
                         }
                     }
-                    Text(backend.recommendedFor)
+                    Text(graphics.recommendedFor)
                         .font(.caption).foregroundStyle(.secondary)
                 } header: {
                     Text("Graphics Backend")
@@ -232,7 +233,7 @@ struct AddGameSheet: View {
                         Task {
                             working = true
                             let game = await env.gameLibrary.addManualGame(
-                                id: draftID, name: name, executable: chosenExe, backend: backend)
+                                id: draftID, name: name, executable: chosenExe, graphics: graphics)
                             working = false
                             if game != nil { dismiss() }
                         }

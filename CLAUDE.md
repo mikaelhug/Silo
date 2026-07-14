@@ -12,7 +12,8 @@ isolated manual bottles**:
   Each game launches under an **automatically chosen graphics backend** (GPTK ⇄ DXMT, per game, overridable),
   pinned at launch by runtime + `WINEDLLOVERRIDES` — never baked into the shared prefix, so GPTK and DXMT
   games co-reside.
-- **Manual (non-Steam) games** each run in their **own isolated Wine prefix** under an explicit per-game backend.
+- **Manual (non-Steam) games** each run in their **own isolated Wine prefix** under a per-game graphics
+  choice — Automatic (the default, resolved by `BackendChooser` exactly like Steam) or an explicit backend.
 
 Pipeline: **Discovery** (parse `appmanifest_*.acf`) → **Provision** (seed the shared Steam prefix, or a
 manual game's own prefix) → **Backend choice** (`BackendChooser`: 32-bit → DXMT, else GPTK; reactive switch
@@ -92,8 +93,13 @@ GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + override
   (`BackendChooser.dxmtMightHelp` off the PE import table), `play` persists `.dxmt` for next time. *(Phase 0,
   2026-07-10 collapsed the old dual Steam bottle to one; the automatic/override backend was the deferred
   follow-up, built 2026-07-11.)* d3d9/OpenGL titles need neither backend — they run wine's own wined3d/GL.
-- **Manual (non-Steam) games** pick an explicit backend per game (`ManualGame.backend`, no `.auto`); each runs
-  in its own isolated bottle under that backend's runtime. The DXMT runtime is installed via Settings → DXMT.
+- **Manual (non-Steam) games** carry a per-game `GraphicsChoice` (`ManualGame.graphics`, default `.auto`) —
+  the SAME Automatic selector as Steam games, resolved forward by `BackendChooser.choose` in `playManual`
+  (32-bit → DXMT, else GPTK). They do NOT carry the reactive learned-DXMT hint (that machinery is Steam-only),
+  so Automatic for a manual game is the pure forward choice; a GPTK failure surfaces the honest "switch to
+  DXMT" fallback message rather than auto-rerouting. Each runs in its own isolated bottle under the resolved
+  backend's runtime (`BottleResolver.manual(_:backend:config:)` takes the resolved backend explicitly, like
+  `steam(backend:)`). The DXMT runtime is installed via Settings → DXMT.
 - When a backend isn't configured, GPTK degrades to wine's own wined3d (the baseline); a secondary backend
   refuses rather than mis-route. `GraphicsFallback` is backend-aware (surfaces a silent wined3d fallback).
 

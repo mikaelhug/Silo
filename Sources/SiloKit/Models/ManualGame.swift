@@ -1,9 +1,8 @@
 import Foundation
 
 /// A non-Steam game the user added by hand: an absolute path to a Windows `.exe` on disk, launched in its
-/// OWN isolated Wine bottle (`ManualBottles/<id>`) under GPTK (no Steamworks needed). Unlike `SteamApp` —
-/// which is *discovered* from the bottle's `appmanifest_*.acf` — a `ManualGame` is user-authored and
-/// persisted in `config.json`.
+/// OWN isolated Wine bottle (`ManualBottles/<id>`). Unlike `SteamApp` — which is *discovered* from the
+/// bottle's `appmanifest_*.acf` — a `ManualGame` is user-authored and persisted in `config.json`.
 public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
     public let id: UUID
     public var name: String
@@ -13,10 +12,11 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
     /// Per-game performance + environment tuning (same knobs as a Steam game). Defaults are the
     /// Apple-Silicon GPTK baseline.
     public var envFlags: EnvFlags
-    /// The graphics translation layer this game runs under. Manual games each get their own isolated
-    /// bottle, so the backend is a free per-game choice (unlike Steam games, whose backend = their bottle).
-    /// Defaults to `.gptk`; the isolated bottle's runtime is overlaid for whichever backend is selected.
-    public var backend: GraphicsBackend
+    /// The graphics-backend **choice** for this game — `.auto` (Silo picks per launch via `BackendChooser`:
+    /// 32-bit → DXMT, else GPTK), or an explicit `.gptk` / `.dxmt` pin — exactly like a Steam game's
+    /// `GameConfig.graphics`. Manual games each get their own isolated bottle, so the resolved backend just
+    /// overlays that bottle's runtime. Defaults to `.auto`.
+    public var graphics: GraphicsChoice
     /// Extra arguments appended after the executable.
     public var customArgs: [String]
     public var lastPlayed: Date?
@@ -26,7 +26,7 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
         name: String,
         executablePath: URL,
         envFlags: EnvFlags = EnvFlags(),
-        backend: GraphicsBackend = .gptk,
+        graphics: GraphicsChoice = .auto,
         customArgs: [String] = [],
         lastPlayed: Date? = nil
     ) {
@@ -34,7 +34,7 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
         self.name = name
         self.executablePath = executablePath
         self.envFlags = envFlags
-        self.backend = backend
+        self.graphics = graphics
         self.customArgs = customArgs
         self.lastPlayed = lastPlayed
     }
@@ -53,10 +53,11 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
         GameConfig(appID: 0, envFlags: envFlags, presence: .none, customArgs: customArgs)
     }
 
-    // MARK: - Codable (tolerates a missing `backend` so old config.json keeps its manual games)
+    // MARK: - Codable (tolerant: migrates the pre-Automatic `backend` field; never throws on a missing one)
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, executablePath, envFlags, backend, customArgs, lastPlayed
+        // `backend` is read-only legacy — decoded for migration, never encoded (new configs write `graphics`).
+        case id, name, executablePath, envFlags, graphics, backend, customArgs, lastPlayed
     }
 
     public init(from decoder: any Decoder) throws {
@@ -65,10 +66,29 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
         name = try c.decode(String.self, forKey: .name)
         executablePath = try c.decode(URL.self, forKey: .executablePath)
         envFlags = try c.decodeIfPresent(EnvFlags.self, forKey: .envFlags) ?? EnvFlags()
-        // New field: a config written before DXMT support has no `backend` → default to GPTK (don't
-        // throw, which would drop the whole manualGames array on load — see AppState's tolerant decode).
-        backend = try c.decodeIfPresent(GraphicsBackend.self, forKey: .backend) ?? .gptk
+        // `graphics` (a GraphicsChoice, incl. Automatic) supersedes the pre-Automatic `backend` (a concrete
+        // GraphicsBackend). Migrate an old explicit backend to the matching explicit choice; a config with
+        // neither field (very old) defaults to Automatic. Never throw — that would drop the whole
+        // manualGames array on load (see AppState's tolerant decode).
+        if let choice = try c.decodeIfPresent(GraphicsChoice.self, forKey: .graphics) {
+            graphics = choice
+        } else if let legacy = try c.decodeIfPresent(GraphicsBackend.self, forKey: .backend) {
+            graphics = legacy == .dxmt ? .dxmt : .gptk
+        } else {
+            graphics = .auto
+        }
         customArgs = try c.decodeIfPresent([String].self, forKey: .customArgs) ?? []
         lastPlayed = try c.decodeIfPresent(Date.self, forKey: .lastPlayed)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(executablePath, forKey: .executablePath)
+        try c.encode(envFlags, forKey: .envFlags)
+        try c.encode(graphics, forKey: .graphics)
+        try c.encode(customArgs, forKey: .customArgs)
+        try c.encodeIfPresent(lastPlayed, forKey: .lastPlayed)
     }
 }
