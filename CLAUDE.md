@@ -35,6 +35,18 @@ PID-free via `WineServerProbe` (the wineserver socket, keyed by the prefix's dev
 orphans too). "Steam is up" = `SteamReadiness.isReady`. Only the first-run warm-up still uses
 `isRunning`/`terminate` on a transient local PID (setup plumbing).
 
+**Desktop shortcuts (`silo://` deep links, re-added 2026-07-14):** a game's tile menu → *Create Desktop
+Shortcut* writes a tiny `LSUIElement` agent `.app` (`GameShortcut`, per-game bundle id, sanitized filename)
+whose launch script only does `open silo://play/steam/<appID>` or `…/manual/<uuid>` (`SiloDeepLink` — pure
+parse/build). The custom scheme is registered in `Info.plist.template` (`CFBundleURLTypes`) and handled by
+`SiloApp.onOpenURL` → `AppEnvironment.handleDeepLink` → route to `play`/`playManual`. A shortcut is a
+*reference* to a library game, NOT a launch snapshot — so the backend (Automatic/learned-DXMT), prefix, and
+(for Steam) the co-resident client are all resolved fresh at click time; it works for both game kinds with no
+prefix pre-seeding. A link that arrives before the library finishes loading is held in a one-slot pending
+queue and routed once `bootstrap()` completes. *(This is the deliberately-simpler replacement for the old
+`GameAppShortcut`, removed 2026-07-10, which baked a resolved `LaunchPlan` into a wine-exec'ing `.app` — that
+went stale, needed DXMT prefix-seeding, showed a "wine" Dock tile, and couldn't serve Steam titles.)*
+
 ## Hard constraints (non-negotiable)
 1. **SwiftPM only — never call `xcodebuild`.** This machine has Command Line Tools only (no Xcode).
    Build with `swift build`; the `.app` is assembled by `Scripts/build-app.sh`.
@@ -80,7 +92,8 @@ GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + override
   one runtime. `RuntimeVariants` prepares each: GPTK overlays the base runtime in place (the proven path,
   unchanged); DXMT gets an **APFS clone** of the base + `GraphicsLinker.overlayDXMT`.
 - `BottleResolver` is the ONE place that maps a game → `{prefix, wineBinary, graphics}` (`steam(backend:config:)`
-  for the Steam bottle, `manual(game,config:)` for a manual game). Every launch/provision/tool path routes
+  for the Steam bottle, `manual(game,backend:,config:)` for a manual game — both take the caller's resolved
+  backend explicitly, so neither launch path can silently land on GPTK). Every launch/provision/tool path routes
   through it — never hard-code `paths.steamBottle` or `backend.wineBinaryPath`. A launch emits exactly that
   backend's `WINEDLLOVERRIDES` builtin set, so it can never cross GPTK↔DXMT or silently land on wined3d (it
   refuses an unconfigured secondary backend).
