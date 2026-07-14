@@ -39,6 +39,18 @@ struct ManualGameTests {
         }
     }
 
+    @Test("An unknown/newer graphics value degrades to Automatic instead of throwing (forward-compat)")
+    func tolerantDecodeOfUnknownGraphics() throws {
+        // A config written by a FUTURE Silo (e.g. a `d9mt` choice) opened by this build must not throw — a
+        // throw would drop the whole config document, not just this game.
+        let json = """
+        {"id":"\(UUID().uuidString)","name":"Future","executablePath":"file:///g/f.exe",
+         "envFlags":{},"graphics":"d9mt","customArgs":[]}
+        """
+        let game = try JSONDecoder().decode(ManualGame.self, from: Data(json.utf8))
+        #expect(game.graphics == .auto)
+    }
+
     @Test("The graphics choice survives an encode/decode round-trip (and writes `graphics`, not `backend`)")
     func roundTripsGraphics() throws {
         let game = ManualGame(name: "Old", executablePath: URL(fileURLWithPath: "/g/old.exe"), graphics: .dxmt)

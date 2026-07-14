@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A small capsule tag on a manual game's library card showing its graphics-backend choice — `Auto`, `GPTK`,
-/// or `DXMT`. (Steam games carry their own badge; this is the manual-card variant.)
+/// or `DXMT`. Only manual cards carry it (Steam tiles show install size instead).
 struct BackendTag: View {
     let choice: GraphicsChoice
 

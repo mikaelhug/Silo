@@ -1,8 +1,9 @@
 import SwiftUI
 import AppKit
 
-/// A library tile for a manual (non-Steam) game. Play launches its `.exe` in the bottle under GPTK; the
-/// menu exposes Settings, Log, Wine config, Finder, and Remove (which forgets the entry, not the files).
+/// A library tile for a manual (non-Steam) game. Play launches its `.exe` in the game's isolated bottle
+/// under its resolved graphics backend (Automatic/GPTK/DXMT); the menu exposes Settings, Log, Wine config,
+/// a Desktop shortcut, Finder, and Remove (which forgets the entry, not the files).
 struct ManualGameTileView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow

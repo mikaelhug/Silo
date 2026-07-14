@@ -247,17 +247,10 @@ public final class GameLibraryViewModel {
         // fix the title, so a stale hint is dropped (passed as nil) and GPTK is re-probed.
         let learned = config.learnedUnderRuntime == cfg.gptkRuntimeName ? config.learnedBackend : nil
         let chosen = BackendChooser.choose(config.graphics, is32Bit: is32, learned: learned)
-        // A 32-bit game under an EXPLICIT GPTK choice is a dead end (Apple ships no i386 D3DMetal). Automatic
-        // routes 32-bit to DXMT, so this is only reachable when the user pinned GPTK. Refuse with a DXMT steer.
-        if config.graphics == .gptk, is32 {
-            setStatus(Self.unsupported32BitMessage(name: game.name, dxmtAvailable: dxmtConfigured))
-            return
-        }
-        // A 32-bit game routed to DXMT needs the DXMT runtime to ship i386 modules; a 64-bit-only DXMT build
-        // would launch to a silent black screen. Refuse honestly. (If DXMT isn't configured at all, the
-        // resolver throws `backendNotConfigured` below with its own "install DXMT" message.)
-        if is32, chosen == .dxmt, dxmtConfigured, !cfg.dxmtSupports32Bit {
-            setStatus("\(game.name) needs the 32-bit DXMT build — update DXMT in Settings.")
+        if let refusal = Self.bitnessRefusal(
+            name: game.name, choice: config.graphics, chosen: chosen,
+            is32: is32, dxmtConfigured: dxmtConfigured, dxmtSupports32Bit: cfg.dxmtSupports32Bit) {
+            setStatus(refusal)
             return
         }
         do {
@@ -398,27 +391,20 @@ public final class GameLibraryViewModel {
         guard backend.isWineConfigured, !manualBusyIDs.contains(game.id) else { return }
         if launchBlockedByBottles() { return }
         manualBusyIDs.insert(game.id); defer { manualBusyIDs.remove(game.id) }
-        let is32 = WindowsExecutable.is32Bit(game.executablePath)
-        let dxmtConfigured = backend.libDir(for: .dxmt) != nil
-        // Manual games don't carry a learned hint (that reactive machinery is Steam-only), so Automatic here
-        // is the pure forward choice: 32-bit → DXMT, else GPTK.
+        let cfg = backend
+        // Read the exe's bitness off-main — a PE-header read on a possibly-slow/external volume must not block
+        // the UI (mirrors `play`). Manual games carry no learned hint (that reactive machinery is Steam-only),
+        // so Automatic here is the pure forward choice: 32-bit → DXMT, else GPTK.
+        let is32 = await Task.detached { WindowsExecutable.is32Bit(game.executablePath) }.value
+        let dxmtConfigured = cfg.libDir(for: .dxmt) != nil
         let chosen = BackendChooser.choose(game.graphics, is32Bit: is32)
-        // A 32-bit game under an EXPLICIT GPTK pin is a dead end (Apple ships no i386 D3DMetal). Automatic
-        // routes 32-bit to DXMT, so this only fires when the user pinned GPTK — refuse before provisioning
-        // the bottle and steer to Automatic/DXMT.
-        if game.graphics == .gptk, is32 {
-            setStatus(Self.unsupported32BitMessage(name: game.name, dxmtAvailable: dxmtConfigured))
-            return
-        }
-        // A 32-bit game routed to DXMT needs the DXMT runtime's i386 modules; a 64-bit-only DXMT build would
-        // launch to a silent black screen. Refuse honestly (mirrors `play`) — but only when DXMT IS configured;
-        // an unconfigured DXMT is caught by `BottleResolver.manual` below with its own "install DXMT" message.
-        if is32, chosen == .dxmt, dxmtConfigured, !backend.dxmtSupports32Bit {
-            setStatus("\(game.name) needs the 32-bit DXMT build — update DXMT in Settings.")
+        if let refusal = Self.bitnessRefusal(
+            name: game.name, choice: game.graphics, chosen: chosen,
+            is32: is32, dxmtConfigured: dxmtConfigured, dxmtSupports32Bit: cfg.dxmtSupports32Bit) {
+            setStatus(refusal)
             return
         }
         guard await ensureManualBottle(game.id) else { return }
-        let cfg = backend
         let context: LaunchContext
         do {
             context = try await Task.detached { [paths] in
@@ -614,6 +600,26 @@ public final class GameLibraryViewModel {
             return "\(name): DXMT couldn't drive this game's graphics. "
                 + "Check the DXMT runtime in Settings → DXMT."
         }
+    }
+
+    /// The refusal message if the resolved backend can't run this executable's bitness — a 32-bit game pinned
+    /// to GPTK (64-bit-only), or one routed to a DXMT build with no i386 modules — else nil. Pure, and shared
+    /// by `play` and `playManual` so their guards (and the "needs the 32-bit DXMT build" text) can't drift.
+    private static func bitnessRefusal(
+        name: String, choice: GraphicsChoice, chosen: GraphicsBackend,
+        is32: Bool, dxmtConfigured: Bool, dxmtSupports32Bit: Bool
+    ) -> String? {
+        // A 32-bit game under an EXPLICIT GPTK pin is a dead end (Apple ships no i386 D3DMetal); Automatic
+        // routes 32-bit to DXMT, so this is only reachable when the user pinned GPTK. Steer to DXMT.
+        if choice == .gptk, is32 {
+            return unsupported32BitMessage(name: name, dxmtAvailable: dxmtConfigured)
+        }
+        // A 32-bit game routed to DXMT needs the runtime's i386 modules; a 64-bit-only build would launch to a
+        // silent black screen. (An unconfigured DXMT is caught later by the resolver's "install DXMT" message.)
+        if is32, chosen == .dxmt, dxmtConfigured, !dxmtSupports32Bit {
+            return "\(name) needs the 32-bit DXMT build — update DXMT in Settings."
+        }
+        return nil
     }
 
     /// The message when a 32-bit (i386) game is refused under an explicit GPTK choice. GPTK / D3DMetal is

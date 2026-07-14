@@ -21,7 +21,7 @@ public enum SiloDeepLink: Sendable, Equatable {
     /// Parse an incoming URL, or nil if it isn't a well-formed Silo play link. Fails closed — an unknown
     /// scheme/host/kind, a non-numeric appID, or a malformed UUID all return nil rather than a wrong target.
     public init?(url: URL) {
-        guard url.scheme?.lowercased() == Self.scheme, url.host == Self.playHost else { return nil }
+        guard url.scheme?.lowercased() == Self.scheme, url.host?.lowercased() == Self.playHost else { return nil }
         // pathComponents includes the leading "/" element — drop it so ["/", "steam", "440"] → ["steam","440"].
         let parts = url.pathComponents.filter { $0 != "/" }
         guard parts.count == 2 else { return nil }

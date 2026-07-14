@@ -39,7 +39,6 @@ public struct GameShortcut: Sendable {
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
             <key>CFBundleShortVersionString</key><string>1.0</string>
-            <key>CFBundleIconFile</key><string>AppIcon</string>
             <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
             <key>LSUIElement</key><true/>
             <key>LSMinimumSystemVersion</key><string>15.0</string>

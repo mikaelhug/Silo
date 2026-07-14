@@ -47,8 +47,8 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// The `GameConfig` used to launch this manual game: appID 0 (not a Steam title), no Steam presence,
-    /// and the game's own env flags + args. The single place a `ManualGame` maps to a launch config —
-    /// shared by the launch path and the Desktop-shortcut builder.
+    /// and the game's own env flags + args. The single place a `ManualGame` maps to a launch config
+    /// (consumed by `LaunchOrchestrator.launchManualGame`).
     public var gameConfig: GameConfig {
         GameConfig(appID: 0, envFlags: envFlags, presence: .none, customArgs: customArgs)
     }
@@ -67,13 +67,15 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
         executablePath = try c.decode(URL.self, forKey: .executablePath)
         envFlags = try c.decodeIfPresent(EnvFlags.self, forKey: .envFlags) ?? EnvFlags()
         // `graphics` (a GraphicsChoice, incl. Automatic) supersedes the pre-Automatic `backend` (a concrete
-        // GraphicsBackend). Migrate an old explicit backend to the matching explicit choice; a config with
-        // neither field (very old) defaults to Automatic. Never throw — that would drop the whole
-        // manualGames array on load (see AppState's tolerant decode).
-        if let choice = try c.decodeIfPresent(GraphicsChoice.self, forKey: .graphics) {
-            graphics = choice
-        } else if let legacy = try c.decodeIfPresent(GraphicsBackend.self, forKey: .backend) {
-            graphics = legacy == .dxmt ? .dxmt : .gptk
+        // GraphicsBackend). Decode both as raw strings so an unknown/newer value (e.g. a config written by a
+        // future Silo) degrades to Automatic rather than THROWING — a throw here drops the ENTIRE config
+        // document on load (backend + every game config), not just this game (see AppState's tolerant decode).
+        // Migrate an old explicit backend to the matching explicit choice; neither key (a very old config) →
+        // Automatic.
+        if let raw = try c.decodeIfPresent(String.self, forKey: .graphics) {
+            graphics = GraphicsChoice(rawValue: raw) ?? .auto
+        } else if let legacy = try c.decodeIfPresent(String.self, forKey: .backend) {
+            graphics = legacy == GraphicsBackend.dxmt.rawValue ? .dxmt : .gptk
         } else {
             graphics = .auto
         }
