@@ -44,6 +44,29 @@ struct MakePlanTests {
         #expect(plan.environment["WINESERVER"] == nil)
     }
 
+    @Test("An .msi target runs via builtin msiexec /i, addressed through the Z: (unix-root) drive")
+    func msiRunsViaMsiexec() throws {
+        let msi = URL(fileURLWithPath: "/Users/me/Downloads/GravityMark 1.89.msi")
+        var cfg = GameConfig(appID: 0, presence: .none)
+        cfg.customArgs = ["/qb"]
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: backend(), gameExe: msi, prefix: prefix, logURL: log)
+
+        #expect(plan.executable.path == "/w/bin/wine64")
+        // msiexec, not the package path directly; DOS path preserves spaces without quoting; args appended.
+        #expect(plan.arguments == ["msiexec", "/i", "Z:\\Users\\me\\Downloads\\GravityMark 1.89.msi", "/qb"])
+        #expect(plan.currentDirectory.path == "/Users/me/Downloads")
+    }
+
+    @Test("A .exe target runs directly (msi routing is inert for normal executables, any case)")
+    func exeRunsDirectly() throws {
+        let upper = URL(fileURLWithPath: "/games/Setup.EXE")
+        #expect(LaunchOrchestrator.invocation(for: upper) == ["/games/Setup.EXE"])
+        #expect(LaunchOrchestrator.invocation(for: gameExe) == [gameExe.path])
+        // Extension match is case-insensitive.
+        #expect(LaunchOrchestrator.invocation(for: URL(fileURLWithPath: "/d/x.MSI")).first == "msiexec")
+    }
+
     @Test("Bottle launch forces msync even if the game is configured for esync (one shared wineserver)")
     func forcesMsyncForCoResidency() throws {
         var cfg = GameConfig(appID: 220)

@@ -92,11 +92,27 @@ public struct LaunchOrchestrator: Sendable {
 
         return LaunchPlan(
             executable: wine,
-            arguments: [gameExe.path] + config.customArgs,
+            arguments: Self.invocation(for: gameExe) + config.customArgs,
             environment: environment,
             currentDirectory: gameExe.deletingLastPathComponent(),
             logURL: logURL
         )
+    }
+
+    /// The wine argument vector that runs `target`. Wine can exec a PE image (`.exe`) directly, but a
+    /// Windows Installer package (`.msi`) is data, not a PE — it must be handed to the bottle's builtin
+    /// `msiexec /i`. Everything else runs directly. (Steam/manual game targets are always `.exe`; only the
+    /// "run installer" path feeds an `.msi` here.)
+    static func invocation(for target: URL) -> [String] {
+        guard target.pathExtension.lowercased() == "msi" else { return [target.path] }
+        return ["msiexec", "/i", dosPath(for: target)]
+    }
+
+    /// Map a unix path to its `Z:` DOS equivalent (wine's default unix-root drive), e.g.
+    /// `/a/b c.msi` → `Z:\a\b c.msi`. `msiexec` needs a DOS path; the child gets the argv element verbatim
+    /// (no shell), so spaces need no quoting.
+    static func dosPath(for url: URL) -> String {
+        "Z:" + url.path.replacingOccurrences(of: "/", with: "\\")
     }
 
     // MARK: - Full pipeline

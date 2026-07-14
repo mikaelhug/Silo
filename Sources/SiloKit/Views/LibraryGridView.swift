@@ -186,7 +186,8 @@ struct AddGameSheet: View {
                 Section {
                     Button {
                         if let installer = chooseExecutable(
-                            message: "Choose an installer (setup .exe) to run in this game's new bottle.") {
+                            message: "Choose an installer (setup .exe or .msi) to run in this game's new bottle.",
+                            installer: true) {
                             Task {
                                 working = true
                                 await env.gameLibrary.runInstaller(installer, forBottle: draftID)

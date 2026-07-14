@@ -13,17 +13,21 @@ func chooseDiskImage() -> URL? {
     return panel.runModal() == .OK ? panel.url : nil
 }
 
-/// Present an open panel for choosing a Windows `.exe` (a game or installer). `directory` sets the initial
-/// location (e.g. the bottle's `drive_c`). Returns nil if cancelled.
+/// Present an open panel for choosing a Windows executable. `directory` sets the initial location (e.g. the
+/// bottle's `drive_c`). When `installer` is true the panel also accepts a `.msi` package — setup programs
+/// ship as either a `.exe` or an `.msi`; otherwise it's `.exe`-only, since a game's launch target must be a
+/// PE image, not an installer package. Returns nil if cancelled.
 @MainActor
-func chooseExecutable(message: String, directory: URL? = nil) -> URL? {
+func chooseExecutable(message: String, directory: URL? = nil, installer: Bool = false) -> URL? {
     let panel = NSOpenPanel()
     panel.canChooseFiles = true
     panel.canChooseDirectories = false
     panel.allowsMultipleSelection = false
     panel.message = message
     panel.prompt = "Choose"
-    if let exe = UTType(filenameExtension: "exe") { panel.allowedContentTypes = [exe] }
+    let extensions = installer ? ["exe", "msi"] : ["exe"]
+    let types = extensions.compactMap { UTType(filenameExtension: $0) }
+    if !types.isEmpty { panel.allowedContentTypes = types }
     if let directory, FileManager.default.fileExists(atPath: directory.path) {
         panel.directoryURL = directory
     }

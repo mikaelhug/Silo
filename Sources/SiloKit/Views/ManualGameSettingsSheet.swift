@@ -32,7 +32,8 @@ struct ManualGameSettingsSheet: View {
                 Section {
                     Button("Run Installer in this bottle…") {
                         if let installer = chooseExecutable(
-                            message: "Choose a setup .exe to run in this game's bottle.") {
+                            message: "Choose a setup .exe or .msi to run in this game's bottle.",
+                            installer: true) {
                             Task { await env.gameLibrary.runInstaller(installer, forBottle: game.id) }
                         }
                     }

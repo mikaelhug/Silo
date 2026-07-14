@@ -3,6 +3,17 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🧩 Installer picker accepts `.msi` — and the launch path actually runs it (2026-07-14, `main`; 407 tests
+  green).** The "Run Installer" pickers (Add-manual-game + manual-game settings) restricted `NSOpenPanel` to
+  the `exe` UTType, so `.msi` packages were greyed out. And even a selected `.msi` couldn't run: `makePlan`
+  did `wine <path>`, but a `.msi` is data, not a PE — wine can't exec it. Two-part fix: (1) `chooseExecutable`
+  gained an `installer:` opt-in that adds the `msi` type to the two installer pickers only (game-target
+  pickers stay `.exe`-only — a launch target must be a PE image); (2) `makePlan` routes an `.msi` target
+  through the bottle's builtin `msiexec /i`, addressing the package via its `Z:` (unix-root) DOS path (argv,
+  no shell → spaces need no quoting). `msiexec.exe`/`msi` are already `=builtin` in `BottleDefaults`, so wine's
+  own msiexec handles it. Pure `invocation(for:)`/`dosPath(for:)` helpers, table-tested (msi→msiexec incl.
+  DOS-path/spaces/appended-args; exe passthrough, case-insensitive). Surfaced while prepping a GravityMark
+  D3D12 GPTK-vs-CrossOver benchmark — GravityMark ships as a `.msi`.
 - **🎛️ Manual games now use the Automatic graphics backend too (2026-07-14, `main`; 402 tests green).** Manual
   (non-Steam) games previously took an explicit `GraphicsBackend` (`.gptk`/`.dxmt`, no Automatic) — a
   deliberate asymmetry, now reversed per the user. `ManualGame.backend: GraphicsBackend` → `graphics:
