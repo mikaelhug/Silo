@@ -1,11 +1,10 @@
-# Silo 0.3.7
+# Silo 0.4.0
 
-A graphics-backend release — Automatic is now self-correcting and honest, with better failure detection, plus internal cleanup.
+Desktop shortcuts are back, and manual games now get the same Automatic graphics backend as Steam.
 
 ## Highlights
-- **Smarter, honest Automatic graphics.** When Automatic learns a game needs DXMT (because GPTK couldn't run it), it no longer overwrites your choice — the setting stays **Automatic** and the learned backend is remembered separately, so it can re-try GPTK on its own after you update the graphics runtime. A game's graphics settings also gain a **Re-probe GPTK** button to force that retry.
-- **Better backend detection.** Silo now positively confirms DXMT engaged (rather than only inferring failure), so it won't warn about a fallback when DXMT actually worked; and it reads delay-loaded Direct3D imports, so it picks the right backend for more titles.
-- **Cleanup.** Removed a non-functional Dock-tile-naming attempt (Silo-launched processes were never actually renamed), simplifying launches; fixed a settings screen that could misreport the active backend right after a runtime update.
+- **Desktop shortcuts.** Right-click any game — Steam or non-Steam — → **Create Desktop Shortcut** for a double-clickable launcher that plays it through Silo from the Desktop, Spotlight, or Launchpad, always resolving the current backend and bottle.
+- **Automatic graphics for non-Steam games.** Manual games now default to the same **Automatic** GPTK/DXMT selection as Steam games, instead of a fixed backend — 32-bit titles route to DXMT automatically. Still overridable per game.
 
 ---
 
