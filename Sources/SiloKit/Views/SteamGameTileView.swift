@@ -46,6 +46,14 @@ struct SteamGameTileView: View {
         }
         Button("Wine Config…") { Task { await env.gameLibrary.openWinecfg() } }
             .disabled(!env.gameLibrary.canLaunch)
+        Button("Create Desktop Shortcut") {
+            Task {
+                guard let app = await env.gameLibrary.makeShortcut(for: game) else { return }
+                // Best-effort: stamp the game's Steam header art on the shortcut (offline → generic icon).
+                let icon = await ShortcutFinalize.remoteIcon(game.headerArtURL)
+                ShortcutFinalize.apply(icon: icon, to: app)
+            }
+        }
         Button("View in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([game.installURL])
         }

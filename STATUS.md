@@ -3,6 +3,20 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔗 Re-added "Create Desktop Shortcut" — as a deep-link, for BOTH game kinds (2026-07-14, `main`; 399 tests
+  green).** The old (removed 2026-07-10) shortcut snapshotted a `LaunchPlan` into a standalone `.app` that
+  `exec`'d wine directly — which went stale, needed DXMT prefix pre-seeding (`prepareGraphics`), read "wine"
+  in the Dock, and couldn't serve Steam titles (no co-resident client). Rebuilt on a **`silo://` URL scheme**
+  instead: a shortcut `.app` just `open`s `silo://play/steam/<appID>` or `silo://play/manual/<uuid>`, so the
+  running/relaunched Silo resolves the backend (Automatic/learned-DXMT), prefix, and Steam client **fresh at
+  click time** — correct forever, and works for Steam **and** manual games. New: `SiloDeepLink` (pure
+  parse/build), `GameShortcut` (builds an `LSUIElement` agent `.app`, per-game bundle id, sanitized filename),
+  `AppEnvironment.handleDeepLink`/`route` (+ a pending-link queue for cold-launch before the library loads),
+  `SiloApp.onOpenURL`, `CFBundleURLTypes` in `Info.plist.template`, `GameLibraryViewModel.makeShortcut(for:)`
+  ×2, and a "Create Desktop Shortcut" menu item on both tiles (best-effort icon: PE icon for manual, Steam
+  header art for Steam). No `prepareGraphics`/prefix-seeding needed — the whole class of problems is gone.
+  On-device-unverified: the LaunchServices scheme registration + `onOpenURL` delivery (needs the assembled,
+  registered `.app`; the plist is `plutil`-clean and the pure logic is unit-tested).
 - **🧹 Post-change review sweep (2026-07-13, `main`; 384 tests green).** Two adversarial review agents over the
   session's changes (switcher + Dock removal). Verdict: Dock removal left NO rot; the PE parser and switcher
   state machine are bounds-safe / fail-open / correct. Fixed the one real finding + closed a test gap:

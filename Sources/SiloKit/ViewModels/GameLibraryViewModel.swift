@@ -470,6 +470,43 @@ public final class GameLibraryViewModel {
         }
     }
 
+    // MARK: - Desktop shortcuts
+
+    /// Create a Desktop shortcut for a Steam game (default location: the Desktop). The shortcut is a small
+    /// `.app` that opens a `silo://play/steam/<appID>` deep link — so clicking it plays the game through Silo
+    /// with the co-resident Steam client and the game's Automatic/chosen backend, resolved fresh each time.
+    /// Returns the bundle URL (for the caller to stamp an icon + reveal in Finder), or nil with the failure in
+    /// the status bar.
+    @discardableResult
+    public func makeShortcut(for game: SteamApp, into directory: URL? = nil) async -> URL? {
+        await writeShortcut(name: game.name, link: .playSteam(appID: game.appID), into: directory)
+    }
+
+    /// Create a Desktop shortcut for a manual (non-Steam) game — a `.app` opening `silo://play/manual/<id>`,
+    /// which plays it through Silo under its chosen backend, in its own isolated bottle.
+    @discardableResult
+    public func makeShortcut(for game: ManualGame, into directory: URL? = nil) async -> URL? {
+        await writeShortcut(name: game.name, link: .playManual(id: game.id), into: directory)
+    }
+
+    /// Shared writer: build the shortcut `.app` off the main actor (small FS I/O) and set a status. Creating a
+    /// shortcut touches only the destination folder (never a bottle or Wine), so it's allowed anytime — even
+    /// before setup; a click before setup just lands on onboarding, exactly as pressing Play would.
+    private func writeShortcut(name: String, link: SiloDeepLink, into directory: URL?) async -> URL? {
+        guard let dir = directory
+            ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first else {
+            setStatus("Couldn't find your Desktop folder."); return nil
+        }
+        do {
+            let app = try await Task.detached { try GameShortcut(name: name, link: link).write(into: dir) }.value
+            setStatus("Created a Desktop shortcut for \(name).")
+            return app
+        } catch {
+            setStatus("Couldn't create the shortcut: \((error as NSError).localizedDescription)")
+            return nil
+        }
+    }
+
     /// Open `winecfg` for a manual game's OWN bottle (Windows version, libraries — isolated per game).
     public func openManualWinecfg(_ game: ManualGame) async {
         guard await ensureManualBottle(game.id) else { return }

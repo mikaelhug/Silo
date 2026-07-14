@@ -42,6 +42,14 @@ struct ManualGameTileView: View {
         }
         Button("Wine Config…") { Task { await env.gameLibrary.openManualWinecfg(game) } }
             .disabled(!env.gameLibrary.canLaunch)
+        Button("Create Desktop Shortcut") {
+            Task {
+                guard let app = await env.gameLibrary.makeShortcut(for: game) else { return }
+                // Best-effort: stamp the game's own icon (parsed from its .exe) on the shortcut, then reveal it.
+                let icon = await ManualIconCache.shared.icon(for: game.executablePath)
+                ShortcutFinalize.apply(icon: icon, to: app)
+            }
+        }
         Button("View in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([game.executablePath])
         }

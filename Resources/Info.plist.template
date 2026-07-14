@@ -26,6 +26,20 @@
     <string>15.0</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
+    <!-- Custom URL scheme for Desktop game shortcuts: a shortcut .app opens silo://play/steam/<appID>
+         or silo://play/manual/<uuid>, which activates (or launches) Silo and plays the game. Parsed by
+         SiloDeepLink; handled in SiloApp.onOpenURL. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.mikael.silo.deeplink</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>silo</string>
+            </array>
+        </dict>
+    </array>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAppTransportSecurity</key>

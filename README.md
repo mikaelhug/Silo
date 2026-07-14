@@ -38,6 +38,9 @@ Wine, imports Apple's Game Porting Toolkit from your `.dmg`, and self-updates fr
   for next time. Override to a specific backend per game whenever you want; GPTK and DXMT games co-reside.
 - **Non-Steam games too.** Add any `.exe` (or run its installer); each manual game lives in its
   **own isolated Wine prefix** with per-game backend, env flags, and launch options.
+- **Desktop shortcuts.** Right-click any game (Steam or non-Steam) → *Create Desktop Shortcut* for a
+  double-clickable launcher that plays it through Silo — same backend, same bottle, Steam client and all —
+  straight from the Desktop, Spotlight, or Launchpad.
 - **Self-contained.** No Homebrew, no external dependencies: Wine comes from Silo's Releases
   (SHA-256 verified, fail-closed), GPTK from your Apple-downloaded `.dmg`, updates in-app.
 - **Native and event-driven.** SwiftUI + Swift 6 strict concurrency; zero polling — game exits,

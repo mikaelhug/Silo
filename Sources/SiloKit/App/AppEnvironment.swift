@@ -34,6 +34,10 @@ public final class AppEnvironment {
     public let bottles: BottlesRelocationCoordinator
     public private(set) var didBootstrap = false
     private var isBootstrapping = false
+    /// A deep link (from a Desktop shortcut) that arrived before the app finished bootstrapping — the library
+    /// isn't loaded yet, so we hold it and route it the moment `bootstrap()` completes. At most one is kept
+    /// (the newest click wins); a link that arrives once bootstrapped routes immediately, never queued.
+    private var pendingDeepLink: SiloDeepLink?
     /// Re-entrancy guard for the guided setup chain (the onboarding "Set up" button) — a double-tap in the
     /// sub-millisecond window before the runtime/bottle busy flags flip would otherwise start two chains.
     private var isRunningFullSetup = false
@@ -154,6 +158,37 @@ public final class AppEnvironment {
         await updates.checkForUpdate()   // best-effort; nil updateCheck on offline
         didBootstrap = true
         isBootstrapping = false
+        // A shortcut may have cold-launched the app: route the link now that the library is loaded. Read +
+        // clear synchronously (no await between the flip above and here) so a link arriving in this instant
+        // routes itself via `handleDeepLink` instead of being double-processed.
+        if let link = pendingDeepLink { pendingDeepLink = nil; await route(link) }
+    }
+
+    // MARK: - Deep links (Desktop game shortcuts)
+
+    /// Handle an incoming `silo://play/…` deep link (from `SiloApp.onOpenURL`). If the app is still
+    /// bootstrapping the library isn't loaded yet, so the link is held and routed when `bootstrap()` finishes;
+    /// otherwise it routes immediately.
+    public func handleDeepLink(_ link: SiloDeepLink) async {
+        guard didBootstrap else { pendingDeepLink = link; return }
+        await route(link)
+    }
+
+    /// Look the game up in the loaded library and play it via the SAME path the Play button uses — so the
+    /// backend (Automatic/learned-DXMT), prefix, and Steam-client requirement are all resolved fresh. A single
+    /// `load()` retry covers a game installed/added since the last scan; a still-missing target is ignored
+    /// (uninstalled/removed) rather than surfaced from a background-launched shortcut.
+    private func route(_ link: SiloDeepLink) async {
+        switch link {
+        case .playSteam(let appID):
+            if gameLibrary.games.first(where: { $0.appID == appID }) == nil { await gameLibrary.load() }
+            guard let game = gameLibrary.games.first(where: { $0.appID == appID }) else { return }
+            await gameLibrary.play(game)
+        case .playManual(let id):
+            if gameLibrary.manualGames.first(where: { $0.id == id }) == nil { await gameLibrary.load() }
+            guard let game = gameLibrary.manualGames.first(where: { $0.id == id }) else { return }
+            await gameLibrary.playManual(game)
+        }
     }
 
     /// Reload the bottle's game library (e.g. on app re-activation).

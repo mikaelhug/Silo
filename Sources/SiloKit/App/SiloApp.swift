@@ -21,6 +21,12 @@ public struct SiloApp: App {
                     // Returning to Silo (e.g. after downloading games in Steam) re-scans the library.
                     if phase == .active { Task { await environment.refreshLibraryIfReady() } }
                 }
+                .onOpenURL { url in
+                    // A Desktop game shortcut opened a silo://play/… deep link. Ignore anything that isn't a
+                    // well-formed Silo link; route the rest through the environment (which waits for bootstrap).
+                    guard let link = SiloDeepLink(url: url) else { return }
+                    Task { await environment.handleDeepLink(link) }
+                }
         }
         .windowToolbarStyle(.unified)
 
