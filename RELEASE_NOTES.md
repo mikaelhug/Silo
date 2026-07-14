@@ -1,10 +1,10 @@
-# Silo 0.4.0
+# Silo 0.4.1
 
-Desktop shortcuts are back, and manual games now get the same Automatic graphics backend as Steam.
+Add non-Steam games straight from their installer — Silo finds the installed games for you.
 
 ## Highlights
-- **Desktop shortcuts.** Right-click any game — Steam or non-Steam — → **Create Desktop Shortcut** for a double-clickable launcher that plays it through Silo from the Desktop, Spotlight, or Launchpad, always resolving the current backend and bottle.
-- **Automatic graphics for non-Steam games.** Manual games now default to the same **Automatic** GPTK/DXMT selection as Steam games, instead of a fixed backend — 32-bit titles route to DXMT automatically. Still overridable per game.
+- **Install-and-detect for non-Steam games.** After you run a game's installer, Silo reads the shortcuts it created and lists the installed games automatically the moment the installer closes — each with the right executable, launch arguments, and working directory, so you no longer hunt for the correct `.exe`. One installer that adds several games puts them all in a single bottle.
+- **`.msi` installers supported.** Windows Installer packages now run directly when adding a game.
 
 ---
 
