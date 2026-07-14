@@ -165,12 +165,15 @@ public struct LaunchOrchestrator: Sendable {
         return try await spawn(plan)
     }
 
-    /// Run an arbitrary installer `.exe` in the bottle prefix (detached, so the user drives its GUI). It
-    /// installs into the bottle's `drive_c`; the user then points the game at the installed executable.
+    /// Run an installer (`.exe` or `.msi`) in the bottle prefix and **WAIT for it to finish**. Unlike a game
+    /// launch (detached — Silo never owns a game's lifecycle), an installer is transient setup, like the
+    /// license-bearing component installers: it runs blocking, so this returns when the user closes its
+    /// window. That exit is the deterministic "install finished" signal the caller uses to scan for the
+    /// shortcuts it wrote — no polling, no focus heuristics. Installs into the bottle's `drive_c`.
     @discardableResult
     public func runInstaller(
         exe: URL, backend: BackendConfig, graphics: GraphicsBackend = .gptk, prefix: URL, logURL: URL
-    ) async throws -> Int32 {
+    ) async throws -> ProcessResult {
         guard let wine = backend.wineBinaryPath else { throw LaunchError.wineNotConfigured }
         guard FileManager.default.fileExists(atPath: exe.path) else {
             throw LaunchError.executableNotFound(exe)
@@ -179,7 +182,18 @@ public struct LaunchOrchestrator: Sendable {
         let plan = try Self.makePlan(
             config: GameConfig(appID: 0, presence: .none), backend: backend, graphics: graphics,
             wine: wine, gameExe: exe, prefix: prefix, logURL: logURL)
-        return try await spawn(plan)
+        writeLogHeader(for: plan)
+        let result = try await runner.run(
+            executable: plan.executable, arguments: plan.arguments,
+            environment: plan.environment, currentDirectory: plan.currentDirectory)
+        // Best-effort: append the installer's output under the header (the log viewer shows manual logs).
+        if let handle = try? FileHandle(forWritingTo: logURL) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: result.standardOutput)
+            try? handle.write(contentsOf: result.standardError)
+        }
+        return result
     }
 
     private func spawn(_ plan: LaunchPlan) async throws -> Int32 {

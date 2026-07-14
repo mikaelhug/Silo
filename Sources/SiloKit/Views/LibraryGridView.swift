@@ -140,11 +140,12 @@ struct AddGameSheet: View {
     /// The graphics-backend choice for this game — Automatic by default (Silo picks GPTK, or DXMT for 32-bit
     /// and problem titles); overridable to an explicit backend.
     @State private var graphics: GraphicsChoice = .auto
-    /// Shortcuts found in the bottle after the installer's wizard finishes (target + args + working dir the
+    /// Shortcuts found in the bottle once the installer's wizard closes (target + args + working dir the
     /// installer itself recorded), and which of them the user chose to add. All share this one bottle.
     @State private var discovered: [DiscoveredShortcut] = []
     @State private var selectedShortcutIDs: Set<String> = []
-    @State private var scanned = false
+    /// True while the (blocking) installer runs — its exit is our deterministic "scan now" signal.
+    @State private var installerRunning = false
 
     var body: some View {
         NavigationStack {
@@ -194,44 +195,36 @@ struct AddGameSheet: View {
                             message: "Choose an installer (setup .exe or .msi) to run in this game's new bottle.",
                             installer: true) {
                             Task {
-                                working = true
+                                installerRunning = true
+                                // Blocks until the installer's window closes; on return, the install is done
+                                // and its Start-Menu shortcuts exist — so we scan right then, automatically.
                                 await env.gameLibrary.runInstaller(installer, forBottle: draftID)
                                 bottleCreated = true
                                 ranInstaller = true
-                                working = false
+                                await scanForInstalledGames()
+                                installerRunning = false
                             }
                         }
                     } label: {
                         Label("Run Installer…", systemImage: "shippingbox")
                     }
-                    .disabled(working)
-                    if ranInstaller {
-                        Label("Installer launched — finish its setup window, then find the installed games below.",
-                              systemImage: "arrow.up.forward.circle")
-                            .font(.caption).foregroundStyle(.secondary)
+                    .disabled(installerRunning || working)
+                    if installerRunning {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Finish the installer's setup window — Silo lists the games when it closes.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Installer (only if needed)")
                 }
 
-                // After the installer's wizard finishes, scan the bottle for the shortcuts it created and let
-                // the user add them directly — each inherits the installer's own target + args + working dir
-                // (no guessing an .exe). Multiple shortcuts become multiple library entries in THIS one bottle.
-                if ranInstaller {
+                // Once the installer closes we auto-scan its Start-Menu shortcuts and pre-select them, so the
+                // user just presses Add — each entry inherits the installer's own target + args + working dir
+                // (no guessing an .exe). Several shortcuts → several library entries in THIS one bottle.
+                if ranInstaller && !installerRunning {
                     Section {
-                        Button {
-                            Task {
-                                working = true
-                                discovered = await env.gameLibrary.installedShortcuts(inBottle: draftID)
-                                selectedShortcutIDs = Set(discovered.map(\.id))
-                                scanned = true
-                                working = false
-                            }
-                        } label: {
-                            Label(scanned ? "Rescan for installed games" : "Find installed games",
-                                  systemImage: "magnifyingglass")
-                        }
-                        .disabled(working)
                         ForEach(discovered) { shortcut in
                             Toggle(isOn: Binding(
                                 get: { selectedShortcutIDs.contains(shortcut.id) },
@@ -250,11 +243,14 @@ struct AddGameSheet: View {
                                 }
                             }
                         }
-                        if scanned && discovered.isEmpty {
-                            Text("No installed games found yet — finish the installer, then rescan, or choose "
-                                 + "the .exe above.")
+                        if discovered.isEmpty {
+                            Text("No installed games detected — the installer may still be finishing. "
+                                 + "Rescan, or choose the .exe above.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        // Fallback for the rare installer that exits before writing its shortcuts.
+                        Button("Rescan") { Task { await scanForInstalledGames() } }
+                            .font(.caption)
                     } header: {
                         Text("Installed games")
                     }
@@ -277,7 +273,7 @@ struct AddGameSheet: View {
                         if bottleCreated { Task { await env.gameLibrary.discardManualBottle(draftID) } }
                         dismiss()
                     }
-                    .disabled(working)
+                    .disabled(working || installerRunning)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
@@ -304,7 +300,8 @@ struct AddGameSheet: View {
                             }
                         }
                     }
-                    .disabled(working || (chosenExe == nil && selectedShortcutIDs.isEmpty))
+                    .disabled(working || installerRunning
+                              || (chosenExe == nil && selectedShortcutIDs.isEmpty))
                 }
             }
         }
@@ -314,6 +311,13 @@ struct AddGameSheet: View {
     /// Initial folder for the "choose game .exe" panel — this game's bottle drive, where its installer lands.
     private var bottleDriveC: URL {
         env.paths.manualBottle(draftID).appendingPathComponent("drive_c", isDirectory: true)
+    }
+
+    /// Scan the just-installed bottle for the shortcuts its installer wrote and pre-select them all, so the
+    /// user only has to press Add. Runs automatically the moment the installer closes; also the Rescan action.
+    private func scanForInstalledGames() async {
+        discovered = await env.gameLibrary.installedShortcuts(inBottle: draftID)
+        selectedShortcutIDs = Set(discovered.map(\.id))
     }
 }
 

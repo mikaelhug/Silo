@@ -429,7 +429,7 @@ struct LaunchPipelineTests {
         }
     }
 
-    @Test("runInstaller spawns the installer .exe in the bottle prefix")
+    @Test("runInstaller runs the installer BLOCKING (not detached) in the bottle prefix")
     func installerRun() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let fake = FakeProcessRunner()
@@ -441,9 +441,11 @@ struct LaunchPipelineTests {
 
         _ = try await orchestrator.runInstaller(
             exe: installer, backend: backend, prefix: prefix, logURL: tmp.url.appendingPathComponent("i.log"))
-        let spawn = try #require(fake.invocations.last { $0.detached })
-        #expect(spawn.arguments == [installer.path])
-        #expect(spawn.environment["WINEPREFIX"] == prefix.path)
+        // Blocking (`run`, not `spawnDetached`) so the caller learns when the install finished.
+        let run = try #require(fake.lastInvocation)
+        #expect(run.detached == false)
+        #expect(run.arguments == [installer.path])
+        #expect(run.environment["WINEPREFIX"] == prefix.path)
     }
 }
 

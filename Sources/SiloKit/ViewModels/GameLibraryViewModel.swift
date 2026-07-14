@@ -331,7 +331,8 @@ public final class GameLibraryViewModel {
         do {
             _ = try await orchestrator.runInstaller(
                 exe: installer, backend: backend, prefix: paths.manualBottle(id), logURL: paths.manualLog(id))
-            setStatus("Running installer — then choose the installed .exe.")
+            // `runInstaller` blocks until the installer window closes, so we're here once setup is done.
+            setStatus("Installer finished.")
         } catch { setStatus("Couldn't run the installer: \(Self.resolveMessage(error))") }
     }
 

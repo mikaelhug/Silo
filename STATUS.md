@@ -18,9 +18,14 @@
     shortcuts from ONE install share ONE prefix (N library entries, not N installs); `workingDirectory` (URL?)
     honored by `makePlan` (cwd override). Bottle deletion is now **ref-counted** (only when the last entry
     using it is removed). `addManualGame` gained `bottleID`/`workingDirectory`/`customArgs`.
-  - **Add sheet**: after the installer's wizard, a "Find installed games" scan lists the discovered shortcuts
-    as multi-select toggles (target+args shown); adding creates one `ManualGame` per pick, all sharing the
-    install bottle. **Installer-path only** — a directly-chosen ready-to-run `.exe` is unchanged (no scanning).
+  - **Add sheet**: the installer now runs **blocking** (`LaunchOrchestrator.runInstaller` → `runner.run`, not
+    `spawnDetached`; returns `ProcessResult` — an installer is transient setup, like the license-bearing
+    component installers). Its exit when the user closes the window is the deterministic "install done" signal:
+    Silo auto-scans + pre-selects the discovered shortcuts right then, so the **Add button lights up blue with
+    zero extra clicks** (no manual "Find" button, no window-focus/polling heuristics — a small "Rescan"
+    fallback covers the rare installer that exits before writing its shortcuts). Adding creates one
+    `ManualGame` per pick, all sharing the install bottle. **Installer-path only** — a directly-chosen
+    ready-to-run `.exe` is unchanged (no scanning).
   - Fixed a latent bug: the settings-sheet "Run Installer in this bottle" used `game.id` not `game.bottleID`.
   On-device-unverified: the SwiftUI picker end-to-end (parser + discovery are unit-tested against the real
   `.lnk`; the resolved launch = exactly what `run_browser.bat` runs).
