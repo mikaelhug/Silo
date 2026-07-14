@@ -22,7 +22,16 @@ public struct GameShortcut: Sendable {
         self.link = link
     }
 
-    public enum ShortcutError: Error, Sendable, Equatable { case writeFailed(String) }
+    /// The `CFBundleIdentifier` prefix every Silo shortcut carries — used to tell OUR shortcut `.app`s
+    /// (safe to replace) apart from an unrelated item that happens to share the file name.
+    static let bundleIDPrefix = "com.mikael.silo.shortcut."
+
+    public enum ShortcutError: Error, Sendable, Equatable {
+        case writeFailed(String)
+        /// The destination `<name>.app` is occupied by something that ISN'T a Silo shortcut — refuse rather
+        /// than delete a user's unrelated app/file/folder that happens to share the name.
+        case destinationOccupied(String)
+    }
 
     /// `Contents/Info.plist`. A per-game `CFBundleIdentifier` (from the deep link) keeps each shortcut a
     /// distinct LaunchServices identity; `LSUIElement` suppresses the Dock tile for the momentary stub.
@@ -34,7 +43,7 @@ public struct GameShortcut: Sendable {
         <dict>
             <key>CFBundleName</key><string>\(xmlEscaped(name))</string>
             <key>CFBundleDisplayName</key><string>\(xmlEscaped(name))</string>
-            <key>CFBundleIdentifier</key><string>com.mikael.silo.shortcut.\(bundleSafe(link.bundleIDComponent))</string>
+            <key>CFBundleIdentifier</key><string>\(Self.bundleIDPrefix)\(bundleSafe(link.bundleIDComponent))</string>
             <key>CFBundleExecutable</key><string>launch</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -64,6 +73,11 @@ public struct GameShortcut: Sendable {
     public func write(into directory: URL, fileManager: FileManager = .default) throws -> URL {
         let app = directory.appendingPathComponent("\(fileSafeName).app", isDirectory: true)
         let macOS = app.appendingPathComponent("Contents/MacOS", isDirectory: true)
+        // Replacing our OWN prior shortcut is fine (re-create is idempotent); deleting anything else — a
+        // user's unrelated app/file/folder that happens to share the name — is not. Refuse in that case.
+        if fileManager.fileExists(atPath: app.path), !Self.isSiloShortcut(at: app, fileManager: fileManager) {
+            throw ShortcutError.destinationOccupied(app.lastPathComponent)
+        }
         do {
             if fileManager.fileExists(atPath: app.path) { try fileManager.removeItem(at: app) }
             try fileManager.createDirectory(at: macOS, withIntermediateDirectories: true)
@@ -76,6 +90,18 @@ public struct GameShortcut: Sendable {
             throw ShortcutError.writeFailed((error as NSError).localizedDescription)
         }
         return app
+    }
+
+    /// Whether the item at `url` is one of Silo's own shortcut `.app`s — i.e. a bundle whose Info.plist
+    /// `CFBundleIdentifier` carries our prefix. A plain file (no `Contents/Info.plist`) or any third-party
+    /// bundle reads as `false`, so `write` never deletes it.
+    static func isSiloShortcut(at url: URL, fileManager: FileManager = .default) -> Bool {
+        let plistURL = url.appendingPathComponent("Contents/Info.plist")
+        guard let data = fileManager.contents(atPath: plistURL.path),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let id = (plist as? [String: Any])?["CFBundleIdentifier"] as? String
+        else { return false }
+        return id.hasPrefix(bundleIDPrefix)
     }
 
     // MARK: - Escaping

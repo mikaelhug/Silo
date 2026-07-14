@@ -494,6 +494,10 @@ public final class GameLibraryViewModel {
             let app = try await Task.detached { try GameShortcut(name: name, link: link).write(into: dir) }.value
             setStatus("Created a Desktop shortcut for \(name).")
             return app
+        } catch GameShortcut.ShortcutError.destinationOccupied(let filename) {
+            // Something the user owns already has that name — never silently delete it.
+            setStatus("Couldn't create the shortcut — “\(filename)” already exists there. Rename or remove it first.")
+            return nil
         } catch {
             setStatus("Couldn't create the shortcut: \((error as NSError).localizedDescription)")
             return nil

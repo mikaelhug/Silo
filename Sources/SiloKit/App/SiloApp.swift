@@ -12,7 +12,11 @@ public struct SiloApp: App {
     }
 
     public var body: some Scene {
-        WindowGroup {
+        // The main window is a `Window`, NOT a `WindowGroup`. A WindowGroup can hold many windows, so macOS
+        // opens a fresh one whenever the app is activated by an external event — which made a silo:// Desktop
+        // shortcut spawn a SECOND Silo window (regardless of how the URL itself is handled). A `Window` is a
+        // single, unique window that can't be duplicated, so the shortcut's URL just activates this one.
+        Window("Silo", id: "main") {
             RootView()
                 .environment(environment)
                 .frame(minWidth: 920, minHeight: 600)
@@ -23,7 +27,8 @@ public struct SiloApp: App {
                 }
                 .onOpenURL { url in
                     // A Desktop game shortcut opened a silo://play/… deep link. Ignore anything that isn't a
-                    // well-formed Silo link; route the rest through the environment (which waits for bootstrap).
+                    // well-formed Silo link; route the rest through the environment (which queues it until the
+                    // library has loaded). No new window opens now that this is a single `Window` scene.
                     guard let link = SiloDeepLink(url: url) else { return }
                     Task { await environment.handleDeepLink(link) }
                 }

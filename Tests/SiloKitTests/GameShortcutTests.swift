@@ -78,12 +78,43 @@ struct GameShortcutTests {
         #expect(plist.contains("<key>CFBundleName</key><string>Half-Life: Alyx / VR</string>"))
     }
 
-    @Test("write overwrites an existing shortcut of the same name")
-    func writeOverwrites() throws {
+    @Test("write replaces an existing SILO shortcut of the same name (idempotent re-create)")
+    func writeReplacesOwnShortcut() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let shortcut = GameShortcut(name: "Dup", link: .playSteam(appID: 1))
         _ = try shortcut.write(into: tmp.url)
-        let app = try shortcut.write(into: tmp.url)   // second write must not throw
+        let app = try shortcut.write(into: tmp.url)   // ours → safe to replace, must not throw
         #expect(FileManager.default.fileExists(atPath: app.appendingPathComponent("Contents/Info.plist").path))
+    }
+
+    @Test("write REFUSES to delete a same-named item that isn't a Silo shortcut (no data loss)")
+    func writeRefusesForeignItem() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // A user's unrelated app bundle on the Desktop that happens to share the name (any non-Silo bundle id).
+        let foreign = tmp.url.appendingPathComponent("Steam.app/Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: foreign, withIntermediateDirectories: true)
+        let foreignPlist = "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict>"
+            + "<key>CFBundleIdentifier</key><string>com.valve.steam</string></dict></plist>"
+        try Data(foreignPlist.utf8).write(to: foreign.appendingPathComponent("Info.plist"))
+        let sentinel = foreign.appendingPathComponent("MacOS/steam_real")
+        try FileManager.default.createDirectory(at: sentinel.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("real".utf8).write(to: sentinel)
+
+        #expect(throws: GameShortcut.ShortcutError.destinationOccupied("Steam.app")) {
+            try GameShortcut(name: "Steam", link: .playSteam(appID: 1)).write(into: tmp.url)
+        }
+        // The user's bundle is untouched.
+        #expect(FileManager.default.fileExists(atPath: sentinel.path))
+    }
+
+    @Test("write REFUSES a same-named plain file (not a bundle) rather than deleting it")
+    func writeRefusesPlainFile() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let plain = tmp.url.appendingPathComponent("Notes.app")   // a plain file that just ends in .app
+        try Data("important".utf8).write(to: plain)
+        #expect(throws: GameShortcut.ShortcutError.destinationOccupied("Notes.app")) {
+            try GameShortcut(name: "Notes", link: .playManual(id: UUID())).write(into: tmp.url)
+        }
+        #expect(try String(contentsOf: plain, encoding: .utf8) == "important")
     }
 }
