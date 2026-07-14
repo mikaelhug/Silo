@@ -50,6 +50,7 @@ public struct LaunchOrchestrator: Sendable {
         graphics: GraphicsBackend = .gptk,
         wine: URL? = nil,
         gameExe: URL,
+        workingDirectory: URL? = nil,
         prefix: URL,
         logURL: URL
     ) throws -> LaunchPlan {
@@ -94,7 +95,9 @@ public struct LaunchOrchestrator: Sendable {
             executable: wine,
             arguments: Self.invocation(for: gameExe) + config.customArgs,
             environment: environment,
-            currentDirectory: gameExe.deletingLastPathComponent(),
+            // A game may resolve its data relative to a "start in" dir that isn't the exe's own folder
+            // (e.g. an installer shortcut's WORKING_DIR). Honor it when set; otherwise default to the exe dir.
+            currentDirectory: workingDirectory ?? gameExe.deletingLastPathComponent(),
             logURL: logURL
         )
     }
@@ -158,7 +161,7 @@ public struct LaunchOrchestrator: Sendable {
         try linkGraphics(backendConfig: backend, graphics: graphics, wine: launchWine, prefix: prefix)
         let plan = try Self.makePlan(
             config: game.gameConfig, backend: backend, graphics: graphics, wine: launchWine,
-            gameExe: game.executablePath, prefix: prefix, logURL: logURL)
+            gameExe: game.executablePath, workingDirectory: game.workingDirectory, prefix: prefix, logURL: logURL)
         return try await spawn(plan)
     }
 

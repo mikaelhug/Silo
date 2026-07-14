@@ -52,7 +52,9 @@ public struct BottleResolver: Sendable {
     /// (from the game's `graphics` choice via `BackendChooser` — no default, mirroring `steam(backend:)`, so a
     /// manual launch can't silently land on GPTK either).
     public func manual(_ game: ManualGame, backend: GraphicsBackend, config: BackendConfig) throws -> LaunchContext {
-        try context(backend: backend, prefix: paths.manualBottle(game.id), config: config)
+        // `bottleID` (not `id`): games installed together share one prefix, so several library entries can
+        // resolve to the same bottle.
+        try context(backend: backend, prefix: paths.manualBottle(game.bottleID), config: config)
     }
 
     /// The prefix + runtime for a prefix-wide maintenance tool (winecfg / regedit / retina). Distinct from a

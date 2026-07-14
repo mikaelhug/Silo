@@ -58,6 +58,19 @@ struct MakePlanTests {
         #expect(plan.currentDirectory.path == "/Users/me/Downloads")
     }
 
+    @Test("An explicit working directory overrides the exe's own folder as cwd")
+    func honorsWorkingDirectory() throws {
+        let workdir = URL(fileURLWithPath: "/lib/steamapps/common/Game")   // e.g. an installer shortcut's "start in"
+        let plan = try LaunchOrchestrator.makePlan(
+            config: GameConfig(appID: 220), backend: backend(), gameExe: gameExe,
+            workingDirectory: workdir, prefix: prefix, logURL: log)
+        #expect(plan.currentDirectory.path == "/lib/steamapps/common/Game")
+        // Absent, cwd still falls back to the exe's own folder.
+        let fallback = try LaunchOrchestrator.makePlan(
+            config: GameConfig(appID: 220), backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+        #expect(fallback.currentDirectory.path == "/lib/steamapps/common/Half-Life 2")
+    }
+
     @Test("A .exe target runs directly (msi routing is inert for normal executables, any case)")
     func exeRunsDirectly() throws {
         let upper = URL(fileURLWithPath: "/games/Setup.EXE")

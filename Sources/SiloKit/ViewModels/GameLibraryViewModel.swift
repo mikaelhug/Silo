@@ -335,17 +335,23 @@ public final class GameLibraryViewModel {
         } catch { setStatus("Couldn't run the installer: \(Self.resolveMessage(error))") }
     }
 
-    /// Add a non-Steam game pointing at an absolute `.exe`, provisioning its private bottle. Pass the same
-    /// `id` used for any pre-Add installer run so the game adopts that already-booted bottle. Name defaults
-    /// to the exe's filename.
+    /// Add a non-Steam game pointing at an absolute `.exe`, provisioning its bottle. `bottleID` defaults to
+    /// the game's own `id` (a portable game owns its bottle 1:1); pass a shared `bottleID` when several games
+    /// come from ONE installer so they co-reside in that install's prefix. Pass the pre-Add installer's draft
+    /// `id` as `bottleID` so the game adopts the already-booted bottle. `workingDirectory`/`customArgs` come
+    /// from an installer shortcut when inferred. Name defaults to the exe's filename.
     @discardableResult
     public func addManualGame(
-        id: UUID = UUID(), name: String, executable: URL, graphics: GraphicsChoice = .auto
+        id: UUID = UUID(), bottleID: UUID? = nil, name: String, executable: URL,
+        workingDirectory: URL? = nil, graphics: GraphicsChoice = .auto, customArgs: [String] = []
     ) async -> ManualGame? {
-        guard await ensureManualBottle(id) else { return nil }
+        let bottle = bottleID ?? id
+        guard await ensureManualBottle(bottle) else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmed.isEmpty ? executable.deletingPathExtension().lastPathComponent : trimmed
-        let game = ManualGame(id: id, name: finalName, executablePath: executable, graphics: graphics)
+        let game = ManualGame(
+            id: id, bottleID: bottle, name: finalName, executablePath: executable,
+            workingDirectory: workingDirectory, graphics: graphics, customArgs: customArgs)
         do {
             _ = try await configStore.saveManualGame(game)
             manualGames = sortedManual(manualGames + [game])
@@ -370,17 +376,23 @@ public final class GameLibraryViewModel {
     /// files on disk (outside the bottle) are left untouched. Refuses while the game's bottle is live (a live
     /// wineserver ⇒ the game is running; deleting the prefix under it would corrupt/orphan it).
     public func removeManual(_ game: ManualGame) async {
-        guard !WineServerProbe.isLive(prefix: paths.manualBottle(game.id)) else {
+        guard !WineServerProbe.isLive(prefix: paths.manualBottle(game.bottleID)) else {
             setStatus("\(game.name) is running — quit it first.")
             return
         }
         _ = try? await configStore.removeManualGame(id: game.id)
         manualGames.removeAll { $0.id == game.id }
-        let deleted = await deleteBottle(game.id)
         if games.isEmpty && manualGames.isEmpty { loadState = .empty }
-        setStatus(deleted ? "Removed \(game.name)."
-            : "Removed \(game.name), but couldn't delete its bottle — remove it in Finder: "
-              + paths.manualBottle(game.id).path)
+        // Ref-counted: entries installed together share a bottle — only delete the prefix when this was the
+        // last entry using it. A portable game's original files (outside the bottle) are never touched.
+        if manualGames.contains(where: { $0.bottleID == game.bottleID }) {
+            setStatus("Removed \(game.name).")
+        } else if await deleteBottle(game.bottleID) {
+            setStatus("Removed \(game.name).")
+        } else {
+            setStatus("Removed \(game.name), but couldn't delete its bottle — remove it in Finder: "
+                      + paths.manualBottle(game.bottleID).path)
+        }
     }
 
     /// Launch a manual game in its OWN bottle under its resolved backend (Automatic / GPTK / DXMT; no Steam
@@ -404,7 +416,7 @@ public final class GameLibraryViewModel {
             setStatus(refusal)
             return
         }
-        guard await ensureManualBottle(game.id) else { return }
+        guard await ensureManualBottle(game.bottleID) else { return }
         let context: LaunchContext
         do {
             context = try await Task.detached { [paths] in

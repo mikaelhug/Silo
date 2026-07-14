@@ -38,7 +38,7 @@ struct ManualGameSettingsSheet: View {
                         }
                     }
                     Button("Show bottle in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([env.paths.manualBottle(game.id)])
+                        NSWorkspace.shared.activateFileViewerSelecting([env.paths.manualBottle(game.bottleID)])
                     }
                 } header: {
                     Text("Bottle")

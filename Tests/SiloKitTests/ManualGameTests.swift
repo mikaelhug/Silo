@@ -39,6 +39,31 @@ struct ManualGameTests {
         }
     }
 
+    @Test("A config without a bottleID adopts its own id as the bottle (pre-shared-bottle migration)")
+    func migratesMissingBottleID() throws {
+        let gid = UUID()
+        let legacy = """
+        {"id":"\(gid.uuidString)","name":"Solo","executablePath":"file:///g/solo.exe","envFlags":{},
+         "graphics":"auto","customArgs":[]}
+        """
+        let game = try JSONDecoder().decode(ManualGame.self, from: Data(legacy.utf8))
+        #expect(game.bottleID == gid)                // owns its own bottle, exactly as before
+        #expect(game.workingDirectory == nil)
+    }
+
+    @Test("A shared bottleID and working directory round-trip through encode/decode")
+    func roundTripsBottleAndWorkingDir() throws {
+        let bottle = UUID()
+        let game = ManualGame(
+            bottleID: bottle, name: "Sibling", executablePath: URL(fileURLWithPath: "/g/bin/app.exe"),
+            workingDirectory: URL(fileURLWithPath: "/g/bin"), customArgs: ["-x"])
+        #expect(game.bottleID == bottle)
+        #expect(game.id != bottle)                   // distinct library identity, shared bottle
+        let decoded = try JSONDecoder().decode(ManualGame.self, from: JSONEncoder().encode(game))
+        #expect(decoded == game)
+        #expect(decoded.workingDirectory?.path == "/g/bin")
+    }
+
     @Test("An unknown/newer graphics value degrades to Automatic instead of throwing (forward-compat)")
     func tolerantDecodeOfUnknownGraphics() throws {
         // A config written by a FUTURE Silo (e.g. a `d9mt` choice) opened by this build must not throw — a

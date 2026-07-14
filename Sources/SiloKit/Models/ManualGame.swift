@@ -5,10 +5,19 @@ import Foundation
 /// bottle's `appmanifest_*.acf` — a `ManualGame` is user-authored and persisted in `config.json`.
 public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
     public let id: UUID
+    /// The bottle this game runs in (`ManualBottles/<bottleID>`). Defaults to `id`, so a portable-`.exe`
+    /// game — and every pre-existing config — owns its bottle 1:1. When several games come from ONE
+    /// installer, they carry the SAME `bottleID` so they share that install's prefix: N Start-Menu shortcuts
+    /// become N library entries in one bottle, not N re-installs. Bottle deletion is therefore ref-counted.
+    public var bottleID: UUID
     public var name: String
     /// Absolute host path to the game executable — typically inside the bottle's `drive_c` after running
     /// the game's installer, or a portable `.exe` anywhere readable. Wine launches host paths directly.
     public var executablePath: URL
+    /// The "start in" directory the target expects, when it differs from the exe's own folder (e.g. an
+    /// installer shortcut whose target resolves data relative to a parent dir). `nil` → default to the exe's
+    /// folder. Sourced from a shortcut's `WORKING_DIR` at add time.
+    public var workingDirectory: URL?
     /// Per-game performance + environment tuning (same knobs as a Steam game). Defaults are the
     /// Apple-Silicon GPTK baseline.
     public var envFlags: EnvFlags
@@ -23,16 +32,20 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
 
     public init(
         id: UUID = UUID(),
+        bottleID: UUID? = nil,
         name: String,
         executablePath: URL,
+        workingDirectory: URL? = nil,
         envFlags: EnvFlags = EnvFlags(),
         graphics: GraphicsChoice = .auto,
         customArgs: [String] = [],
         lastPlayed: Date? = nil
     ) {
         self.id = id
+        self.bottleID = bottleID ?? id
         self.name = name
         self.executablePath = executablePath
+        self.workingDirectory = workingDirectory
         self.envFlags = envFlags
         self.graphics = graphics
         self.customArgs = customArgs
@@ -57,14 +70,18 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         // `backend` is read-only legacy — decoded for migration, never encoded (new configs write `graphics`).
-        case id, name, executablePath, envFlags, graphics, backend, customArgs, lastPlayed
+        case id, bottleID, name, executablePath, workingDirectory, envFlags, graphics, backend, customArgs,
+             lastPlayed
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
+        // A config predating shared bottles has no `bottleID` → the game owns its own bottle (bottleID == id).
+        bottleID = try c.decodeIfPresent(UUID.self, forKey: .bottleID) ?? id
         name = try c.decode(String.self, forKey: .name)
         executablePath = try c.decode(URL.self, forKey: .executablePath)
+        workingDirectory = try c.decodeIfPresent(URL.self, forKey: .workingDirectory)
         envFlags = try c.decodeIfPresent(EnvFlags.self, forKey: .envFlags) ?? EnvFlags()
         // `graphics` (a GraphicsChoice, incl. Automatic) supersedes the pre-Automatic `backend` (a concrete
         // GraphicsBackend). Decode both as raw strings so an unknown/newer value (e.g. a config written by a
@@ -86,8 +103,10 @@ public struct ManualGame: Codable, Sendable, Hashable, Identifiable {
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
+        try c.encode(bottleID, forKey: .bottleID)
         try c.encode(name, forKey: .name)
         try c.encode(executablePath, forKey: .executablePath)
+        try c.encodeIfPresent(workingDirectory, forKey: .workingDirectory)
         try c.encode(envFlags, forKey: .envFlags)
         try c.encode(graphics, forKey: .graphics)
         try c.encode(customArgs, forKey: .customArgs)
