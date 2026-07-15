@@ -11,12 +11,12 @@
 ![Swift](https://img.shields.io/badge/Swift%206-strict%20concurrency-orange)
 [![License](https://img.shields.io/badge/license-LGPL--2.1+-blue)](LICENSE)
 
-[Discord](https://discord.gg/kNysBA9VU5)
+[Discord](https://discord.gg/kNysBA9VU5) ·
 [Website](https://mikaelhug.github.io/Silo/) ·
 [Releases](https://github.com/mikaelhug/Silo/releases) ·
 [Architecture](CLAUDE.md) ·
 [Wine build](WINE-BUILD.md) ·
-[Status](STATUS.md) ·
+[Status](STATUS.md)
 
 <img src="docs/images/dashboard.png" width="820" alt="Silo library — a grid of installed Steam games (Bloons TD 6, Bloons TD Battles 2, It Takes Two, Overcooked 2, Split Fiction, Victoria 3), each with cover art, install size, a per-game graphics-backend badge (Automatic, GPTK, or DXMT), and a Play button" />
 
