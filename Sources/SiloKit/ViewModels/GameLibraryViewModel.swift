@@ -625,6 +625,9 @@ public final class GameLibraryViewModel {
         case .dxmt:
             return "\(name): DXMT couldn't drive this game's graphics. "
                 + "Check the DXMT runtime in Settings → DXMT."
+        case .dxvk:
+            return "\(name): DXVK / Vulkan couldn't drive this game's graphics. "
+                + "Check the DXVK runtime in Settings → DXVK."
         }
     }
 

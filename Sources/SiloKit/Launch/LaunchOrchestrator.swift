@@ -87,6 +87,14 @@ public struct LaunchOrchestrator: Sendable {
                 environment["DYLD_FALLBACK_LIBRARY_PATH"] = "\(external.path):\(wine.siloDyldFallback)"
                 environment["DYLD_FALLBACK_FRAMEWORK_PATH"] = external.path
             }
+            // DXVK reaches Metal via wine's winevulkan → MoltenVK. Pin the winemac Vulkan backend (win32u
+            // reads CX_LIBVULKAN) to the runtime's bundled libMoltenVK.dylib by absolute path, so Vulkan
+            // device creation is deterministic rather than relying on a dlopen-by-name search. The clone
+            // inherits this dylib from the base runtime, so it's always present next to `wine`.
+            if graphics == .dxvk {
+                environment["CX_LIBVULKAN"] =
+                    wine.siloBundledDylibDir.appendingPathComponent("libMoltenVK.dylib").path
+            }
             environment["WINEDLLOVERRIDES"] = mergeOverride(
                 environment["WINEDLLOVERRIDES"], graphics.dllOverrides)
         }
@@ -268,6 +276,10 @@ public struct LaunchOrchestrator: Sendable {
         case .dxmt:
             try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: libDir)
             try linker.installDXMTPrefixLoaders(prefix: prefix, dxmtLibDir: libDir)
+        case .dxvk:
+            // DXVK needs no prefix loader: its d3d9/10core/11 are standard wine dll names (wineboot fakedlls
+            // them), so the `=b` override resolves the overlaid builtins directly.
+            try linker.overlayDXVK(wineBinary: wine, dxvkLibDir: libDir)
         }
     }
 

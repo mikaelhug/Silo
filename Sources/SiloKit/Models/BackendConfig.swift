@@ -16,6 +16,12 @@ public struct BackendConfig: Codable, Sendable, Hashable {
     public var dxmtLibDirPath: URL?
     /// Name of the default DXMT install (managed in the Runtimes settings).
     public var dxmtRuntimeName: String?
+    /// Directory containing DXVK's PE modules (`d3d9`/`d3d10core`/`d3d11`), overlaid into the wine runtime's
+    /// `lib/wine` tree by `GraphicsLinker.overlayDXVK`. The DXVK counterpart of `dxmtLibDirPath`; points at
+    /// the `x86_64-windows` tree (its `i386-windows` sibling drives 32-bit games — see `dxvkSupports32Bit`).
+    public var dxvkLibDirPath: URL?
+    /// Name of the default DXVK install (managed in the Runtimes settings).
+    public var dxvkRuntimeName: String?
     /// macOS Retina/HiDPI mode ("High Resolution Mode") for the shared Steam bottle. Mirrors what Silo last
     /// wrote to the prefix; off is Wine's default. Drives a coupled PAIR of registry keys —
     /// `HKCU\Software\Wine\Mac Driver\RetinaMode` (crisp native rendering) plus its DPI companion
@@ -29,6 +35,8 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         gptkRuntimeName: String? = nil,
         dxmtLibDirPath: URL? = nil,
         dxmtRuntimeName: String? = nil,
+        dxvkLibDirPath: URL? = nil,
+        dxvkRuntimeName: String? = nil,
         retinaMode: Bool = false
     ) {
         self.wineBinaryPath = wineBinaryPath
@@ -37,12 +45,14 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         self.gptkRuntimeName = gptkRuntimeName
         self.dxmtLibDirPath = dxmtLibDirPath
         self.dxmtRuntimeName = dxmtRuntimeName
+        self.dxvkLibDirPath = dxvkLibDirPath
+        self.dxvkRuntimeName = dxvkRuntimeName
         self.retinaMode = retinaMode
     }
 
     private enum CodingKeys: String, CodingKey {
         case wineBinaryPath, wineRuntimeName, gptkLibDirPath, gptkRuntimeName
-        case dxmtLibDirPath, dxmtRuntimeName, retinaMode
+        case dxmtLibDirPath, dxmtRuntimeName, dxvkLibDirPath, dxvkRuntimeName, retinaMode
     }
 
     /// Tolerant decode (mirrors `AppState`): every field defaults if absent, so adding one never makes an
@@ -55,6 +65,8 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         gptkRuntimeName = try c.decodeIfPresent(String.self, forKey: .gptkRuntimeName)
         dxmtLibDirPath = try c.decodeIfPresent(URL.self, forKey: .dxmtLibDirPath)
         dxmtRuntimeName = try c.decodeIfPresent(String.self, forKey: .dxmtRuntimeName)
+        dxvkLibDirPath = try c.decodeIfPresent(URL.self, forKey: .dxvkLibDirPath)
+        dxvkRuntimeName = try c.decodeIfPresent(String.self, forKey: .dxvkRuntimeName)
         retinaMode = try c.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? false
     }
 
@@ -67,6 +79,7 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         switch backend {
         case .gptk: gptkLibDirPath
         case .dxmt: dxmtLibDirPath
+        case .dxvk: dxvkLibDirPath
         }
     }
 
@@ -77,6 +90,17 @@ public struct BackendConfig: Codable, Sendable, Hashable {
         guard let lib = dxmtLibDirPath else { return false }
         let i386 = lib.deletingLastPathComponent()
             .appendingPathComponent("i386-windows/winemetal.dll")
+        return FileManager.default.fileExists(atPath: i386.path)
+    }
+
+    /// Whether the installed DXVK runtime ships 32-bit (i386) modules — DXVK is the ONLY backend that can run
+    /// a 32-bit **DirectX 9** game (GPTK is 64-bit-only; DXMT has no d3d9), so this gates that path. Mirrors
+    /// `dxmtSupports32Bit`, checking the `i386-windows` sibling for `d3d11.dll` (the DXVK witness module).
+    /// False when DXVK is unset.
+    public var dxvkSupports32Bit: Bool {
+        guard let lib = dxvkLibDirPath else { return false }
+        let i386 = lib.deletingLastPathComponent()
+            .appendingPathComponent("i386-windows/d3d11.dll")
         return FileManager.default.fileExists(atPath: i386.path)
     }
 }

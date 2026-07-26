@@ -334,7 +334,90 @@ struct GraphicsLinkerTests {
             prefix.appendingPathComponent("drive_c/windows/syswow64/winemetal.dll").path))
     }
 
-    @Test("isOverlayModule: only .dll/.so with a backend's module prefixes; the two filters diverge right")
+    // MARK: - DXVK overlay
+
+    /// Build a minimal DXVK runtime tree and return its `lib/wine/x86_64-windows` dir (the `dxvkLibDir`).
+    /// DXVK's real layout: PE `d3d9`/`d3d10core`/`d3d11` dlls and NOTHING else — no `dxgi` (wine's builtin is
+    /// used), no unix `.so` (DXVK reaches Metal via wine's winevulkan), no `lib/external`.
+    @discardableResult
+    private func makeDXVK(_ tmp: TempDir) throws -> URL {
+        let win = try tmp.makeDir("dxvk/lib/wine/x86_64-windows")
+        for module in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {
+            try tmp.write("dxvk/lib/wine/x86_64-windows/\(module)", "PE:\(module)")
+        }
+        return win
+    }
+
+    @Test("overlayDXVK copies DXVK's d3d9/10core/11 PE modules into the wine runtime — and only those")
+    func overlayDXVKCopiesModules() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxvkLibDir = try makeDXVK(tmp)
+        let wine = try makeWine(tmp)
+        let wineLib = wine.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("lib")
+
+        try linker.overlayDXVK(wineBinary: wine, dxvkLibDir: dxvkLibDir)
+
+        for dll in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {
+            let dest = wineLib.appendingPathComponent("wine/x86_64-windows/\(dll)")
+            #expect(FileManager.default.contentsEqual(
+                atPath: dest.path, andPath: dxvkLibDir.appendingPathComponent(dll).path))
+        }
+        // DXVK is PE-only: no unix `.so`, no lib/external, and it never overlays dxgi (wine's builtin stands).
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/x86_64-unix/d3d11.so").path))
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("external").path))
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/x86_64-windows/dxgi.dll").path))
+    }
+
+    @Test("overlayDXVK ALSO overlays the i386 tree when the release ships 32-bit libs (so 32-bit DX9 games work)")
+    func overlayDXVKBothArches() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxvkLibDir = try makeDXVK(tmp)
+        try tmp.makeDir("dxvk/lib/wine/i386-windows")
+        for module in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {
+            try tmp.write("dxvk/lib/wine/i386-windows/\(module)", "PE32:\(module)")
+        }
+        let wine = try makeWine(tmp)
+        let wineLib = wine.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("lib")
+
+        try linker.overlayDXVK(wineBinary: wine, dxvkLibDir: dxvkLibDir)
+
+        #expect(try String(contentsOf:
+            wineLib.appendingPathComponent("wine/x86_64-windows/d3d9.dll"), encoding: .utf8) == "PE:d3d9.dll")
+        for dll in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {   // the 32-bit tree — the DX9-on-32-bit path
+            #expect(try String(contentsOf:
+                wineLib.appendingPathComponent("wine/i386-windows/\(dll)"), encoding: .utf8) == "PE32:\(dll)")
+        }
+        #expect(!FileManager.default.fileExists(atPath: wineLib.appendingPathComponent("wine/i386-unix").path))
+    }
+
+    @Test("overlayDXVK is idempotent and re-applies on a DXVK update")
+    func overlayDXVKIdempotentAndReapplies() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let dxvkLibDir = try makeDXVK(tmp)
+        let wine = try makeWine(tmp)
+        let d3d11 = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-windows/d3d11.dll")
+
+        try linker.overlayDXVK(wineBinary: wine, dxvkLibDir: dxvkLibDir)
+        try linker.overlayDXVK(wineBinary: wine, dxvkLibDir: dxvkLibDir)   // no throw, still correct
+        #expect(try String(contentsOf: d3d11, encoding: .utf8) == "PE:d3d11.dll")
+
+        try tmp.write("dxvk/lib/wine/x86_64-windows/d3d11.dll", "PE:d3d11.dll v2")  // DXVK update
+        try linker.overlayDXVK(wineBinary: wine, dxvkLibDir: dxvkLibDir)
+        #expect(try String(contentsOf: d3d11, encoding: .utf8) == "PE:d3d11.dll v2")
+    }
+
+    @Test("overlayDXVK throws sourceMissing when DXVK's module dir does not exist")
+    func overlayDXVKSourceMissing() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let wine = try makeWine(tmp)
+        let missing = tmp.url.appendingPathComponent("nope/lib/wine/x86_64-windows")
+        #expect(throws: GraphicsLinker.LinkError.sourceMissing(missing)) {
+            try linker.overlayDXVK(wineBinary: wine, dxvkLibDir: missing)
+        }
+    }
+
+    @Test("isOverlayModule: only .dll/.so with a backend's module prefixes; the three filters diverge right")
     func overlayModulePredicate() {
         #expect(GraphicsLinker.isOverlayModule("d3d11.dll", prefixes: ["d3d"]))
         #expect(GraphicsLinker.isOverlayModule("D3D11.DLL", prefixes: ["d3d"]))       // case-insensitive
@@ -343,6 +426,11 @@ struct GraphicsLinkerTests {
         // The backend filters parameterize the shared predicate — their DIFFERENCES must survive:
         #expect(GraphicsLinker.isGPTKModule("nvngx.dll") && !GraphicsLinker.isDXMTModule("nvngx.dll"))
         #expect(GraphicsLinker.isDXMTModule("winemetal.so") && !GraphicsLinker.isGPTKModule("winemetal.so"))
+        // DXVK selects d3d9 (its DirectX 9 translator), but must NOT grab dxgi — wine's builtin dxgi stands —
+        // where DXMT's broader filter DOES match dxgi; nor d3d12 (that stays GPTK).
+        #expect(GraphicsLinker.isDXVKModule("d3d9.dll"))
+        #expect(!GraphicsLinker.isDXVKModule("dxgi.dll") && GraphicsLinker.isDXMTModule("dxgi.dll"))
+        #expect(!GraphicsLinker.isDXVKModule("d3d12.dll"))
     }
 
     @Test("witnessMatches: skip only when the witness is byte-identical in the runtime")

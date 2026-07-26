@@ -12,6 +12,11 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
     case gptk
     /// 3Shain's DXMT — D3D10/11 → Metal directly (no Vulkan). The fallback for titles D3DMetal can't run.
     case dxmt
+    /// DXVK — D3D9/10/11 → Vulkan, run on the runtime's bundled MoltenVK (Vulkan → Metal). The only backend
+    /// that translates **DirectX 9** (GPTK and DXMT are D3D10/11+ only), and a mature compatibility net for
+    /// the D3D10/11 titles the two Metal backends can't drive. Rides wine's own `winevulkan` — its d3d
+    /// modules are PE-only (no `.so`), and it reuses the base runtime's `libMoltenVK.dylib` via `CX_LIBVULKAN`.
+    case dxvk
 
     public var id: String { rawValue }
 
@@ -20,6 +25,7 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
         switch self {
         case .gptk: "GPTK / D3DMetal"
         case .dxmt: "DXMT"
+        case .dxvk: "DXVK / Vulkan"
         }
     }
 
@@ -28,6 +34,7 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
         switch self {
         case .gptk: "GPTK"
         case .dxmt: "DXMT"
+        case .dxvk: "DXVK"
         }
     }
 
@@ -36,6 +43,7 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
         switch self {
         case .gptk: "Modern DirectX 11 / 12 games"
         case .dxmt: "Older or problem DirectX 10 / 11 games"
+        case .dxvk: "DirectX 9 games, and titles the Metal backends can't run"
         }
     }
 
@@ -45,20 +53,27 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
     /// override deterministically resolves to the intended layer.
     /// - GPTK: the full D3DMetal set incl. d3d12 (GPTK covers DX12). `d3d9`/`d3dcompiler_*` left native.
     /// - DXMT: `d3d10core`/`d3d11`/`dxgi` + `winemetal` (its Metal bridge). D3D10/11 only — no d3d12/d3d9.
+    /// - DXVK: `d3d9`/`d3d10core`/`d3d11` (its Vulkan translation). **No `dxgi`** — DXVK pairs with wine's own
+    ///   builtin dxgi (which is already builtin by default), exactly as CrossOver's DXVK does; **no
+    ///   `winemetal`** — DXVK reaches Metal through `winevulkan` → MoltenVK, not a Metal bridge dll.
     public var dllOverrides: String {
         switch self {
         case .gptk: "d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b"
         case .dxmt: "d3d10core,d3d11,dxgi,winemetal=b"
+        case .dxvk: "d3d9,d3d10core,d3d11=b"
         }
     }
 
     /// Whether the backend ships a framework/dylib in the runtime's `lib/external` that dyld must locate at
     /// launch (so `makePlan` prepends it to `DYLD_FALLBACK_*`). GPTK's `D3DMetal.framework` + `libd3dshared`
-    /// live there; DXMT's `winemetal.so` links the system `Metal.framework`, so it needs nothing extra.
+    /// live there; DXMT's `winemetal.so` links the system `Metal.framework`, so it needs nothing extra; DXVK
+    /// reaches Metal via the base runtime's already-bundled `libMoltenVK.dylib` (pinned by `CX_LIBVULKAN`,
+    /// see `makePlan`), which is already on the launch DYLD path — so it needs nothing extra either.
     public var overlaysExternalFramework: Bool {
         switch self {
         case .gptk: true
         case .dxmt: false
+        case .dxvk: false
         }
     }
 }
@@ -72,6 +87,7 @@ public enum GraphicsChoice: String, Codable, Sendable, CaseIterable, Identifiabl
     case auto
     case gptk
     case dxmt
+    case dxvk
 
     public var id: String { rawValue }
 
@@ -81,6 +97,7 @@ public enum GraphicsChoice: String, Codable, Sendable, CaseIterable, Identifiabl
         case .auto: nil
         case .gptk: .gptk
         case .dxmt: .dxmt
+        case .dxvk: .dxvk
         }
     }
 
@@ -90,6 +107,7 @@ public enum GraphicsChoice: String, Codable, Sendable, CaseIterable, Identifiabl
         case .auto: "Automatic"
         case .gptk: GraphicsBackend.gptk.displayName
         case .dxmt: GraphicsBackend.dxmt.displayName
+        case .dxvk: GraphicsBackend.dxvk.displayName
         }
     }
 
@@ -99,6 +117,7 @@ public enum GraphicsChoice: String, Codable, Sendable, CaseIterable, Identifiabl
         case .auto: "Auto"
         case .gptk: GraphicsBackend.gptk.badge
         case .dxmt: GraphicsBackend.dxmt.badge
+        case .dxvk: GraphicsBackend.dxvk.badge
         }
     }
 
@@ -108,6 +127,7 @@ public enum GraphicsChoice: String, Codable, Sendable, CaseIterable, Identifiabl
         case .auto: "Recommended — Silo picks the backend per game"
         case .gptk: GraphicsBackend.gptk.recommendedFor
         case .dxmt: GraphicsBackend.dxmt.recommendedFor
+        case .dxvk: GraphicsBackend.dxvk.recommendedFor
         }
     }
 }

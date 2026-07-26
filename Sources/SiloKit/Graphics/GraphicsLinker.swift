@@ -185,6 +185,60 @@ public struct GraphicsLinker: Sendable {
         }
     }
 
+    // MARK: - DXVK overlay
+
+    /// The modules DXVK ships in its `lib/wine` tree: its Direct3D 9/10/11 translation (`d3d9`, `d3d10core`,
+    /// `d3d11`). **No `dxgi`** — DXVK pairs with wine's own builtin dxgi (so we don't clobber it), and **no
+    /// `winemetal`** — DXVK reaches Metal through wine's `winevulkan` → MoltenVK, not a Metal bridge. The
+    /// prefixes exclude `d3d12` (DXVK has none — DX12 stays GPTK) and `dxgi`/`d3d8` even if a build ships them.
+    static func isDXVKModule(_ name: String) -> Bool {
+        isOverlayModule(name, prefixes: ["d3d9", "d3d10", "d3d11"])
+    }
+
+    /// Overlay DXVK's Direct3D modules into the **wine runtime** (not a game prefix) so wine loads DXVK's
+    /// Vulkan-backed Direct3D directly, exactly as `overlayDXMT` does for its Metal path. DXVK is the
+    /// simplest overlay of the three: its d3d modules are **PE-only** — they call into wine's own
+    /// `winevulkan` (already in the runtime) which reaches the runtime's bundled `libMoltenVK.dylib`, so
+    /// there is **no unix `.so`** to pair (unlike DXMT's `winemetal.so`), **nothing in `lib/external`**
+    /// (unlike GPTK's `D3DMetal.framework`), and **no prefix loader** (unlike DXMT's `winemetal.dll` seed —
+    /// `d3d9`/`d3d10core`/`d3d11` are standard wine names wineboot fakedlls, so `=b` resolves the overlaid
+    /// builtins without help). The `WINEDLLOVERRIDES` set (`GraphicsBackend.dxvk.dllOverrides`) forces
+    /// d3d9/10core/11 to builtin so these overlaid versions beat any native redist copies.
+    ///
+    /// **Both ABIs, auto-selected** (as in `overlayDXMT`): DXVK ships `x86_64-windows` and `i386-windows`
+    /// PE trees — the 32-bit one is what lets a 32-bit **DirectX 9** game run (neither GPTK nor DXMT can).
+    /// Every `<arch>-windows` sibling the release carries is overlaid; wine loads the tree matching each
+    /// game's PE machine type. A 64-bit-only release overlays just x86_64. Idempotent (witness byte-compare).
+    ///
+    /// - Parameters:
+    ///   - wineBinary: the runtime's wine binary (`<wine>/bin/wine64`), used to locate `<wine>/lib`.
+    ///   - dxvkLibDir: DXVK's x86_64 PE module dir (`<dxvk>/lib/wine/x86_64-windows`); its `<arch>-windows`
+    ///     sibling is the source for the 32-bit ABI.
+    public func overlayDXVK(wineBinary: URL, dxvkLibDir: URL) throws {
+        guard fileManager.fileExists(atPath: dxvkLibDir.path) else { throw LinkError.sourceMissing(dxvkLibDir) }
+        let sourceRoot = dxvkLibDir.deletingLastPathComponent()   // holds the <arch>-windows PE trees
+        let wineLayout = WineRuntimeLayout(wineBinary: wineBinary)
+
+        for arch in WineArch.allCases {
+            let srcWin = sourceRoot.appendingPathComponent("\(arch.rawValue)-windows")
+            guard fileManager.fileExists(atPath: srcWin.path),
+                  let modules = try? fileManager.contentsOfDirectory(at: srcWin, includingPropertiesForKeys: nil)
+                    .filter({ Self.isDXVKModule($0.lastPathComponent) }),
+                  !modules.isEmpty
+            else { continue }   // this ABI isn't in the release — skip it
+
+            let wineWinDir = wineLayout.windowsModulesDir(arch)
+            // Idempotent: if a witness module is already byte-identical, the runtime carries THIS DXVK — skip.
+            if witnessMatches(modules, in: wineWinDir) { continue }
+
+            try fileManager.createDirectory(at: wineWinDir, withIntermediateDirectories: true)
+            // DXVK ships no `.so`, so pass the (absent) `<arch>-unix` source: copyModules finds no matching
+            // `.so` and copies the PE dlls only, never creating a unix-modules dir.
+            let srcUnix = sourceRoot.appendingPathComponent("\(arch.rawValue)-unix")
+            try copyModules(modules, unixSource: srcUnix, toWin: wineWinDir, toUnix: wineLayout.unixModulesDir(arch))
+        }
+    }
+
     // MARK: - Helpers
 
     /// The idempotency check shared by both overlays: if a representative module (preferring `d3d11.dll`)

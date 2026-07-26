@@ -19,16 +19,27 @@ struct GraphicsBackendTests {
         #expect(!GraphicsBackend.dxmt.overlaysExternalFramework)        // winemetal.so links system Metal
     }
 
-    @Test("Each backend's override set is non-empty and the two are distinct")
+    @Test("DXVK overrides d3d9/10core/11 — the only DX9 path — with no dxgi (wine's builtin) and no framework")
+    func dxvkShape() {
+        #expect(GraphicsBackend.dxvk.dllOverrides == "d3d9,d3d10core,d3d11=b")
+        #expect(GraphicsBackend.dxvk.dllOverrides.contains("d3d9"))     // DXVK is the sole DirectX 9 translator
+        #expect(!GraphicsBackend.dxvk.dllOverrides.contains("dxgi"))    // pairs with wine's builtin dxgi
+        #expect(!GraphicsBackend.dxvk.dllOverrides.contains("d3d12"))   // DX12 stays GPTK
+        #expect(!GraphicsBackend.dxvk.overlaysExternalFramework)        // reuses the runtime's bundled MoltenVK
+    }
+
+    @Test("Each backend's override set is non-empty and all three are distinct")
     func overridesDistinct() {
         for backend in GraphicsBackend.allCases { #expect(!backend.dllOverrides.isEmpty) }
-        #expect(GraphicsBackend.gptk.dllOverrides != GraphicsBackend.dxmt.dllOverrides)
+        let overrides = GraphicsBackend.allCases.map(\.dllOverrides)
+        #expect(Set(overrides).count == overrides.count)   // no two backends share an override set
     }
 
     @Test("Codable round-trips via stable rawValues (config.json forward/back compatibility)")
     func codableRoundTrip() throws {
         #expect(GraphicsBackend.gptk.rawValue == "gptk")
         #expect(GraphicsBackend.dxmt.rawValue == "dxmt")
+        #expect(GraphicsBackend.dxvk.rawValue == "dxvk")
         for backend in GraphicsBackend.allCases {
             let data = try JSONEncoder().encode(backend)
             #expect(try JSONDecoder().decode(GraphicsBackend.self, from: data) == backend)

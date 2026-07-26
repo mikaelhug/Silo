@@ -141,6 +141,32 @@ struct MakePlanTests {
         #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.contains("/silo-bundled") == true)
     }
 
+    @Test("DXVK plan: d3d9/10/11 builtin overrides + CX_LIBVULKAN pinned to the runtime's MoltenVK, no lib/external")
+    func dxvkPlan() throws {
+        let cfg = GameConfig(appID: 220)
+        var b = backend()   // wine binary = /w/bin/wine64 → runtime root /w
+        b.dxvkLibDirPath = URL(fileURLWithPath: "/x/lib/wine/x86_64-windows")
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: b, graphics: .dxvk, gameExe: gameExe, prefix: prefix, logURL: log)
+
+        // DXVK forces ITS d3d9/10core/11 set to builtin — the sole DirectX 9 path — and NOT dxgi (wine's builtin).
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10core,d3d11=b")
+        // winevulkan is pinned to the runtime's bundled MoltenVK by absolute path (win32u reads CX_LIBVULKAN).
+        #expect(plan.environment["CX_LIBVULKAN"] == "/w/lib/silo-bundled/libMoltenVK.dylib")
+        // DXVK ships no framework in lib/external (it reuses the bundled MoltenVK), so no /w/lib/external prepend.
+        #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == nil)
+        #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/w/lib/external:") == false)
+    }
+
+    @Test("An unconfigured DXVK leaks no CX_LIBVULKAN and no d3d overrides (falls back to plain wined3d)")
+    func dxvkUnconfigured() throws {
+        let cfg = GameConfig(appID: 220)
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: backend(), graphics: .dxvk, gameExe: gameExe, prefix: prefix, logURL: log)
+        #expect(plan.environment["CX_LIBVULKAN"] == nil)
+        #expect(plan.environment["WINEDLLOVERRIDES"] == nil)
+    }
+
     @Test("Determinism: selecting DXMT never leaks GPTK's overrides, even when GPTK is the configured backend")
     func backendSelectionIsDeterministic() throws {
         let cfg = GameConfig(appID: 220)

@@ -38,6 +38,13 @@ public struct RuntimeVariants: Sendable {
             let variantWine = try ensureClone(of: baseWine, backend: backend)
             try linker.overlayDXMT(wineBinary: variantWine, dxmtLibDir: libDir)
             return variantWine
+        case .dxvk:
+            // Like DXMT: DXVK overlays a builtin d3d11 into the runtime, so it can't share GPTK's/DXMT's tree.
+            // It gets its own `<root>-dxvk` clone (which inherits the base runtime's bundled libMoltenVK.dylib
+            // — DXVK's Vulkan driver — so no separate MoltenVK overlay is needed here).
+            let variantWine = try ensureClone(of: baseWine, backend: backend)
+            try linker.overlayDXVK(wineBinary: variantWine, dxvkLibDir: libDir)
+            return variantWine
         }
     }
 

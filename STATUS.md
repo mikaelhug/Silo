@@ -3,6 +3,29 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🌋 DXVK / Vulkan — third graphics backend, Phase 2 model threading (2026-07-26, `main`; 430 tests green).**
+  Adding DXVK (D3D9/10/11 → Vulkan → MoltenVK → Metal) as a third backend so **DirectX 9** games (which
+  neither GPTK nor DXMT can translate — today they black-screen on wined3d) and the D3D10/11 titles the Metal
+  backends can't run get a mature compatibility path. Mirrors CrossOver 26, which ships DXVK as its Vulkan
+  tier below D3DMetal. Plan: `~/.claude/plans/silo-has-one-big-rippling-quail.md`; routing decided **DX9-first
+  + deep fallback** (GPTK > DXMT > DXVK for DX10/11; DXVK first for DX9), provenance **from-source DXVK +
+  patched MoltenVK** (never a vendored prebuilt).
+  - **On-device discovery (the big de-risk):** Silo's from-source wine ALREADY carries the full Vulkan→Metal
+    substrate — `winevulkan`, the winemac Vulkan backend in `win32u.so` that loads a driver via `CX_LIBVULKAN`,
+    and a **bundled stock MoltenVK 1.4.1** at `lib/silo-bundled/libMoltenVK.dylib`. So DXVK needs only its PE
+    DLLs overlaid + `=b` overrides + `CX_LIBVULKAN` pinned at that MoltenVK. (CrossOver 26.2's own DXVK =
+    `d3d9`/`d3d10core`/`d3d11` PEs for both ABIs, no dxgi/d3d12/`.so`; its MoltenVK ~1.2.10 is heavily patched
+    for geometry-shader + transform-feedback — the stock-vs-patched question Phase 0's render test settles.)
+  - **Phase 2 (this commit):** `GraphicsBackend.dxvk` + `GraphicsChoice.dxvk` (all 9 exhaustive switches);
+    `BackendConfig.dxvkLibDirPath`/`dxvkRuntimeName` + `libDir(.dxvk)` + `dxvkSupports32Bit` (32-bit DX9 is a
+    capability GPTK structurally lacks); `RuntimeVariants.prepare(.dxvk)` → `<root>-dxvk` clone;
+    `GraphicsLinker.overlayDXVK` (PE-only — no `.so`, no `lib/external`, no prefix loader — the simplest of the
+    three); `LaunchOrchestrator` overlays + exports `CX_LIBVULKAN`; `EnvFlags`/`GraphicsFallback` made
+    exhaustive (real DXVK log signatures captured in Phase 0). Compiles + unit-tests with ZERO runtimes
+    (constraint #4); +14 tests. **DXVK appears in the graphics picker but has no installer yet** → an explicit
+    pin honestly throws `backendNotConfigured` until Phase 3 (install/Settings) lands.
+  - **Still pending:** Phase 0 render proof (needs a DX9 game installed — HUMAN-INPUT), Phase 1 (from-source
+    build scripts + CI), Phase 3 (install + Settings UI), Phase 4 (DX9-first routing + fallback signatures).
 - **🎮 Game-controller support: re-enable SDL in the Wine build (2026-07-26, `main`; 416 tests green — CODE
   DONE, needs a new `wine-cx-*` CI release + on-device controller verification).** Controllers didn't work
   because Wine was built `--without-sdl` and `libSDL2` was stripped on install (M75→M80) — a real fix for a

@@ -68,6 +68,7 @@ public struct EnvFlags: Codable, Sendable, Hashable {
             switch graphics {
             case .gptk: env["D3DM_ENABLE_METALFX"] = "1"
             case .dxmt: env["DXMT_METALFX_SPATIAL_SWAPCHAIN"] = "1"
+            case .dxvk: break   // DXVK renders through Vulkan/MoltenVK — no MetalFX upscaling hook to toggle
             }
         }
         if dxr, graphics == .gptk { env["D3DM_SUPPORT_DXR"] = "1" }   // DX12 raytracing — GPTK only

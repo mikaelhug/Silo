@@ -25,6 +25,11 @@ public enum GraphicsFallback: Sendable {
         switch backend {
         case .gptk: []
         case .dxmt: ["DXMT: created Metal device"]
+        // DXVK logs its device/adapter creation (e.g. "DXVK: Game: …", "D3D11CoreCreateDevice"), which — like
+        // DXMT — lets a DXVK launch be positively confirmed. The exact string is captured in the Phase 0
+        // on-device spike; until then DXVK stays absence-confirmed like GPTK (no false positives, just no
+        // early engagement signal). TODO(phase0): fill the confirmed DXVK engagement string.
+        case .dxvk: []
         }
     }
 
@@ -48,6 +53,10 @@ public enum GraphicsFallback: Sendable {
         switch backend {
         case .gptk: ["Failed to dlopen D3DMetal"]   // GPTK's Metal backend never loaded
         case .dxmt: []
+        // DXVK that fails to reach a Vulkan device logs a distinct error before wine falls back to wined3d
+        // (whose generic "Using the Vulkan renderer" signal below still catches the fallback either way). A
+        // DXVK-specific early signature is captured on-device. TODO(phase0): fill it if one proves reliable.
+        case .dxvk: []
         }
     }
 

@@ -9,7 +9,7 @@ struct BottleResolverTests {
 
     /// A base wine runtime (`wine/bin/wine64` + empty module dirs) and minimal GPTK + DXMT source trees.
     /// Returns the configured backend + the AppPaths rooted in `tmp`.
-    private func fixtures(_ tmp: TempDir, gptk: Bool = true, dxmt: Bool = true) throws -> (BackendConfig, AppPaths) {
+    private func fixtures(_ tmp: TempDir, gptk: Bool = true, dxmt: Bool = true, dxvk: Bool = false) throws -> (BackendConfig, AppPaths) {
         let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
         try tmp.makeDir("wine/lib/wine/x86_64-windows")
         try tmp.makeDir("wine/lib/wine/x86_64-unix")
@@ -36,6 +36,13 @@ struct BottleResolverTests {
             }
             try tmp.write("dxmt/lib/wine/x86_64-unix/winemetal.so", "WINEMETAL")
             config.dxmtLibDirPath = win
+        }
+        if dxvk {
+            let win = try tmp.makeDir("dxvk/lib/wine/x86_64-windows")   // PE-only, no dxgi, no .so
+            for module in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {
+                try tmp.write("dxvk/lib/wine/x86_64-windows/\(module)", "DXVK:\(module)")
+            }
+            config.dxvkLibDirPath = win
         }
         return (config, AppPaths(supportDir: tmp.url.appendingPathComponent("Silo")))
     }
@@ -73,6 +80,29 @@ struct BottleResolverTests {
         let (config, paths) = try fixtures(tmp, dxmt: false)   // wine + GPTK only
         #expect(throws: BottleResolver.ResolveError.backendNotConfigured(.dxmt)) {
             try BottleResolver(paths: paths).steam(backend: .dxmt, config: config)
+        }
+    }
+
+    @Test("Steam with a DXVK backend resolves the SAME Steam prefix on the DXVK variant runtime")
+    func steamDXVK() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (config, paths) = try fixtures(tmp, dxvk: true)
+        let ctx = try BottleResolver(paths: paths).steam(backend: .dxvk, config: config)
+
+        #expect(ctx.graphics == .dxvk)
+        #expect(ctx.prefix == paths.steamBottle)                        // the shared Steam prefix
+        #expect(ctx.wineBinary.path.contains("/wine-dxvk/bin/wine64"))  // the DXVK variant clone
+        // DXVK's d3d9 overlaid into the CLONE (the DirectX 9 path), never the base runtime.
+        #expect(FileManager.default.fileExists(
+            atPath: tmp.url.appendingPathComponent("wine-dxvk/lib/wine/x86_64-windows/d3d9.dll").path))
+    }
+
+    @Test("Steam with an unconfigured DXVK backend refuses — never mis-routes onto the base runtime")
+    func steamDXVKNotConfigured() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (config, paths) = try fixtures(tmp)   // wine + GPTK + DXMT, but no DXVK
+        #expect(throws: BottleResolver.ResolveError.backendNotConfigured(.dxvk)) {
+            try BottleResolver(paths: paths).steam(backend: .dxvk, config: config)
         }
     }
 
