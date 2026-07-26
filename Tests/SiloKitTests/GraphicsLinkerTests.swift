@@ -337,18 +337,18 @@ struct GraphicsLinkerTests {
     // MARK: - DXVK prefix seeding (native model)
 
     /// Build a minimal DXVK module tree and return its `lib/wine/x86_64-windows` dir (the `dxvkLibDir`).
-    /// DXVK's real layout: PE `d3d9`/`d3d10core`/`d3d11` dlls and NOTHING else — no `dxgi` (wine's builtin is
-    /// used), no unix `.so` (DXVK reaches Metal via wine's winevulkan), no `lib/external`.
+    /// DXVK's real layout: PE `d3d9`/`d3d10core`/`d3d11` + its own `dxgi` (upstream d3d11 is coupled to it),
+    /// and NOTHING else — no unix `.so` (DXVK reaches Metal via wine's winevulkan), no `lib/external`.
     @discardableResult
     private func makeDXVK(_ tmp: TempDir) throws -> URL {
         let win = try tmp.makeDir("dxvk/lib/wine/x86_64-windows")
-        for module in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {
+        for module in ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"] {
             try tmp.write("dxvk/lib/wine/x86_64-windows/\(module)", "PE:\(module)")
         }
         return win
     }
 
-    @Test("installDXVKPrefixLoaders seeds DXVK's d3d9/10core/11 into the prefix's system32 (native, =n) — only those")
+    @Test("installDXVKPrefixLoaders seeds DXVK's d3d9/10core/11 + its own dxgi into the prefix's system32 (native)")
     func installDXVKSeedsPrefix() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let dxvkLibDir = try makeDXVK(tmp)
@@ -357,12 +357,10 @@ struct GraphicsLinkerTests {
         try linker.installDXVKPrefixLoaders(prefix: prefix, dxvkLibDir: dxvkLibDir)
 
         let sys32 = prefix.appendingPathComponent("drive_c/windows/system32")
-        for dll in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {
+        for dll in ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"] {   // upstream ships its own dxgi
             #expect(FileManager.default.contentsEqual(
                 atPath: sys32.appendingPathComponent(dll).path, andPath: dxvkLibDir.appendingPathComponent(dll).path))
         }
-        // Native DXVK touches NOTHING in the runtime and never seeds dxgi (wine's builtin dxgi backs it).
-        #expect(!FileManager.default.fileExists(atPath: sys32.appendingPathComponent("dxgi.dll").path))
     }
 
     @Test("installDXVKPrefixLoaders ALSO seeds syswow64 from the i386 tree (the 32-bit DirectX 9 path)")
@@ -370,7 +368,7 @@ struct GraphicsLinkerTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let dxvkLibDir = try makeDXVK(tmp)
         try tmp.makeDir("dxvk/lib/wine/i386-windows")
-        for module in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {
+        for module in ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"] {
             try tmp.write("dxvk/lib/wine/i386-windows/\(module)", "PE32:\(module)")
         }
         let prefix = try tmp.makeDir("bottle")
@@ -379,7 +377,7 @@ struct GraphicsLinkerTests {
 
         #expect(try String(contentsOf: prefix.appendingPathComponent(   // 64-bit → system32
             "drive_c/windows/system32/d3d9.dll"), encoding: .utf8) == "PE:d3d9.dll")
-        for dll in ["d3d9.dll", "d3d10core.dll", "d3d11.dll"] {          // 32-bit → syswow64 (32-bit DX9)
+        for dll in ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"] {   // 32-bit → syswow64 (32-bit DX9)
             #expect(try String(contentsOf: prefix.appendingPathComponent(
                 "drive_c/windows/syswow64/\(dll)"), encoding: .utf8) == "PE32:\(dll)")
         }
@@ -422,11 +420,9 @@ struct GraphicsLinkerTests {
         // The backend filters parameterize the shared predicate — their DIFFERENCES must survive:
         #expect(GraphicsLinker.isGPTKModule("nvngx.dll") && !GraphicsLinker.isDXMTModule("nvngx.dll"))
         #expect(GraphicsLinker.isDXMTModule("winemetal.so") && !GraphicsLinker.isGPTKModule("winemetal.so"))
-        // DXVK selects d3d9 (its DirectX 9 translator), but must NOT grab dxgi — wine's builtin dxgi stands —
-        // where DXMT's broader filter DOES match dxgi; nor d3d12 (that stays GPTK).
-        #expect(GraphicsLinker.isDXVKModule("d3d9.dll"))
-        #expect(!GraphicsLinker.isDXVKModule("dxgi.dll") && GraphicsLinker.isDXMTModule("dxgi.dll"))
-        #expect(!GraphicsLinker.isDXVKModule("d3d12.dll"))
+        // DXVK selects d3d9 (its DirectX 9 translator) and its own dxgi, but never d3d12 (that stays GPTK).
+        #expect(GraphicsLinker.isDXVKModule("d3d9.dll") && GraphicsLinker.isDXVKModule("dxgi.dll"))
+        #expect(!GraphicsLinker.isDXVKModule("d3d12.dll") && !GraphicsLinker.isDXVKModule("winemetal.so"))
     }
 
     @Test("witnessMatches: skip only when the witness is byte-identical in the runtime")

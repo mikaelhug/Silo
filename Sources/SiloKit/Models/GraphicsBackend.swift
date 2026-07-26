@@ -15,10 +15,11 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
     /// DXVK — D3D9/10/11 → Vulkan, run on the runtime's bundled MoltenVK (Vulkan → Metal). The only backend
     /// that translates **DirectX 9** (GPTK and DXMT are D3D10/11+ only), and a mature compatibility net for
     /// the D3D10/11 titles the two Metal backends can't drive. Built stock from upstream (no patches) and run
-    /// as **native** DLLs: its PE d3d modules are seeded into the game prefix's `system32`/`syswow64` and
-    /// overridden `=n`, so DXVK runs on the **base runtime** with nothing overlaid into `lib/wine` and no
-    /// clone. It rides wine's own `winevulkan`, reaching the base runtime's bundled `libMoltenVK.dylib` via
-    /// `CX_LIBVULKAN`. (CrossOver ships DXVK as a builtin instead — a CX patch Silo deliberately avoids.)
+    /// as **native** DLLs: its PE d3d modules (incl. DXVK's own `dxgi`) are seeded into the game prefix's
+    /// `system32`/`syswow64` and overridden `=n`, so DXVK runs on the **base runtime** with nothing overlaid
+    /// into `lib/wine` and no clone. It rides wine's own `winevulkan`, reaching the base runtime's bundled
+    /// `libMoltenVK.dylib` via `CX_LIBVULKAN`. (CrossOver ships DXVK as a builtin + reuses wine's dxgi — CX
+    /// patches Silo deliberately avoids.)
     case dxvk
 
     public var id: String { rawValue }
@@ -56,14 +57,15 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
     /// override deterministically resolves to the intended layer.
     /// - GPTK: the full D3DMetal set incl. d3d12 (GPTK covers DX12). `d3d9`/`d3dcompiler_*` left native.
     /// - DXMT: `d3d10core`/`d3d11`/`dxgi` + `winemetal` (its Metal bridge). D3D10/11 only — no d3d12/d3d9.
-    /// - DXVK: `d3d9`/`d3d10core`/`d3d11` forced **native** (`=n`) — stock upstream DXVK is a native DLL set
-    ///   seeded into the prefix, not a wine builtin, so `=n` is what loads it. **No `dxgi`** — DXVK pairs with
-    ///   wine's own builtin dxgi; **no `winemetal`** — DXVK reaches Metal through `winevulkan` → MoltenVK.
+    /// - DXVK: `d3d9`/`d3d10core`/`d3d11`/`dxgi` forced **native** (`=n`) — stock upstream DXVK is a native DLL
+    ///   set seeded into the prefix, not a wine builtin, so `=n` is what loads it. **Includes `dxgi`** — upstream
+    ///   DXVK's d3d11 is coupled to DXVK's own dxgi (setup_dxvk installs both; only CrossOver's *patched* build
+    ///   reuses wine's builtin dxgi). **No `winemetal`** — DXVK reaches Metal through `winevulkan` → MoltenVK.
     public var dllOverrides: String {
         switch self {
         case .gptk: "d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b"
         case .dxmt: "d3d10core,d3d11,dxgi,winemetal=b"
-        case .dxvk: "d3d9,d3d10core,d3d11=n"
+        case .dxvk: "d3d9,d3d10core,d3d11,dxgi=n"
         }
     }
 

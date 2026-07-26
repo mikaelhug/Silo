@@ -1,0 +1,168 @@
+name: Build DXVK (DirectX 9 + broad-compat backend)
+
+# Self-reliant DXVK pipeline: build doitsujin/dxvk (Silo's DirectX 9 translator + the Vulkan compatibility
+# fallback below GPTK/DXMT) STOCK from upstream and publish it to this repo's Releases — so the app never
+# depends on a third-party prebuilt (e.g. the stale Gcenx fork) that may go stale.
+#
+# DXVK is shipped NATIVE (no CrossOver builtin patches): Silo seeds its d3d9/d3d10core/d3d11 + dxgi dlls into
+# the game prefix and overrides them `=n`, running on the base wine runtime whose bundled MoltenVK is DXVK's
+# Vulkan driver (D3D → Vulkan → MoltenVK → Metal). DXVK is NOT Wine, so constraint #8 is unaffected. Unlike
+# the DXMT / Wine builds this needs NO Metal toolchain, Rosetta, x86_64 Homebrew, or Wine install — DXVK is a
+# pure Windows-PE cross-compile (meson + llvm-mingw + glslang). See also Scripts/build-dxvk.sh (identical
+# local recipe — it can run on a Command-Line-Tools-only box).
+#
+# CAVEAT: the DXVK_VERSION↔MoltenVK pairing must be validated on-device (Phase 0) — a newer DXVK needs more
+# Vulkan features MoltenVK may lack. Intentionally manual (workflow_dispatch) + chained from wine-autoupdate.
+
+on:
+  workflow_dispatch:
+    # All versions come from versions.env (the single source of truth); these are OPTIONAL overrides.
+    inputs:
+      dxvk_version:
+        description: "Override DXVK tag (blank = DXVK_VERSION from versions.env)"
+        required: false
+        default: ""
+      llvm_mingw_version:
+        description: "Override llvm-mingw version (blank = LLVM_MINGW_VERSION from versions.env)"
+        required: false
+        default: ""
+      wine_release_tag:
+        description: "CrossOver Wine release this DXVK is validated with (blank = wine-cx-<CROSSOVER_VERSION>)"
+        required: false
+        default: ""
+      release_tag:
+        description: "Override the published release tag (blank = dxvk-<DXVK_VERSION>-cx<wine version>)"
+        required: false
+        default: ""
+  workflow_call:
+    # Chained from wine-autoupdate.yml after a new wine-cx-* is published, so the DXVK↔Wine validation tag
+    # stays paired with the current runtime (DXVK itself is wine-independent, but Silo matches by tag).
+    inputs:
+      dxvk_version:
+        required: false
+        type: string
+        default: ""
+      llvm_mingw_version:
+        required: false
+        type: string
+        default: ""
+      wine_release_tag:
+        required: false
+        type: string
+        default: ""
+      release_tag:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  # One DXVK build at a time; don't cancel an in-flight build.
+  group: dxvk-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # macos-26 matches the app build; DXVK cross-compiles to Windows PE so no Xcode/Metal is used.
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve versions (versions.env is the single source of truth; inputs override)
+        env:
+          IN_DXVK: ${{ inputs.dxvk_version }}
+          IN_MINGW: ${{ inputs.llvm_mingw_version }}
+          IN_WINE: ${{ inputs.wine_release_tag }}
+          IN_REL: ${{ inputs.release_tag }}
+        run: |
+          set -eo pipefail
+          # shellcheck disable=SC1091
+          set -a; . ./versions.env; set +a
+          DXVK_VER="${IN_DXVK:-$DXVK_VERSION}"
+          MINGW_VER="${IN_MINGW:-$LLVM_MINGW_VERSION}"
+          WINE_TAG="${IN_WINE:-wine-cx-$CROSSOVER_VERSION}"
+          CX_VER="${WINE_TAG#wine-cx-}"   # the CrossOver version this DXVK is validated with → into the tag
+          REL_TAG="${IN_REL:-dxvk-$DXVK_VER-cx$CX_VER}"
+          {
+            echo "DXVK_REPO=$DXVK_REPO"
+            echo "DXVK_VER=$DXVK_VER"
+            echo "MINGW_DIR=llvm-mingw-$MINGW_VER-ucrt-macos-universal"
+            echo "MINGW_VER=$MINGW_VER"
+            echo "WINE_TAG=$WINE_TAG"
+            echo "REL_TAG=$REL_TAG"
+          } >> "$GITHUB_ENV"
+          echo "Building $DXVK_REPO@$DXVK_VER → publishing $REL_TAG"
+
+      - name: Build dependencies (meson, ninja, glslang)
+        run: |
+          set -eo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
+          brew install meson ninja glslang || true
+          missing=""
+          for t in meson ninja glslangValidator; do command -v "$t" >/dev/null || missing="$missing $t"; done
+          if [ -n "$missing" ]; then echo "::error::required tools failed to install:$missing"; exit 1; fi
+
+      - name: Fetch DXVK source + submodules + cross toolchain
+        run: |
+          set -eo pipefail
+          git clone --depth 1 --branch "$DXVK_VER" --recurse-submodules --shallow-submodules \
+            "https://github.com/${DXVK_REPO}.git" "$RUNNER_TEMP/dxvk"
+          mkdir -p "$RUNNER_TEMP/dxvk/toolchains"
+          curl -fL "https://github.com/mstorsjo/llvm-mingw/releases/download/${MINGW_VER}/${MINGW_DIR}.tar.xz" -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
+          tar -xf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C "$RUNNER_TEMP/dxvk/toolchains"
+          test -x "$RUNNER_TEMP/dxvk/toolchains/$MINGW_DIR/bin/x86_64-w64-mingw32-gcc"
+          echo "DXVK_SRC=$RUNNER_TEMP/dxvk" >> "$GITHUB_ENV"
+
+      - name: Configure + build (release), both ABIs
+        run: |
+          set -eo pipefail
+          cd "$DXVK_SRC"
+          # DXVK's own cross-files call x86_64-/i686-w64-mingw32 tools by bare name → toolchain leads PATH.
+          export PATH="$DXVK_SRC/toolchains/$MINGW_DIR/bin:$PATH"
+          # Take DXVK's default enabled targets (robust across versions), cherry-pick the dlls after install.
+          build_abi() {  # $1 = cross-file, $2 = build dir, $3 = install prefix
+            meson setup --cross-file "$1" --buildtype release --prefix "$DXVK_SRC/$3" "$2"
+            ninja -C "$2"
+            ninja -C "$2" install
+          }
+          build_abi build-win64.txt build.w64 install64
+          build_abi build-win32.txt build.w32 install32
+
+      - name: Assemble the Silo layout + verify
+        run: |
+          set -eo pipefail
+          cd "$DXVK_SRC"
+          rm -rf out; mkdir -p out/x86_64-windows out/i386-windows
+          locate_dll() { find "$1" -name "$2" -type f 2>/dev/null | head -1; }
+          for dll in d3d9.dll d3d10core.dll d3d11.dll dxgi.dll; do
+            cp "$(locate_dll install64 "$dll")" "out/x86_64-windows/$dll"
+            cp "$(locate_dll install32 "$dll")" "out/i386-windows/$dll"
+          done
+          missing=""
+          for dir in out/x86_64-windows out/i386-windows; do
+            for f in d3d9.dll d3d10core.dll d3d11.dll dxgi.dll; do test -e "$dir/$f" || missing="$missing $dir/$f"; done
+          done
+          if [ -n "$missing" ]; then echo "::error::missing artifacts:$missing"; exit 1; fi
+          file out/x86_64-windows/d3d11.dll | grep -qi PE32 || { echo "::error::d3d11.dll is not a PE image"; exit 1; }
+
+      - name: Package dxvk.tar.xz
+        run: |
+          set -eo pipefail
+          ( cd "$DXVK_SRC/out" && tar -cJf "$GITHUB_WORKSPACE/dxvk.tar.xz" x86_64-windows i386-windows )
+          ( cd "$GITHUB_WORKSPACE" && shasum -a 256 dxvk.tar.xz > dxvk.tar.xz.sha256 )
+          ls -la "$GITHUB_WORKSPACE/dxvk.tar.xz" "$GITHUB_WORKSPACE/dxvk.tar.xz.sha256"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.REL_TAG }}
+          name: ${{ env.REL_TAG }}
+          files: |
+            dxvk.tar.xz
+            dxvk.tar.xz.sha256
+          body: "DXVK ${{ env.DXVK_VER }} (${{ env.DXVK_REPO }}) — Silo's DirectX 9 + broad-compat Vulkan backend (native, D3D → Vulkan → the runtime's bundled MoltenVK → Metal). Validated with this repo's CrossOver Wine (${{ env.WINE_TAG }}). In Silo: Settings → DXVK → Download Latest (or import the extracted x86_64-windows folder)."

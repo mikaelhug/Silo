@@ -25,11 +25,22 @@
     capability GPTK structurally lacks); `RuntimeVariants.prepare(.dxvk)` returns the base wine (no clone);
     `GraphicsLinker.installDXVKPrefixLoaders` (seeds d3d9/10core/11 into the prefix — native, `=n`);
     `LaunchOrchestrator` seeds + forces `=n` + exports `CX_LIBVULKAN`; `EnvFlags`/`GraphicsFallback` made
-    exhaustive (real DXVK log signatures captured in Phase 0). Compiles + unit-tests with ZERO runtimes
-    (constraint #4); +19 tests. **DXVK appears in the graphics picker but has no installer yet** → an explicit
-    pin honestly throws `backendNotConfigured` until Phase 3 (install/Settings) lands.
-  - **Still pending:** Phase 0 render proof (needs a DX9 game installed — HUMAN-INPUT), Phase 1 (from-source
-    build scripts + CI), Phase 3 (install + Settings UI), Phase 4 (DX9-first routing + fallback signatures).
+    exhaustive (real DXVK log signatures captured in Phase 0). DXVK ships + seeds its OWN `dxgi` (upstream
+    d3d11 is coupled to it — only CrossOver's patched build reuses wine's builtin dxgi). Compiles + unit-tests
+    with ZERO runtimes (constraint #4); +19 tests. **DXVK appears in the graphics picker but has no installer
+    yet** → an explicit pin honestly throws `backendNotConfigured` until Phase 3 (install/Settings) lands.
+  - **Phase 1 (landed):** `versions.env` pins `DXVK_REPO=doitsujin/dxvk` + `DXVK_VERSION=v2.6.2` (reuses the
+    DXMT `LLVM_MINGW_VERSION`); `Scripts/build-dxvk.sh` + `.github/workflows/build-dxvk.yml` cross-compile
+    upstream DXVK (meson + llvm-mingw, both ABIs, cherry-pick d3d9/d3d10core/d3d11/dxgi) → `dxvk.tar.xz`
+    (+`.sha256`), tag `dxvk-<ver>-cx<ver>`, chainable from `wine-autoupdate.yml`. **DXVK needs NO Metal
+    toolchain / Wine install** (pure Windows-PE cross-compile), so `build-dxvk.sh` runs on this CLT-only box —
+    a real artifact for the Phase 0 spike can be built locally. CI/local-build-validated-later (not run yet).
+  - **Still pending:** Phase 0 render proof (needs a DX9 game installed — HUMAN-INPUT; then the DXVK version↔
+    MoltenVK-1.4.1 pairing + exact engagement log string are confirmed), Phase 3 (install + Settings UI),
+    Phase 4 (DX9-first routing + fallback signatures). **Phase-0/4 validation item:** native DXVK seeds its
+    dlls into the SHARED Steam prefix's system32 — must confirm they stay dormant for the co-resident Steam
+    client + GPTK/DXMT games (which force `=b`); if wine's default load order picks them up for a non-`=n`
+    launch, add `d3d9,d3d10core,d3d11,dxgi=builtin` to the shared-bottle default overrides.
 - **🎮 Game-controller support: re-enable SDL in the Wine build (2026-07-26, `main`; 416 tests green — CODE
   DONE, needs a new `wine-cx-*` CI release + on-device controller verification).** Controllers didn't work
   because Wine was built `--without-sdl` and `libSDL2` was stripped on install (M75→M80) — a real fix for a

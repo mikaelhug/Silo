@@ -187,12 +187,12 @@ public struct GraphicsLinker: Sendable {
 
     // MARK: - DXVK prefix seeding
 
-    /// DXVK's Direct3D 9/10/11 translation modules (`d3d9`, `d3d10core`, `d3d11`). **No `dxgi`** — native DXVK
-    /// pairs with wine's own builtin dxgi (so we don't ship one); **no `winemetal`** — DXVK reaches Metal
-    /// through wine's `winevulkan` → MoltenVK. The prefixes exclude `d3d12` (DXVK has none — DX12 stays GPTK)
-    /// and `dxgi`/`d3d8` even if a build ships them.
+    /// DXVK's Direct3D translation modules (`d3d9`, `d3d10core`, `d3d11`) plus its own `dxgi` — upstream DXVK's
+    /// d3d11 is coupled to DXVK's dxgi, so native DXVK ships and seeds both (only CrossOver's patched build
+    /// reuses wine's builtin dxgi). **No `winemetal`** — DXVK reaches Metal through wine's `winevulkan` →
+    /// MoltenVK. The prefixes exclude `d3d12` (DXVK has none — DX12 stays GPTK) and `d3d8` even if a build ships it.
     static func isDXVKModule(_ name: String) -> Bool {
-        isOverlayModule(name, prefixes: ["d3d9", "d3d10", "d3d11"])
+        isOverlayModule(name, prefixes: ["d3d9", "d3d10", "d3d11", "dxgi"])
     }
 
     /// Seed DXVK's Direct3D modules into the game **prefix** so wine loads them as **native** dlls — the
@@ -201,7 +201,7 @@ public struct GraphicsLinker: Sendable {
     /// `system32` (x86_64) / `syswow64` (i386), and `GraphicsBackend.dxvk.dllOverrides` forces them `=n`, so
     /// wine loads these from the prefix instead of its builtin d3d1x. They reach Metal via wine's own
     /// `winevulkan` → the runtime's bundled MoltenVK (pinned by `CX_LIBVULKAN`), so there's no `.so`,
-    /// `lib/external`, or runtime clone. DXVK's `dxgi` isn't shipped — wine's builtin dxgi backs DXVK's d3d11.
+    /// `lib/external`, or runtime clone. DXVK's own `dxgi` IS seeded (upstream d3d11 is coupled to it).
     ///
     /// **Both ABIs, auto-selected** (as in `installDXMTPrefixLoaders`): every `<arch>-windows` sibling the
     /// release carries is seeded, so a 64-bit game loads the x86_64 DXVK and a 32-bit **DirectX 9** game loads

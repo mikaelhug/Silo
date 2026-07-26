@@ -149,8 +149,8 @@ struct MakePlanTests {
         let plan = try LaunchOrchestrator.makePlan(
             config: cfg, backend: b, graphics: .dxvk, gameExe: gameExe, prefix: prefix, logURL: log)
 
-        // Native DXVK forces ITS d3d9/10core/11 set to native (=n) — the sole DirectX 9 path — NOT dxgi.
-        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10core,d3d11=n")
+        // Native DXVK forces ITS d3d9/10core/11 + its own dxgi to native (=n) — the sole DirectX 9 path.
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10core,d3d11,dxgi=n")
         // winevulkan is pinned to the runtime's bundled MoltenVK by absolute path (win32u reads CX_LIBVULKAN).
         #expect(plan.environment["CX_LIBVULKAN"] == "/w/lib/silo-bundled/libMoltenVK.dylib")
         // DXVK ships no framework in lib/external (it reuses the bundled MoltenVK), so no /w/lib/external prepend.
