@@ -177,6 +177,63 @@ struct RuntimeManagerTests {
         #expect(RuntimeManager.matchedDXMTRelease(noDXMT, forWine: "wine-cx-26.3.0") == nil)
     }
 
+    @Test("locateDXVKLibDir finds the x86_64-windows module dir by its d3d9+d3d11 signature (excludes DXMT)")
+    func locateDXVK() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        try tmp.makeDir("rt/lib/wine/x86_64-windows")
+        try tmp.write("rt/lib/wine/x86_64-windows/d3d9.dll", "x")
+        try tmp.write("rt/lib/wine/x86_64-windows/d3d11.dll", "x")
+        let found = RuntimeManager.locateDXVKLibDir(in: tmp.url.appendingPathComponent("rt"))
+        #expect(found?.lastPathComponent == "x86_64-windows")
+        #expect(found?.path.hasSuffix("/rt/lib/wine/x86_64-windows") == true)
+        // A DXMT tree (d3d11 + winemetal, but NO d3d9) must NOT be mistaken for DXVK.
+        try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
+        try tmp.write("dxmt/lib/wine/x86_64-windows/d3d11.dll", "x")
+        try tmp.write("dxmt/lib/wine/x86_64-windows/winemetal.dll", "x")
+        #expect(RuntimeManager.locateDXVKLibDir(in: tmp.url.appendingPathComponent("dxmt")) == nil)
+    }
+
+    @Test("installDXVK downloads + extracts via the SHARED engine and locates the x86_64-windows module dir")
+    func installDXVK() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let url = "https://e.com/dxvk.tar.xz"
+        FakeURLProtocol.stub(url, data: Data("ARCHIVE".utf8))
+        let fake = FakeProcessRunner()
+        fake.onRun = { inv in
+            if inv.executable.lastPathComponent == "tar",
+               let i = inv.arguments.firstIndex(of: "-C"), i + 1 < inv.arguments.count {
+                let dest = URL(fileURLWithPath: inv.arguments[i + 1])
+                let win = dest.appendingPathComponent("lib/wine/x86_64-windows")
+                try? FileManager.default.createDirectory(at: win, withIntermediateDirectories: true)
+                for f in ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"] {   // DXVK ships no .so
+                    FileManager.default.createFile(atPath: win.appendingPathComponent(f).path, contents: Data("x".utf8))
+                }
+            }
+        }
+        let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())
+        let dxvk = try await manager.installDXVK(name: "dxvk-v2.6.2-cx26.2.0", from: URL(string: url)!)
+        #expect(dxvk.libDir?.lastPathComponent == "x86_64-windows")
+        #expect(dxvk.isUsable)
+        #expect(await manager.installedDXVK().map(\.name) == ["dxvk-v2.6.2-cx26.2.0"])
+    }
+
+    @Test("matchedDXVKRelease prefers the DXVK tagged for the configured wine, else the newest")
+    func matchDXVK() throws {
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let releases = try decoder.decode([GitHubRelease].self, from: Data("""
+        [{"tag_name":"dxvk-v2.6.2-cx26.3.0","assets":[]},
+         {"tag_name":"wine-cx-26.3.0","assets":[]},
+         {"tag_name":"dxvk-v2.6.2-cx26.2.0","assets":[]},
+         {"tag_name":"v0.2.1","assets":[]}]
+        """.utf8))
+        #expect(RuntimeManager.matchedDXVKRelease(releases, forWine: "wine-cx-26.2.0")?.tagName == "dxvk-v2.6.2-cx26.2.0")
+        #expect(RuntimeManager.matchedDXVKRelease(releases, forWine: "wine-cx-99.9.9")?.tagName == "dxvk-v2.6.2-cx26.3.0")
+        #expect(RuntimeManager.matchedDXVKRelease(releases, forWine: nil)?.tagName == "dxvk-v2.6.2-cx26.3.0")
+        let noDXVK = try decoder.decode([GitHubRelease].self,
+            from: Data(#"[{"tag_name":"wine-cx-26.3.0","assets":[]}]"#.utf8))
+        #expect(RuntimeManager.matchedDXVKRelease(noDXVK, forWine: "wine-cx-26.3.0") == nil)
+    }
+
     @Test("installWine verifies a published SHA-256 and rejects a mismatch")
     func checksum() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

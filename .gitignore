@@ -13,6 +13,7 @@ dist/
 *.tar.xz
 .wine-build/
 .dxmt-build/
+.dxvk-build/
 .dxmt-build-fullrun.log
 
 ## Adoption stats (generated into the Pages artifact by Scripts/gen-stats.sh)

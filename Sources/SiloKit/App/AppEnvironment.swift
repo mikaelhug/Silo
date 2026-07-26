@@ -20,6 +20,9 @@ public final class AppEnvironment {
     /// The DXMT settings tab / onboarding step — the SAME install flow as `runtime`, parameterized for
     /// DXMT (its own releases, its own default persisted to `BackendConfig.dxmtLibDirPath`).
     public let dxmtRuntime: RuntimeViewModel
+    /// The DXVK settings tab / onboarding step — same install flow, parameterized for DXVK (its own releases,
+    /// its own default persisted to `BackendConfig.dxvkLibDirPath`). Enables the DirectX 9 backend.
+    public let dxvkRuntime: RuntimeViewModel
     public let gptkManager: GPTKManagerViewModel
     /// The Steam bottle's settings VM (setup / launch), shared by the Library + the settings pane.
     public let steamBottleVM: SteamBottleViewModel
@@ -77,6 +80,10 @@ public final class AppEnvironment {
             kind: .dxmt(manager: runtimeManager,
                         wineRuntimeName: { backendSettings.config.wineRuntimeName }),
             manager: runtimeManager, repo: Silo.wineRepo)
+        self.dxvkRuntime = RuntimeViewModel(
+            kind: .dxvk(manager: runtimeManager,
+                        wineRuntimeName: { backendSettings.config.wineRuntimeName }),
+            manager: runtimeManager, repo: Silo.wineRepo)
         self.gptkManager = GPTKManagerViewModel(importer: GPTKImporter(runner: runner, paths: paths))
 
         // The single Steam bottle + its live client session + settings VM. The client runs on the base wine
@@ -108,12 +115,17 @@ public final class AppEnvironment {
             guard let lib = install.artifact else { return }
             Task { await self?.backendSettings.applyDXMTLibDir(lib, name: install.name) }
         }
+        dxvkRuntime.onDefaultChanged = { [weak self] install in
+            guard let lib = install.artifact else { return }
+            Task { await self?.backendSettings.applyDXVKLibDir(lib, name: install.name) }
+        }
         // Removing the CURRENT default runtime clears its persisted config path, so the readiness gates
         // (all `!= nil` checks) don't stick true against a deleted runtime — every launch would otherwise
         // fail with a dangling path, and onboarding would keep showing the step "Done".
         runtime.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearWineDefault() } }
         gptkManager.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearGPTKDefault() } }
         dxmtRuntime.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearDXMTDefault() } }
+        dxvkRuntime.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearDXVKDefault() } }
         // A fresh Steam install must flip the library's cached `steamReady` gate (it drives onboarding);
         // load() re-probes the cache off-main. Without this, onboarding would stall until a relaunch.
         steamBottleVM.onSteamInstalled = { [weak self] in Task { await self?.gameLibrary.load() } }
@@ -151,6 +163,8 @@ public final class AppEnvironment {
         await runtime.refresh()
         dxmtRuntime.defaultName = state.backend.dxmtRuntimeName
         await dxmtRuntime.refresh()
+        dxvkRuntime.defaultName = state.backend.dxvkRuntimeName
+        await dxvkRuntime.refresh()
         // Populate the bottle VM's cached installed-flag (settings buttons gate on it).
         await steamBottleVM.refreshInstalled()
         // Library = games installed in the Steam bottle.
@@ -242,12 +256,16 @@ public final class AppEnvironment {
     /// (non-Steam) games.
     public var dxmtReady: Bool { backendSettings.config.dxmtLibDirPath != nil }
 
+    /// The DXVK runtime (its module dir) is configured — enables the DXVK backend, incl. the Automatic DX9
+    /// path (a DX9 game routed to DXVK needs this, else `play` surfaces `backendNotConfigured`).
+    public var dxvkReady: Bool { backendSettings.config.dxvkLibDirPath != nil }
+
     // MARK: - Guided setup (the onboarding "Set up" chain)
 
-    /// True while any part of the guided setup is running (a Wine/DXMT runtime download, or the Steam-bottle
-    /// setUp) — drives the onboarding "Set up" step's spinner.
+    /// True while any part of the guided setup is running (a Wine/DXMT/DXVK runtime download, or the
+    /// Steam-bottle setUp) — drives the onboarding "Set up" step's spinner.
     public var setupBusy: Bool {
-        runtime.isInstalling || dxmtRuntime.isInstalling || steamBottleVM.busy
+        runtime.isInstalling || dxmtRuntime.isInstalling || dxvkRuntime.isInstalling || steamBottleVM.busy
     }
 
     /// The full ordered onboarding setup, chained from a single "Set up" click: download the latest Wine
@@ -275,6 +293,11 @@ public final class AppEnvironment {
         //    Matched to the configured wine, so it must run AFTER the wine default is applied (step 1).
         if !dxmtReady {
             await dxmtRuntime.installLatest()
+        }
+        // 2b. DXVK runtime (best-effort — readies the Automatic DirectX 9 path, which neither GPTK nor DXMT
+        //     can serve; not a prerequisite for the bottle).
+        if !dxvkReady {
+            await dxvkRuntime.installLatest()
         }
         // 3. The Steam bottle: download → create → components → user-guided Steam → warm-up + wrap.
         await steamBottleVM.setUp()

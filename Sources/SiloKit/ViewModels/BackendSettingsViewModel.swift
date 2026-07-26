@@ -41,6 +41,14 @@ public final class BackendSettingsViewModel {
         await save()
     }
 
+    /// Adopt a DXVK runtime's module dir as the backend's DXVK lib dir. The DXVK counterpart of
+    /// `applyDXMTLibDir` (`dxvkLibDirPath` feeds `installDXVKPrefixLoaders` + `dxvkSupports32Bit`).
+    public func applyDXVKLibDir(_ dir: URL, name: String? = nil) async {
+        config.dxvkLibDirPath = dir
+        config.dxvkRuntimeName = name ?? dir.lastPathComponent
+        await save()
+    }
+
     /// Clear a persisted default whose runtime was just removed, so the readiness gates stop pointing at a
     /// deleted path (`wineReady`/`gptkReady`/`dxmtReady` are `!= nil` checks) and onboarding re-surfaces the
     /// step instead of failing every launch with a dangling-path error.
@@ -54,6 +62,10 @@ public final class BackendSettingsViewModel {
     }
     public func clearDXMTDefault() async {
         config.dxmtLibDirPath = nil; config.dxmtRuntimeName = nil
+        await save()
+    }
+    public func clearDXVKDefault() async {
+        config.dxvkLibDirPath = nil; config.dxvkRuntimeName = nil
         await save()
     }
 

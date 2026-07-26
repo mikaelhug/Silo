@@ -190,6 +190,64 @@ public actor RuntimeManager {
         return runtimeName.hasPrefix(prefix) ? String(runtimeName.dropFirst(prefix.count)) : nil
     }
 
+    // MARK: - DXVK (reuses the same download+extract+harden engine as Wine/DXMT)
+
+    /// A DXVK runtime's module dir inside an extracted release — the `x86_64-windows` folder, found by its
+    /// signature files (`d3d9.dll` + `d3d11.dll`). The `d3d9.dll` distinguishes it from a DXMT tree (which
+    /// ships `winemetal.dll` + `d3d11.dll` but NO d3d9). The DXVK counterpart of `locateDXMTLibDir`.
+    public static func locateDXVKLibDir(in dir: URL, fileManager: FileManager = .default) -> URL? {
+        let standard = dir.appendingPathComponent("lib/wine/x86_64-windows")
+        if fileManager.fileExists(atPath: standard.appendingPathComponent("d3d9.dll").path),
+           fileManager.fileExists(atPath: standard.appendingPathComponent("d3d11.dll").path) { return standard }
+
+        guard let enumerator = fileManager.enumerator(at: dir, includingPropertiesForKeys: nil) else { return nil }
+        for case let url as URL in enumerator where url.lastPathComponent == "d3d9.dll" {
+            let parent = url.deletingLastPathComponent()
+            if fileManager.fileExists(atPath: parent.appendingPathComponent("d3d11.dll").path) { return parent }
+        }
+        return nil
+    }
+
+    /// DXVK builds installed under the Runtimes dir (dirs containing a locatable DXVK module dir). DXVK never
+    /// creates a variant clone (it runs native on the base runtime), so — unlike DXMT — there's no clone to
+    /// filter out here; the `d3d9.dll` signature already excludes wine/GPTK/DXMT trees.
+    public func installedDXVK() -> [DXVKInstall] {
+        guard let dirs = try? fileManager.contentsOfDirectory(
+            at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return dirs.compactMap { dir -> DXVKInstall? in
+            guard !RuntimeVariants.isVariantClone(dir.lastPathComponent),
+                  let lib = Self.locateDXVKLibDir(in: dir) else { return nil }
+            return DXVKInstall(name: dir.lastPathComponent, installDir: dir, libDir: lib)
+        }.sorted { $0.name > $1.name }   // newest tag first
+    }
+
+    /// Download + extract a DXVK build and locate its module dir — the DXVK counterpart of `installDXMT`,
+    /// sharing the exact same `install` engine (HTTPS-only, mandatory/best-effort SHA-256, safe extract,
+    /// de-quarantine).
+    @discardableResult
+    public func installDXVK(
+        name: String, from downloadURL: URL, requireDigest: Bool = false
+    ) async throws -> DXVKInstall {
+        let safe = try Self.requireSafeComponent(name)
+        try await install(name: safe, from: downloadURL, requireDigest: requireDigest)
+        let dir = paths.runtimesDir.appendingPathComponent(safe, isDirectory: true)
+        return DXVKInstall(name: safe, installDir: dir, libDir: Self.locateDXVKLibDir(in: dir))
+    }
+
+    /// Pick the DXVK release to install for a given wine. DXVK releases are tagged `dxvk-<ver>-cx<wine
+    /// version>`. DXVK is wine-INDEPENDENT (native dlls, no ABI link), so the `-cx<ver>` match is only a soft
+    /// preference to keep the paired tag; fall back to the newest `dxvk-*`. Pure. Mirrors `matchedDXMTRelease`.
+    public static func matchedDXVKRelease(
+        _ releases: [GitHubRelease], forWine wineRuntimeName: String?
+    ) -> GitHubRelease? {
+        let dxvk = releases.filter { $0.tagName.lowercased().hasPrefix("dxvk") }
+        if let cx = wineRuntimeName.flatMap(wineCXVersion),
+           let matched = dxvk.first(where: { $0.tagName.hasSuffix("-cx\(cx)") }) {
+            return matched
+        }
+        return dxvk.first
+    }
+
     // MARK: - Shared download engine
 
     /// Download an asset and extract it into `Runtimes/<name>` (the shared download+extract engine;

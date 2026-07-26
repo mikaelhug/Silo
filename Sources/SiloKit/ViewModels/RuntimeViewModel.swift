@@ -56,6 +56,22 @@ public extension RuntimeKind {
                 try await manager.installDXMT(name: name, from: url, requireDigest: digest).runtimeInstall
             })
     }
+
+    /// The DXVK flow: the `dxvk-*-cx<ver>` build matched to the configured wine (a soft preference — DXVK is
+    /// native and wine-independent) → `installDXVK`.
+    static func dxvk(manager: RuntimeManager, wineRuntimeName: @escaping () -> String?) -> RuntimeKind {
+        RuntimeKind(
+            noun: "DXVK",
+            workflowName: "build-dxvk",
+            downloadHint: "(~15 MB)",
+            unusableWarning: "no x86_64-windows module folder was found in",
+            releaseLimit: 30,
+            pickRelease: { RuntimeManager.matchedDXVKRelease($0, forWine: wineRuntimeName()) },
+            installed: { await manager.installedDXVK().map(\.runtimeInstall) },
+            install: { name, url, digest in
+                try await manager.installDXVK(name: name, from: url, requireDigest: digest).runtimeInstall
+            })
+    }
 }
 
 /// Drives a runtime settings tab (Wine or DXMT — see `RuntimeKind`): installs the latest prebuilt runtime

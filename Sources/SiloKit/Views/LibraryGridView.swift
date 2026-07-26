@@ -331,6 +331,7 @@ struct SettingsView: View {
             WineDownloadView().tabItem { Label("Wine", systemImage: "wineglass") }
             GPTKManagerView().tabItem { Label("GPTK", systemImage: "cpu") }
             DXMTManagerView().tabItem { Label("DXMT", systemImage: "square.stack.3d.up") }
+            DXVKManagerView().tabItem { Label("DXVK", systemImage: "square.stack.3d.up.badge.a") }
         }
         // Definite compact size; with the scene's `.windowResizability(.contentSize)` the WINDOW becomes
         // exactly this (no grey side-columns), a fixed-size settings pane per macOS convention.
