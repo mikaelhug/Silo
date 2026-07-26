@@ -105,14 +105,33 @@ jobs:
           test -n "$WINE_SRC"
           echo "WINE_SRC=$WINE_SRC" >> "$GITHUB_ENV"
 
+      - name: Build pinned SDL (winebus game-controller backend)
+        run: |
+          set -eo pipefail
+          # Build the EXACT SDL CrossOver ships (versions.env SDL_VERSION) from libsdl-org source, x86_64 to
+          # match Wine. Gives Wine's --with-sdl its headers AND the runtime dylib we bundle. A generic
+          # Homebrew libSDL2 aborted Wine off the main thread; this pinned build does not.
+          set -a; . "$GITHUB_WORKSPACE/versions.env"; set +a
+          export PATH="$($ARCH_PREFIX "$BREW" --prefix cmake)/bin:$PATH"
+          SDL_PREFIX="$GITHUB_WORKSPACE/sdl-install"
+          curl -fL "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL2-${SDL_VERSION}.tar.gz" -o sdl.tar.gz
+          rm -rf sdl-src sdl-build "$SDL_PREFIX" && mkdir sdl-src && tar -xzf sdl.tar.gz -C sdl-src --strip-components=1
+          $ARCH_PREFIX cmake -S sdl-src -B sdl-build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_INSTALL_PREFIX="$SDL_PREFIX" -DSDL_SHARED=ON -DSDL_STATIC=OFF
+          $ARCH_PREFIX cmake --build sdl-build -j"$(sysctl -n hw.ncpu)"
+          $ARCH_PREFIX cmake --install sdl-build
+          test -f "$SDL_PREFIX/lib/libSDL2-2.0.0.dylib"
+          echo "SDL_PREFIX=$SDL_PREFIX" >> "$GITHUB_ENV"
+
       - name: Configure + build Wine (wow64, x86_64)
         run: |
           set -eo pipefail
           BREW_PREFIX="$($ARCH_PREFIX "$BREW" --prefix)"
           export PATH="$($ARCH_PREFIX "$BREW" --prefix ccache)/libexec:$($ARCH_PREFIX "$BREW" --prefix bison)/bin:$($ARCH_PREFIX "$BREW" --prefix pkgconf)/bin:$PATH"
-          export PKG_CONFIG_PATH="$($ARCH_PREFIX "$BREW" --prefix gnutls)/lib/pkgconfig:$($ARCH_PREFIX "$BREW" --prefix freetype)/lib/pkgconfig:$($ARCH_PREFIX "$BREW" --prefix gstreamer)/lib/pkgconfig:$BREW_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-          export CPPFLAGS="-I$($ARCH_PREFIX "$BREW" --prefix gnutls)/include -I$($ARCH_PREFIX "$BREW" --prefix freetype)/include ${CPPFLAGS:-}"
-          export LDFLAGS="-L$($ARCH_PREFIX "$BREW" --prefix gnutls)/lib -L$($ARCH_PREFIX "$BREW" --prefix freetype)/lib -L$BREW_PREFIX/lib ${LDFLAGS:-}"
+          export PKG_CONFIG_PATH="$SDL_PREFIX/lib/pkgconfig:$($ARCH_PREFIX "$BREW" --prefix gnutls)/lib/pkgconfig:$($ARCH_PREFIX "$BREW" --prefix freetype)/lib/pkgconfig:$($ARCH_PREFIX "$BREW" --prefix gstreamer)/lib/pkgconfig:$BREW_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export CPPFLAGS="-I$SDL_PREFIX/include -I$($ARCH_PREFIX "$BREW" --prefix gnutls)/include -I$($ARCH_PREFIX "$BREW" --prefix freetype)/include ${CPPFLAGS:-}"
+          export LDFLAGS="-L$SDL_PREFIX/lib -L$($ARCH_PREFIX "$BREW" --prefix gnutls)/lib -L$($ARCH_PREFIX "$BREW" --prefix freetype)/lib -L$BREW_PREFIX/lib ${LDFLAGS:-}"
           export CC="clang -arch x86_64"
           export CXX="clang++ -arch x86_64"
           pkg-config --modversion gnutls
@@ -135,7 +154,7 @@ jobs:
             --enable-archs=i386,x86_64 \
             --disable-tests --without-x \
             --with-freetype --with-gstreamer --with-gnutls \
-            --without-sdl  # winebus's SDL backend dlopens libSDL2 → off-main-thread NSAlert aborts Wine on macOS
+            --with-sdl  # winebus's SDL controller backend; dlopens the pinned libSDL2 bundled below (Map Controllers → XInput)
           $ARCH_PREFIX make -j"$(sysctl -n hw.ncpu)"
           $ARCH_PREFIX make install
           test -x "$GITHUB_WORKSPACE/wine-install/bin/wine64" || test -x "$GITHUB_WORKSPACE/wine-install/bin/wine"
@@ -149,7 +168,8 @@ jobs:
           python3 "$GITHUB_WORKSPACE/Scripts/check-webhelper-wrapper.py" "$WRAPPER"
 
       - name: Bundle dependency dylibs (self-contained runtime)
-        run: ./Scripts/bundle-wine-dylibs.sh "$GITHUB_WORKSPACE/wine-install"
+        # SILO_SDL_DYLIB ships our pinned libSDL2 (winebus dlopens it by leaf name from silo-bundled).
+        run: SILO_SDL_DYLIB="$SDL_PREFIX/lib/libSDL2-2.0.0.dylib" ./Scripts/bundle-wine-dylibs.sh "$GITHUB_WORKSPACE/wine-install"
 
       - name: Package wine.tar.xz
         run: |

@@ -28,7 +28,7 @@ struct MakePlanTests {
         #expect(plan.environment["WINEMSYNC"] == "1")          // MSync default on Apple Silicon
         #expect(plan.environment["WINEESYNC"] == nil)          // mutually exclusive — not both
         // GPTK injects D3DMetal; with no GPTK lib dir set here there are no d3d overrides, so
-        // WINEDLLOVERRIDES is unset (the SDL crash is fixed by removing libSDL2, not a DLL override).
+        // WINEDLLOVERRIDES is unset (controllers work via winebus's SDL/IOHID backends, no override needed).
         #expect(plan.environment["WINEDLLOVERRIDES"] == nil)
         #expect(plan.environment["WINEDEBUG"] == Silo.wineDebug)   // build-gated (verbose local / -all CI)
         #expect(plan.currentDirectory.path == "/lib/steamapps/common/Half-Life 2")

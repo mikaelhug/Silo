@@ -96,8 +96,6 @@ public enum Silo {
 
     /// `WINEDLLOVERRIDES` used while creating/booting a prefix: disables wine-mono and wine-gecko so
     /// `wineboot` doesn't pop blocking "install Mono/Gecko?" dialogs and can complete headlessly.
-    /// (The winebus/SDL crash is NOT fixed here — `WINEDLLOVERRIDES` can't disable a PnP `.sys` driver;
-    /// the fix is removing libSDL2 from the runtime: build `--without-sdl` + `RuntimeManager.stripBundledSDL`.)
     public static let winePrefixInitOverrides = "mscoree,mshtml="
 
     /// `WINEDEBUG` for every wine invocation. **LOCAL builds: `+loaddll` — wine's default diagnostics

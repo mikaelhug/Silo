@@ -254,11 +254,9 @@ public actor RuntimeManager {
         )
         guard result.succeeded else { throw RuntimeError.extractionFailed(result.exitCode) }
 
-        // winebus's SDL controller backend dlopens libSDL2, whose macOS initializer pops an NSAlert off the
-        // main thread → the WHOLE Wine process aborts the instant winebus loads (before Steam draws). Runtimes
-        // built before `--without-sdl` bundle libSDL2; strip it so a downloaded runtime can't crash on launch,
-        // with no Wine rebuild required.
-        Self.stripBundledSDL(in: staging, fileManager: fileManager)
+        // NB: the runtime intentionally SHIPS libSDL2 (winebus's game-controller backend dlopens it). It's
+        // the pinned SDL_VERSION built from source (see build-wine.sh / bundle-wine-dylibs.sh), NOT the
+        // generic Homebrew libSDL2 that used to abort Wine off the main thread — so we no longer strip it.
 
         // Downloaded Wine is unsigned + quarantined → Gatekeeper blocks it until the quarantine flag is
         // stripped (x86_64 runs unsigned, so no signing is needed — see `deQuarantine`). Best-effort, but
@@ -272,25 +270,6 @@ public actor RuntimeManager {
 
     /// The warning from the most recent install's hardening pass, or nil when it applied cleanly.
     public private(set) var lastHardeningIssue: String?
-
-    /// Remove any bundled `libSDL2*` from a runtime (see `install`). Searches the runtime's dylib tree
-    /// (`lib/`) — covering Silo's `lib/silo-bundled` AND a custom-repo runtime that bundles it elsewhere —
-    /// while PRUNING the large `lib/wine` PE-module subtree, where a loadable dylib never lives. That keeps it
-    /// cheap even on a slow external volume (the built-in repo builds `--without-sdl`, so it usually finds
-    /// nothing, and shouldn't pay to walk thousands of PE files to learn that). Idempotent; no-op if absent.
-    @discardableResult
-    static func stripBundledSDL(in runtimeDir: URL, fileManager: FileManager = .default) -> Int {
-        let libDir = runtimeDir.appendingPathComponent("lib", isDirectory: true)
-        guard let enumerator = fileManager.enumerator(at: libDir, includingPropertiesForKeys: nil)
-        else { return 0 }
-        var removed = 0
-        for case let url as URL in enumerator {
-            if url.lastPathComponent == "wine" { enumerator.skipDescendants(); continue }   // prune the PE tree
-            if url.lastPathComponent.lowercased().hasPrefix("libsdl2"),
-               (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
-        }
-        return removed
-    }
 
     /// Remove an installed runtime, plus any secondary-backend variant CLONE derived from it
     /// (`<name>-dxmt`). The clone is derived state: `RuntimeVariants.ensureClone` keeps an EXISTING clone

@@ -658,8 +658,8 @@ public struct SteamBottle: Sendable {
     /// `--single-process`, which breaks Chromium's network service). The load-bearing flag injection is the
     /// steamwebhelper wrapper (`installWebHelperWrapper`); this env is the partner that carries SwiftShader.
     /// `WINEMSYNC=1` matches the per-game launch env so Steam + co-hosted games share one wineserver (the
-    /// co-residency Steamworks relies on). The winebus/SDL crash is fixed by removing libSDL2 (build
-    /// `--without-sdl` + `stripBundledSDL`), NOT a DLL override; CEF presentation is the virtual desktop.
+    /// co-residency Steamworks relies on). No `WINEDLLOVERRIDES` here: the Steam client needs no
+    /// graphics-backend override (its CEF UI paints via SwiftShader software GL, not GPTK/DXMT).
     private func steamEnvironment(wine: URL) -> [String: String] {
         var env = Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine)
         // Force steamwebhelper's Chromium onto bundled SwiftShader software GL — the route that actually

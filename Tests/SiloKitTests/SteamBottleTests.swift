@@ -61,8 +61,8 @@ struct SteamBottleTests {
         #expect(call.environment["WINEMSYNC"] == "1")                     // co-residency with games
         #expect(call.environment["STEAM_CEF_COMMAND_LINE"]?.contains("--use-gl=swiftshader") == true)
         #expect(call.environment["STEAM_DISABLE_GPU_PROCESS"] == "1")
-        // No WINEDLLOVERRIDES on the Steam launch: the winebus/SDL crash is fixed by removing libSDL2
-        // (--without-sdl / stripBundledSDL), not a DLL override (which can't disable a PnP .sys driver).
+        // No WINEDLLOVERRIDES on the Steam launch: the Steam client needs no graphics-backend override
+        // (its CEF UI paints via SwiftShader software GL, not GPTK/DXMT).
         #expect(call.environment["WINEDLLOVERRIDES"] == nil)
     }
 

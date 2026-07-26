@@ -46,7 +46,7 @@ is_media() {
   find "$WD/bin" "$WD/lib" -type f -print0 2>/dev/null | while IFS= read -r -d '' f; do
     otool -L "$f" 2>/dev/null | tail -n +2 | awk '{print $1}'
   done
-  for pkg in freetype gnutls molten-vk sdl2 libpng; do
+  for pkg in freetype gnutls molten-vk libpng; do
     find "/opt/homebrew/opt/$pkg/lib" "/usr/local/opt/$pkg/lib" -maxdepth 1 -name '*.dylib' 2>/dev/null || true
   done
 } | grep -E '^/opt/homebrew/|^/usr/local/' | sort -u > "$QUEUE"
@@ -68,6 +68,19 @@ while [ -s "$QUEUE" ]; do
   otool -L "$real" 2>/dev/null | tail -n +2 | awk '{print $1}' \
     | grep -E '^/opt/homebrew/|^/usr/local/' >> "$QUEUE" || true
 done
+
+# Bundle the pinned SDL (built from source by build-wine.sh / build-wine.yml, not Homebrew). winebus's
+# controller backend dlopens "libSDL2-2.0.0.dylib" by leaf name → dyld resolves it here via
+# DYLD_FALLBACK_LIBRARY_PATH. SDL on macOS links only system frameworks, so no transitive closure to add.
+if [ -n "${SILO_SDL_DYLIB:-}" ]; then
+  if [ -f "$SILO_SDL_DYLIB" ] && has_arch "$SILO_SDL_DYLIB"; then
+    cp -f "$SILO_SDL_DYLIB" "$BUNDLED/libSDL2-2.0.0.dylib"
+    chmod u+w "$BUNDLED/libSDL2-2.0.0.dylib"
+    echo "Bundled pinned SDL: $SILO_SDL_DYLIB"
+  else
+    echo "ERROR: SILO_SDL_DYLIB=$SILO_SDL_DYLIB missing or wrong arch ($ARCH)"; exit 1
+  fi
+fi
 
 # Ad-hoc sign the bundled dylibs (they're modified copies).
 find "$BUNDLED" -type f -name '*.dylib' -exec codesign --force --sign - {} + 2>/dev/null || true

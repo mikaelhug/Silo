@@ -3,6 +3,29 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🎮 Game-controller support: re-enable SDL in the Wine build (2026-07-26, `main`; 416 tests green — CODE
+  DONE, needs a new `wine-cx-*` CI release + on-device controller verification).** Controllers didn't work
+  because Wine was built `--without-sdl` and `libSDL2` was stripped on install (M75→M80) — a real fix for a
+  recurring off-main-thread `NSWindow`/NSAlert abort when `winebus.so` dlopens libSDL2. Investigation (vs the
+  local CrossOver install, our config oracle) found the abort was a property of the **generic Homebrew
+  libSDL2**, not SDL: CrossOver bundles **SDL 2.30.12 x86_64**, sets **no** SDL hints, and its bottles set
+  **no** winebus registry keys — it relies purely on winebus's compiled-in defaults (`Enable SDL=1`,
+  `Map Controllers=1`, `DisableHidraw=0`); `Map Controllers` is what remaps *any* pad to XInput ("just
+  works"). Silo's `winebus.so` already contained Wine's native **IOHID** backend (never SDL-linked), so it
+  never crashed and gives Xbox pads XInput today — but lacked SDL's broad mapping. Since Silo + CrossOver
+  share the same CrossOver-FOSS winebus source, mirroring CrossOver's exact SDL is the evidence-based fix. One
+  x86_64 SDL covers 32- + 64-bit games (winebus.so is the x86_64 unix-side driver). Changes:
+  - `versions.env`: pinned `SDL_VERSION=2.30.12` (build-input only; not mirrored to `Versions.swift`).
+  - `build-wine.sh` + `build-wine.yml`: build the pinned SDL from libsdl-org source (cmake, x86_64), flip
+    `--without-sdl` → `--with-sdl` pointed at it; drop the Homebrew `sdl2` dep.
+  - `bundle-wine-dylibs.sh`: bundle our built `libSDL2-2.0.0.dylib` into `lib/silo-bundled` (via
+    `SILO_SDL_DYLIB`) — winebus dlopens it by leaf name off `DYLD_FALLBACK_LIBRARY_PATH`.
+  - `RuntimeManager`: removed `stripBundledSDL` (call + fn + test) so the bundled SDL survives install.
+  - No winebus registry work + **deliberately no `xinput/dinput` DLL overrides** — CrossOver relies on Wine's
+    builtin defaults + SDL Map Controllers; adding overrides would deviate from that proven template.
+  - **On-device-unverified (needs a fresh CI `wine-cx-*` release built with these scripts):** the crash gate
+    (no NSWindow abort with 2.30.12), controller enumeration, and the non-Xbox→XInput parity win. Contingency
+    if it still aborts: `SDL_JOYSTICK_MFI=0` / `SDL_VIDEODRIVER=dummy` in the launch env.
 - **🔎 Add-via-installer now infers games from the installer's own Start-Menu shortcuts (2026-07-14, `main`;
   417 tests green).** The failure that motivated this: a user ran an installer, then hand-picked a bare `.exe`
   (`Browser.exe`) that needs args + a working dir it couldn't know — blank window. CrossOver "just works"
@@ -1272,6 +1295,10 @@
     whose macOS init pops an off-main-thread NSAlert → Wine aborts. `WINEDLLOVERRIDES=winebus=` does NOT
     disable a PnP `.sys` driver; the reliable fix is removing the dylib. → build `--without-sdl` (M80) +
     `RuntimeManager.stripBundledSDL` auto-strips bundled `libSDL2*` (no rebuild needed).
+    **⚠️ SUPERSEDED 2026-07-26 (controller support, see "Now"):** the crash was the *generic Homebrew*
+    libSDL2, not SDL itself — CrossOver ships SDL 2.30.12 (same winebus source) and does NOT crash. SDL is
+    now re-enabled: build `--with-sdl` + bundle a pinned SDL 2.30.12 built from source; `stripBundledSDL`
+    removed.
   - **wrapper stranded** (M81): a Steam update switched the CEF dir `cef.win7x64`→`cef.win64`, leaving the
     single-dir wrapper orphaned while Steam ran the unwrapped webhelper → black. `installWebHelperWrapper`
     now wraps ALL `bin/cef/*/steamwebhelper.exe`. (Path was also wrongly `cef.win64`-hardcoded pre-M78.)
