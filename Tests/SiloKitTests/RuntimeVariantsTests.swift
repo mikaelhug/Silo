@@ -93,30 +93,26 @@ struct RuntimeVariantsTests {
         return lib
     }
 
-    @Test("prepare(.dxvk) clones the base to <root>-dxvk and overlays DXVK's PE d3d modules into the CLONE only")
+    @Test("prepare(.dxvk) runs on the BASE runtime — no clone, nothing overlaid into lib/wine (native model)")
     func prepareDXVK() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let wine = try makeWine(tmp)
         let dxvkLib = try makeDXVK(tmp)
         let out = try RuntimeVariants().prepare(backend: .dxvk, baseWine: wine, libDir: dxvkLib)
-        #expect(out.path.hasSuffix("wine-dxvk/bin/wine64"))
-        // A full clone (the marker rode along); the overlay landed in the clone, never the base.
-        #expect(FileManager.default.fileExists(
-            atPath: tmp.url.appendingPathComponent("wine-dxvk/share/marker.txt").path))
-        #expect(FileManager.default.fileExists(
-            atPath: tmp.url.appendingPathComponent("wine-dxvk/lib/wine/x86_64-windows/d3d9.dll").path))
+        #expect(out == wine)   // native DXVK runs on the base wine — its dlls are seeded into the PREFIX, not here
+        // No `<root>-dxvk` clone, and the base runtime's lib/wine is untouched (DXVK is `=n` from the prefix).
+        #expect(!FileManager.default.fileExists(atPath: tmp.url.appendingPathComponent("wine-dxvk").path))
         #expect(!FileManager.default.fileExists(
             atPath: tmp.url.appendingPathComponent("wine/lib/wine/x86_64-windows/d3d9.dll").path))
     }
 
-    @Test("cloneName + isVariantClone are the ONE naming source — and never flag a real DXMT/DXVK release tag")
+    @Test("cloneName + isVariantClone are the ONE naming source — and never flag a real DXMT release tag")
     func cloneNaming() {
         #expect(RuntimeVariants.cloneName(ofBase: "wine-cx-26.2.0", backend: .dxmt) == "wine-cx-26.2.0-dxmt")
-        #expect(RuntimeVariants.cloneName(ofBase: "wine-cx-26.2.0", backend: .dxvk) == "wine-cx-26.2.0-dxvk")
         // A clone name round-trips as a clone…
         #expect(RuntimeVariants.isVariantClone(RuntimeVariants.cloneName(ofBase: "wine-cx-26.2.0", backend: .dxmt)))
-        #expect(RuntimeVariants.isVariantClone(RuntimeVariants.cloneName(ofBase: "wine-cx-26.2.0", backend: .dxvk)))
-        // …a base wine build and REAL DXMT/DXVK release tags do not (they must stay listable in their panes).
+        // …a base wine build and a REAL DXMT/DXVK release tag do not (they must stay listable in their panes;
+        // DXVK never clones, so no `-dxvk` dir is ever created either).
         #expect(!RuntimeVariants.isVariantClone("wine-cx-26.2.0"))
         #expect(!RuntimeVariants.isVariantClone("dxmt-v0.72-cx26.2.0"))
         #expect(!RuntimeVariants.isVariantClone("dxvk-v2.4-cx26.2.0"))

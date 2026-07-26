@@ -10,6 +10,9 @@ import Darwin
 ///   The clone is near-free on APFS (only the handful of overlaid files diverge); on a non-APFS / cross-
 ///   volume target it falls back to a deep copy. The DXMT override set (`GraphicsBackend.dxmt.dllOverrides`)
 ///   forces D3D10/11 to DXMT's builtins, so any GPTK modules inherited by the clone stay dormant.
+/// - **DXVK** overlays NOTHING here — native DXVK runs on the **base runtime** with its d3d modules seeded
+///   into the game prefix (`installDXVKPrefixLoaders`) and overridden `=n`, so `prepare(.dxvk)` just returns
+///   the base wine (the `=n` native DLLs load from the prefix regardless of what `lib/wine` carries).
 ///
 /// Idempotent — safe to call before every launch: it re-overlays (a no-op if unchanged) and only clones the
 /// first time the variant is needed.
@@ -39,12 +42,11 @@ public struct RuntimeVariants: Sendable {
             try linker.overlayDXMT(wineBinary: variantWine, dxmtLibDir: libDir)
             return variantWine
         case .dxvk:
-            // Like DXMT: DXVK overlays a builtin d3d11 into the runtime, so it can't share GPTK's/DXMT's tree.
-            // It gets its own `<root>-dxvk` clone (which inherits the base runtime's bundled libMoltenVK.dylib
-            // — DXVK's Vulkan driver — so no separate MoltenVK overlay is needed here).
-            let variantWine = try ensureClone(of: baseWine, backend: backend)
-            try linker.overlayDXVK(wineBinary: variantWine, dxvkLibDir: libDir)
-            return variantWine
+            // Unlike GPTK/DXMT, native DXVK overlays NOTHING into `lib/wine` — its d3d modules are seeded into
+            // the game PREFIX per launch (LaunchOrchestrator.linkGraphics → installDXVKPrefixLoaders) and
+            // overridden `=n`. So it needs no clone and no runtime overlay: it runs on the base runtime
+            // as-is (the `=n` native DLLs are loaded from the prefix regardless of what's in lib/wine).
+            return baseWine
         }
     }
 

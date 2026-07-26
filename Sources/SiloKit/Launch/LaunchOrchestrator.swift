@@ -277,9 +277,9 @@ public struct LaunchOrchestrator: Sendable {
             try linker.overlayDXMT(wineBinary: wine, dxmtLibDir: libDir)
             try linker.installDXMTPrefixLoaders(prefix: prefix, dxmtLibDir: libDir)
         case .dxvk:
-            // DXVK needs no prefix loader: its d3d9/10core/11 are standard wine dll names (wineboot fakedlls
-            // them), so the `=b` override resolves the overlaid builtins directly.
-            try linker.overlayDXVK(wineBinary: wine, dxvkLibDir: libDir)
+            // Native DXVK overlays nothing into the runtime — seed its d3d9/10core/11 into the prefix's
+            // system32/syswow64, where the `=n` override loads them (mirrors DXMT's winemetal seed).
+            try linker.installDXVKPrefixLoaders(prefix: prefix, dxvkLibDir: libDir)
         }
     }
 

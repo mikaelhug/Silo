@@ -83,18 +83,20 @@ struct BottleResolverTests {
         }
     }
 
-    @Test("Steam with a DXVK backend resolves the SAME Steam prefix on the DXVK variant runtime")
+    @Test("Steam with a DXVK backend resolves the SAME Steam prefix on the BASE runtime (native — no clone)")
     func steamDXVK() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (config, paths) = try fixtures(tmp, dxvk: true)
         let ctx = try BottleResolver(paths: paths).steam(backend: .dxvk, config: config)
 
         #expect(ctx.graphics == .dxvk)
-        #expect(ctx.prefix == paths.steamBottle)                        // the shared Steam prefix
-        #expect(ctx.wineBinary.path.contains("/wine-dxvk/bin/wine64"))  // the DXVK variant clone
-        // DXVK's d3d9 overlaid into the CLONE (the DirectX 9 path), never the base runtime.
-        #expect(FileManager.default.fileExists(
-            atPath: tmp.url.appendingPathComponent("wine-dxvk/lib/wine/x86_64-windows/d3d9.dll").path))
+        #expect(ctx.prefix == paths.steamBottle)             // the shared Steam prefix
+        #expect(ctx.wineBinary == config.wineBinaryPath)     // native DXVK runs on the base wine, no clone
+        // No `-dxvk` runtime clone, and nothing overlaid into the base lib/wine (DXVK's dlls are seeded into
+        // the PREFIX at launch, by LaunchOrchestrator.linkGraphics — not here).
+        #expect(!FileManager.default.fileExists(atPath: tmp.url.appendingPathComponent("wine-dxvk").path))
+        #expect(!FileManager.default.fileExists(
+            atPath: tmp.url.appendingPathComponent("wine/lib/wine/x86_64-windows/d3d9.dll").path))
     }
 
     @Test("Steam with an unconfigured DXVK backend refuses — never mis-routes onto the base runtime")

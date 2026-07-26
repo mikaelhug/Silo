@@ -19,9 +19,10 @@ struct GraphicsBackendTests {
         #expect(!GraphicsBackend.dxmt.overlaysExternalFramework)        // winemetal.so links system Metal
     }
 
-    @Test("DXVK overrides d3d9/10core/11 — the only DX9 path — with no dxgi (wine's builtin) and no framework")
+    @Test("DXVK overrides d3d9/10core/11 as NATIVE — the only DX9 path — no dxgi (wine's builtin), no framework")
     func dxvkShape() {
-        #expect(GraphicsBackend.dxvk.dllOverrides == "d3d9,d3d10core,d3d11=b")
+        // Native (upstream) DXVK, seeded into the prefix — so `=n`, NOT the `=b` builtin GPTK/DXMT use.
+        #expect(GraphicsBackend.dxvk.dllOverrides == "d3d9,d3d10core,d3d11=n")
         #expect(GraphicsBackend.dxvk.dllOverrides.contains("d3d9"))     // DXVK is the sole DirectX 9 translator
         #expect(!GraphicsBackend.dxvk.dllOverrides.contains("dxgi"))    // pairs with wine's builtin dxgi
         #expect(!GraphicsBackend.dxvk.dllOverrides.contains("d3d12"))   // DX12 stays GPTK

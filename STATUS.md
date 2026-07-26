@@ -9,20 +9,24 @@
   backends can't run get a mature compatibility path. Mirrors CrossOver 26, which ships DXVK as its Vulkan
   tier below D3DMetal. Plan: `~/.claude/plans/silo-has-one-big-rippling-quail.md`; routing decided **DX9-first
   + deep fallback** (GPTK > DXMT > DXVK for DX10/11; DXVK first for DX9), provenance **from-source DXVK +
-  patched MoltenVK** (never a vendored prebuilt).
+  patched MoltenVK** (never a vendored prebuilt). **DXVK packaging decided NATIVE/upstream (patch-free), NOT
+  CrossOver's builtin:** upstream DXVK has no wine-builtin build without CX patches, so Silo runs stock DXVK
+  as native — d3d dlls seeded into the prefix `system32`/`syswow64` with a `=n` override — on the **base
+  runtime** (no clone, nothing overlaid into `lib/wine`), reusing the `installDXMTPrefixLoaders` pattern.
   - **On-device discovery (the big de-risk):** Silo's from-source wine ALREADY carries the full Vulkan→Metal
     substrate — `winevulkan`, the winemac Vulkan backend in `win32u.so` that loads a driver via `CX_LIBVULKAN`,
     and a **bundled stock MoltenVK 1.4.1** at `lib/silo-bundled/libMoltenVK.dylib`. So DXVK needs only its PE
-    DLLs overlaid + `=b` overrides + `CX_LIBVULKAN` pinned at that MoltenVK. (CrossOver 26.2's own DXVK =
-    `d3d9`/`d3d10core`/`d3d11` PEs for both ABIs, no dxgi/d3d12/`.so`; its MoltenVK ~1.2.10 is heavily patched
-    for geometry-shader + transform-feedback — the stock-vs-patched question Phase 0's render test settles.)
-  - **Phase 2 (this commit):** `GraphicsBackend.dxvk` + `GraphicsChoice.dxvk` (all 9 exhaustive switches);
+    dlls seeded into the prefix + `=n` overrides + `CX_LIBVULKAN` pinned at that MoltenVK. (CrossOver 26.2's own
+    DXVK = `d3d9`/`d3d10core`/`d3d11` PEs for both ABIs, no dxgi/d3d12/`.so`, but built builtin; its MoltenVK
+    ~1.2.10 is heavily patched for geometry-shader + transform-feedback — the stock-vs-patched question Phase 0's
+    render test settles.)
+  - **Phase 2 (landed):** `GraphicsBackend.dxvk` + `GraphicsChoice.dxvk` (all 9 exhaustive switches);
     `BackendConfig.dxvkLibDirPath`/`dxvkRuntimeName` + `libDir(.dxvk)` + `dxvkSupports32Bit` (32-bit DX9 is a
-    capability GPTK structurally lacks); `RuntimeVariants.prepare(.dxvk)` → `<root>-dxvk` clone;
-    `GraphicsLinker.overlayDXVK` (PE-only — no `.so`, no `lib/external`, no prefix loader — the simplest of the
-    three); `LaunchOrchestrator` overlays + exports `CX_LIBVULKAN`; `EnvFlags`/`GraphicsFallback` made
+    capability GPTK structurally lacks); `RuntimeVariants.prepare(.dxvk)` returns the base wine (no clone);
+    `GraphicsLinker.installDXVKPrefixLoaders` (seeds d3d9/10core/11 into the prefix — native, `=n`);
+    `LaunchOrchestrator` seeds + forces `=n` + exports `CX_LIBVULKAN`; `EnvFlags`/`GraphicsFallback` made
     exhaustive (real DXVK log signatures captured in Phase 0). Compiles + unit-tests with ZERO runtimes
-    (constraint #4); +14 tests. **DXVK appears in the graphics picker but has no installer yet** → an explicit
+    (constraint #4); +19 tests. **DXVK appears in the graphics picker but has no installer yet** → an explicit
     pin honestly throws `backendNotConfigured` until Phase 3 (install/Settings) lands.
   - **Still pending:** Phase 0 render proof (needs a DX9 game installed — HUMAN-INPUT), Phase 1 (from-source
     build scripts + CI), Phase 3 (install + Settings UI), Phase 4 (DX9-first routing + fallback signatures).
