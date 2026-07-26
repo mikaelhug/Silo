@@ -5,21 +5,22 @@
 
 ## Mission
 **Silo** is a native macOS (SwiftUI) launcher overlay for Windows Steam games run via Wine + Apple's
-Game Porting Toolkit (GPTK / D3DMetal) and 3Shain's DXMT. Topology = **one shared Steam bottle +
+Game Porting Toolkit (GPTK / D3DMetal), 3Shain's DXMT, and DXVK. Topology = **one shared Steam bottle +
 isolated manual bottles**:
 - **Steam games** run co-resident in **ONE shared "Steam" bottle** (`SteamBottle`) next to a logged-in
   Windows Steam client — Steamworks IPC is prefix-scoped, so a game and its client must share a prefix.
-  Each game launches under an **automatically chosen graphics backend** (GPTK ⇄ DXMT, per game, overridable),
-  pinned at launch by runtime + `WINEDLLOVERRIDES` — never baked into the shared prefix, so GPTK and DXMT
-  games co-reside.
+  Each game launches under an **automatically chosen graphics backend** (GPTK / DXMT / DXVK, per game,
+  overridable), pinned at launch by runtime + `WINEDLLOVERRIDES` (+ seeded prefix dlls for DXVK) — never baked
+  into the shared prefix, so all three co-reside.
 - **Manual (non-Steam) games** each run in their **own isolated Wine prefix** under a per-game graphics
   choice — Automatic (the default, resolved by `BackendChooser` exactly like Steam) or an explicit backend.
 
 Pipeline: **Discovery** (parse `appmanifest_*.acf`) → **Provision** (seed the shared Steam prefix, or a
-manual game's own prefix) → **Backend choice** (`BackendChooser`: 32-bit → DXMT, else GPTK; reactive switch
-to DXMT when GPTK can't drive an `.auto` game) → **Graphics Linker** (overlay GPTK/DXMT into the chosen
-runtime, wined3d fallback) → **Launch Orchestrator** (detached; `BottleResolver` is the one map from
-game → `{prefix, wineBinary, graphics}`).
+manual game's own prefix) → **Backend choice** (`BackendChooser`: DX9-only → DXVK; else 32-bit → DXMT; else
+GPTK; reactive GPTK→DXMT→DXVK learning when a Metal backend can't drive an `.auto` game) → **Graphics Linker**
+(overlay GPTK/DXMT into the chosen runtime, or seed DXVK's native dlls into the prefix; wined3d fallback) →
+**Launch Orchestrator** (detached; `BottleResolver` is the one map from game → `{prefix, wineBinary,
+graphics}`).
 
 **Dock tiles:** Silo-launched Wine processes show a Dock tile named "wine" (macOS names it after the
 resolved loader binary). A `DockAppBundle` `.app`-wrapper attempt to rename it was **removed 2026-07-13** —
@@ -74,45 +75,64 @@ went stale, needed DXMT prefix-seeding, showed a "wine" Dock tile, and couldn't 
    problem is to be **fixed on this from-source CrossOver-FOSS Wine** — debug the build flags, Wine
    registry, env, and Silo's launch code; never answer "use a different runtime." Decided 2026-06-28.
 
-## Graphics backends (GPTK + DXMT — decided 2026-06-30, reverses the GPTK-only stance)
-Two Metal translation layers, selectable **per game**: **GPTK / D3DMetal** (Apple's, D3D10/11/12 → Metal,
-the default) and **DXMT** (3Shain's, D3D10/11 → Metal directly, the fallback for titles GPTK's
-device-creation can't run, e.g. Overcooked 2). DXMT `v0.72` — the **exact version CrossOver 26 bundles** —
-is built from its upstream (`3Shain/dxmt`, pinned in `versions.env`) **against the CrossOver Wine**, the
-DXMT↔Wine pairing CrossOver itself ships — via `Scripts/build-dxmt.sh` / `.github/workflows/build-dxmt.yml`
-(needs full Xcode's Metal toolchain + the wine install for `winemetal.so`). Constraint #8 binds **Wine**
-only (DXMT isn't Wine); we build from upstream for the canonical, reproducible build incl. its git
-submodules. Never a third-party prebuilt. DXVK was evaluated and rejected (Vulkan/MoltenVK stack; DXMT is
-Metal-direct).
+## Graphics backends (GPTK + DXMT + DXVK — DXVK added 2026-07-26; GPTK+DXMT decided 2026-06-30)
+Three D3D→GPU translation layers, selectable **per game**: **GPTK / D3DMetal** (Apple's, D3D10/11/12 → Metal,
+the default), **DXMT** (3Shain's, D3D10/11 → Metal directly, the fallback for titles GPTK's device-creation
+can't run, e.g. Overcooked 2), and **DXVK** (`doitsujin/dxvk`, D3D9/10/11 → Vulkan → the runtime's bundled
+MoltenVK → Metal). DXMT `v0.72` — the **exact version CrossOver 26 bundles** — is built from its upstream
+(`3Shain/dxmt`, pinned in `versions.env`) **against the CrossOver Wine** via `Scripts/build-dxmt.sh` /
+`build-dxmt.yml` (needs full Xcode's Metal toolchain + the wine install for `winemetal.so`).
+
+**DXVK is the DirectX 9 backend AND the broad-compat fallback** — GPTK doesn't translate DX9 at all and DXMT
+is D3D10/11-only, so a DX9 title had NO backend (it black-screened on wined3d). DXVK fills that gap, exactly
+as CrossOver ships DXVK as its Vulkan tier below D3DMetal. **Built STOCK from upstream (zlib, no patches) and
+run NATIVE** — its d3d9/d3d10core/d3d11/dxgi dlls are seeded into the game prefix's `system32`/`syswow64` and
+overridden `=n`, so DXVK runs on the **base runtime** with nothing overlaid into `lib/wine` and no clone
+(`GraphicsLinker.installDXVKPrefixLoaders`). It rides wine's own `winevulkan` → the base runtime's
+**already-bundled `libMoltenVK.dylib`** (pinned by `CX_LIBVULKAN`; the winemac Vulkan backend in `win32u.so`
+reads it — same CrossOver-source wine as CrossOver's). We deliberately do NOT adopt CrossOver's *builtin* DXVK
+(a CX patch) — upstream ships native, which is patch-free and needs no runtime clone. `Scripts/build-dxvk.sh`
+/ `build-dxvk.yml` cross-compile it (meson + llvm-mingw, both ABIs, **no Metal toolchain** — pure Windows-PE,
+so it even runs on a Command-Line-Tools-only box). Constraint #8 binds **Wine** only (neither DXMT nor DXVK is
+Wine); never a third-party prebuilt. *(This REVERSES the earlier "DXVK evaluated and rejected" note — the
+rejection assumed the Vulkan/MoltenVK stack wasn't worth it, but the substrate already ships in Silo's wine
+and DXVK is the only DX9 path, so it earns its place as the third tier below the two Metal backends.)*
+DXVK-on-Vulkan-only titles (games that call Vulkan directly) also work via this substrate. d9mt (a future
+D3D9→Metal-direct layer) is still deferred — DXVK covers DX9 today.
 
 **The deterministic rule — backend ⇔ runtime ⇔ overrides** (`GraphicsBackend` is the single source of truth
 for a backend's runtime + `WINEDLLOVERRIDES`; the *bottle* is per-launch, not per-backend — Steam games on
 GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + overrides at launch):
-- Both backends overlay a **builtin** `d3d11`/`dxgi` into a runtime's `lib/wine` tree, so they can't share
-  one runtime. `RuntimeVariants` prepares each: GPTK overlays the base runtime in place (the proven path,
-  unchanged); DXMT gets an **APFS clone** of the base + `GraphicsLinker.overlayDXMT`.
+- GPTK/DXMT overlay a **builtin** `d3d11`/`dxgi` into a runtime's `lib/wine` tree, so they can't share one
+  runtime. `RuntimeVariants` prepares each: GPTK overlays the base runtime in place (the proven path,
+  unchanged); DXMT gets an **APFS clone** of the base + `GraphicsLinker.overlayDXMT`. **DXVK is different — it's
+  NATIVE, not a builtin overlay**: `prepare(.dxvk)` returns the base wine (no clone, nothing in `lib/wine`),
+  and the dlls are seeded into the game *prefix* at launch — so DXVK co-resides on the base runtime and its
+  `=n` native dlls load regardless of what `lib/wine` carries.
 - `BottleResolver` is the ONE place that maps a game → `{prefix, wineBinary, graphics}` (`steam(backend:config:)`
   for the Steam bottle, `manual(game,backend:,config:)` for a manual game — both take the caller's resolved
   backend explicitly, so neither launch path can silently land on GPTK). Every launch/provision/tool path routes
   through it — never hard-code `paths.steamBottle` or `backend.wineBinaryPath`. A launch emits exactly that
   backend's `WINEDLLOVERRIDES` builtin set, so it can never cross GPTK↔DXMT or silently land on wined3d (it
   refuses an unconfigured secondary backend).
-- **Steam games run in a SINGLE shared Steam bottle** (`SteamBottle`) with a **per-launch backend** — GPTK and
-  DXMT games co-reside in the one bottle (backend-ness is per-launch: runtime + `WINEDLLOVERRIDES` + an inert
-  `winemetal.dll` prefix-loader, never baked into the shared prefix; the DXMT clone joins the Steam client's
-  prefix-keyed wineserver). Each game has a `GameConfig.graphics` choice (`GraphicsChoice = .auto | .gptk |
-  .dxmt`, default `.auto`). **Automatic** (`BackendChooser`): 32-bit → DXMT (GPTK is 64-bit-only), else GPTK;
-  and if GPTK can't drive an `.auto` game (the `GraphicsFallback` signature) and DXMT could plausibly help
-  (`BackendChooser.dxmtMightHelp` off the PE import table), `play` persists `.dxmt` for next time. *(Phase 0,
-  2026-07-10 collapsed the old dual Steam bottle to one; the automatic/override backend was the deferred
-  follow-up, built 2026-07-11.)* d3d9/OpenGL titles need neither backend — they run wine's own wined3d/GL.
+- **Steam games run in a SINGLE shared Steam bottle** (`SteamBottle`) with a **per-launch backend** — GPTK,
+  DXMT and DXVK games co-reside in the one bottle (backend-ness is per-launch: runtime + `WINEDLLOVERRIDES` +
+  the seeded prefix dlls, never baked into the shared prefix; a DXMT clone / the base runtime for DXVK joins
+  the Steam client's prefix-keyed wineserver). Each game has a `GameConfig.graphics` choice
+  (`GraphicsChoice = .auto | .gptk | .dxmt | .dxvk`, default `.auto`). **Automatic** (`BackendChooser.choose`):
+  **DX9-only → DXVK** (imports d3d9 and none of d3d10/11/12, via `isD3D9Only` off the PE imports — the only DX9
+  translator, bitness-independent); else 32-bit → DXMT (GPTK is 64-bit-only); else GPTK. **Reactive learning
+  walks GPTK → DXMT → DXVK**: if a Metal backend can't drive an `.auto` game (`GraphicsFallback`) and the next
+  backend could plausibly help (`dxmtMightHelp`/`dxvkMightHelp` off the imports) and is installed, `play`
+  persists a `learnedBackend` hint (`.dxmt` or `.dxvk`; DXVK terminal) for next launch — `.auto` intent and the
+  settings UI stay intact, and a GPTK upgrade re-probes GPTK. OpenGL titles need no backend — wine's own GL.
 - **Manual (non-Steam) games** carry a per-game `GraphicsChoice` (`ManualGame.graphics`, default `.auto`) —
-  the SAME Automatic selector as Steam games, resolved forward by `BackendChooser.choose` in `playManual`
-  (32-bit → DXMT, else GPTK). They do NOT carry the reactive learned-DXMT hint (that machinery is Steam-only),
-  so Automatic for a manual game is the pure forward choice; a GPTK failure surfaces the honest "switch to
-  DXMT" fallback message rather than auto-rerouting. Each runs in its own isolated bottle under the resolved
-  backend's runtime (`BottleResolver.manual(_:backend:config:)` takes the resolved backend explicitly, like
-  `steam(backend:)`). The DXMT runtime is installed via Settings → DXMT.
+  the SAME Automatic selector as Steam games (incl. DX9→DXVK), resolved forward by `BackendChooser.choose` in
+  `playManual`. They do NOT carry the reactive learned hint (that machinery is Steam-only), so Automatic for a
+  manual game is the pure forward choice; a Metal-backend failure surfaces the honest "switch to X" fallback
+  message rather than auto-rerouting. Each runs in its own isolated bottle under the resolved backend's runtime
+  (`BottleResolver.manual(_:backend:config:)`). The DXMT/DXVK runtimes install via Settings → DXMT / DXVK
+  (`runFullSetup` installs both best-effort so Automatic works out of the box).
 - When a backend isn't configured, GPTK degrades to wine's own wined3d (the baseline); a secondary backend
   refuses rather than mis-route. `GraphicsFallback` is backend-aware (surfaces a silent wined3d fallback).
 
