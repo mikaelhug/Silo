@@ -35,9 +35,12 @@ public enum GraphicsFallback: Sendable {
 
     /// Signatures that mean wine's own `wined3d` was left driving d3d1x — i.e. the requested backend did
     /// NOT engage (and Silo has no fallback that makes this work; it usually fails device creation).
-    /// **Backend-agnostic:** both GPTK and DXMT target Metal, so a Vulkan-renderer / feature-level-
-    /// unsupported line means neither did its job and wined3d is driving d3d1x. A healthy launch — and a
-    /// legitimate d3d9/OpenGL game that never touches d3d1x — emits NONE of these, so no false positives.
+    /// **Backend-agnostic:** GPTK and DXMT target Metal, so a Vulkan-renderer / feature-level-unsupported line
+    /// means neither did its job and wined3d is driving d3d1x. It's a valid fallback signal for DXVK too: when
+    /// native DXVK loads it IS the d3d1x provider (wined3d isn't involved, so this line never appears), so the
+    /// line appears only when DXVK FAILED to load and wine fell back to its builtin wined3d — again a
+    /// non-engagement. A healthy launch — and a legitimate OpenGL game that never touches d3d1x — emits NONE
+    /// of these, so no false positives.
     static let wined3dFallbackSignatures = [
         "None of the requested D3D feature levels is supported",     // wined3d couldn't create the d3d1x device
         "Using the Vulkan renderer",                                 // wined3d IS driving d3d1x (the definitive

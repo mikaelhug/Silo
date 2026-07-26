@@ -116,6 +116,45 @@ struct GameLibraryViewModelTests {
                         stateFlags: .fullyInstalled, sizeOnDisk: 100, libraryPath: paths.steamBottleClientDir)
     }
 
+    /// A Steam game whose `game.exe` is a full PE with the given import table (for DX-version routing tests).
+    private func installedGamePEImports(
+        _ paths: AppPaths, appID: Int, name: String, dir: String, machine: UInt16, imports: [String]) throws -> SteamApp {
+        let common = paths.steamBottleClientDir.appendingPathComponent("steamapps/common/\(dir)")
+        try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
+        let magic: UInt16 = machine == 0x8664 ? 0x20b : 0x10b
+        FileManager.default.createFile(atPath: common.appendingPathComponent("game.exe").path,
+                                       contents: PEFixture.withImports(magic: magic, machine: machine, imports: imports))
+        return SteamApp(appID: appID, name: name, installDir: dir,
+                        stateFlags: .fullyInstalled, sizeOnDisk: 100, libraryPath: paths.steamBottleClientDir)
+    }
+
+    /// A library VM with wine + a DXVK source tree configured (native DXVK — its d3d dlls are seeded into the
+    /// prefix, no clone). For exercising the DirectX 9 → DXVK Automatic routing.
+    private func makeDXVKReady(_ tmp: TempDir) throws -> (GameLibraryViewModel, FakeProcessRunner, AppPaths) {
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        let wine = try tmp.write("wine/bin/wine64", "#!/bin/sh")
+        try tmp.makeDir("wine/lib/wine/x86_64-windows"); try tmp.makeDir("wine/lib/wine/x86_64-unix")
+        // Bundled MoltenVK (CX_LIBVULKAN target) + a DXVK source tree (both ABIs).
+        try tmp.makeDir("wine/lib/silo-bundled"); try tmp.write("wine/lib/silo-bundled/libMoltenVK.dylib", "MVK")
+        let dxvkLib = try tmp.makeDir("dxvk/lib/wine/x86_64-windows")
+        try tmp.makeDir("dxvk/lib/wine/i386-windows")
+        for m in ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"] {
+            try tmp.write("dxvk/lib/wine/x86_64-windows/\(m)", "DXVK")
+            try tmp.write("dxvk/lib/wine/i386-windows/\(m)", "DXVK32")
+        }
+        var backend = BackendConfig(); backend.wineBinaryPath = wine; backend.dxvkLibDirPath = dxvkLib
+        let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        session.updateWine(backend.wineBinaryPath); session.readinessTimeout = 0
+        let vm = GameLibraryViewModel(
+            bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
+            provisioner: WinePrefixProvisioner(runner: fake))
+        return (vm, fake, paths)
+    }
+
     /// The persisted graphics choice for a Steam game (reads config.json back).
     private func persistedGraphics(_ paths: AppPaths, _ appID: Int) async -> GraphicsChoice {
         await ConfigStore(paths: paths).load().config(for: appID).graphics
@@ -299,6 +338,31 @@ struct GameLibraryViewModelTests {
         // The DXMT prefix-loader seeded winemetal.dll into the shared Steam prefix (needed for DXMT to load).
         let wm = paths.steamBottle.appendingPathComponent("drive_c/windows/system32/winemetal.dll")
         #expect(FileManager.default.fileExists(atPath: wm.path))
+    }
+
+    @Test("Automatic routes a DirectX 9 Steam game to DXVK (native) in the shared bottle — seeds its dlls + =n")
+    func autoRoutesDX9ToDXVK() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (vm, fake, paths) = try makeDXVKReady(tmp)
+        try installSteam(paths)
+        // A pure DirectX 9 title (imports d3d9, nothing newer) — neither GPTK nor DXMT can run it.
+        let game = try installedGamePEImports(paths, appID: 700, name: "DX9", dir: "DX9", machine: 0x8664, imports: ["d3d9.dll"])
+
+        await vm.play(game)
+
+        let spawn = try #require(fake.invocations.last {
+            $0.detached && $0.environment["WINEPREFIX"] == paths.steamBottle.path
+                && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
+        })
+        // Native DXVK runs on the BASE runtime (no clone), overrides its d3d set + dxgi to native, and pins
+        // the bundled MoltenVK for winevulkan.
+        #expect(spawn.executable.path.hasSuffix("/wine/bin/wine64"))           // base wine, NOT a variant clone
+        #expect(!spawn.executable.path.contains("-dxvk"))
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10core,d3d11,dxgi=n")
+        #expect(spawn.environment["CX_LIBVULKAN"]?.hasSuffix("/lib/silo-bundled/libMoltenVK.dylib") == true)
+        // DXVK's dlls were seeded into the shared Steam prefix's system32 (native `=n` loads them from there).
+        let d3d9 = paths.steamBottle.appendingPathComponent("drive_c/windows/system32/d3d9.dll")
+        #expect(FileManager.default.fileExists(atPath: d3d9.path))
     }
 
     @Test("A 32-bit game is refused when the installed DXMT has no i386 build (no silent black screen)")
@@ -809,24 +873,41 @@ struct GameLibraryViewModelTests {
         #expect(vm.statusMessage?.contains("Set up DXMT") == true)
     }
 
-    @Test("graphicsFallbackMessage steers to DXMT only when DXMT could help, adapting to readiness")
+    @Test("fallbackAlternative walks GPTK → DXMT → DXVK, DXMT → DXVK, DXVK → nil (per might-help)")
+    func fallbackAlternativeChain() {
+        typealias VM = GameLibraryViewModel
+        // GPTK: prefer DXMT when it can help, else DXVK, else nil (a pure D3D12 title).
+        #expect(VM.fallbackAlternative(after: .gptk, dxmtMightHelp: true, dxvkMightHelp: true) == .dxmt)
+        #expect(VM.fallbackAlternative(after: .gptk, dxmtMightHelp: false, dxvkMightHelp: true) == .dxvk)
+        #expect(VM.fallbackAlternative(after: .gptk, dxmtMightHelp: false, dxvkMightHelp: false) == nil)
+        // DXMT: DXVK is the only deeper fallback.
+        #expect(VM.fallbackAlternative(after: .dxmt, dxmtMightHelp: true, dxvkMightHelp: true) == .dxvk)
+        #expect(VM.fallbackAlternative(after: .dxmt, dxmtMightHelp: true, dxvkMightHelp: false) == nil)
+        // DXVK is the last resort — nothing deeper.
+        #expect(VM.fallbackAlternative(after: .dxvk, dxmtMightHelp: true, dxvkMightHelp: true) == nil)
+    }
+
+    @Test("graphicsFallbackMessage steers to the alternative backend, adapting to readiness")
     func graphicsFallbackMessageBranches() {
         typealias VM = GameLibraryViewModel
-        // GPTK, DXMT installed + could help → switch this game's graphics to DXMT.
-        let gptkReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: true, dxmtMightHelp: true)
+        // GPTK, alternative DXMT installed → switch this game's graphics to DXMT.
+        let gptkReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, alternative: .dxmt, alternativeInstalled: true)
         #expect(gptkReady.contains("Switch this game's graphics to DXMT"))
-        // GPTK, DXMT not installed → set DXMT up first.
-        let gptkNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: false, dxmtMightHelp: true)
+        // GPTK, alternative DXMT not installed → set DXMT up first.
+        let gptkNotReady = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, alternative: .dxmt, alternativeInstalled: false)
         #expect(gptkNotReady.contains("Set up DXMT in Settings → DXMT first"))
-        // GPTK, DXMT can't help this game (D3D12 / D3D9-only) → NO false DXMT steer.
-        let gptkNoHelp = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, dxmtAvailable: true, dxmtMightHelp: false)
+        // GPTK, no alternative can help (D3D12) → NO false steer.
+        let gptkNoHelp = VM.graphicsFallbackMessage(name: "OC2", backend: .gptk, alternative: nil, alternativeInstalled: false)
         #expect(gptkNoHelp.contains("couldn't drive this game's graphics"))
-        #expect(!gptkNoHelp.contains("DXMT"))
-        // DXMT backend → names DXMT, points at Settings.
-        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, dxmtAvailable: true, dxmtMightHelp: true)
-        #expect(dxmt.contains("DXMT couldn't drive this game's graphics") && dxmt.contains("Settings → DXMT"))
+        #expect(!gptkNoHelp.contains("DXMT") && !gptkNoHelp.contains("DXVK"))
+        // DXMT backend, alternative DXVK → names DXMT, steers to DXVK (the deep fallback).
+        let dxmt = VM.graphicsFallbackMessage(name: "OC2", backend: .dxmt, alternative: .dxvk, alternativeInstalled: true)
+        #expect(dxmt.contains("DXMT couldn't drive this game's graphics") && dxmt.contains("Switch this game's graphics to DXVK"))
+        // DXVK — the last resort — failing: honest, no steer.
+        let dxvk = VM.graphicsFallbackMessage(name: "OC2", backend: .dxvk, alternative: nil, alternativeInstalled: false)
+        #expect(dxvk.contains("DXVK / Vulkan couldn't drive this game's graphics"))
         // None of them pretends graphics are "running on fallback graphics".
-        for m in [gptkReady, gptkNotReady, gptkNoHelp, dxmt] {
+        for m in [gptkReady, gptkNotReady, gptkNoHelp, dxmt, dxvk] {
             #expect(m.hasPrefix("OC2: "))
             #expect(!m.contains("running on fallback graphics"))
         }

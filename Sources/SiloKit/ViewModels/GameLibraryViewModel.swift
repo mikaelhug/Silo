@@ -236,20 +236,26 @@ public final class GameLibraryViewModel {
         let config = await configStore.load().config(for: game.appID)
         let cfg = backend
         let dxmtConfigured = backend.libDir(for: .dxmt) != nil
-        // Resolve the exe ONCE off-main (the install-dir scan can be a large walk) and read its bitness; pick
-        // the backend from that. The SAME exe is handed to `launchInBottle` (so the decision and the launch
-        // can't disagree) and to `watchGraphics` (which reads its imports only if a failure actually fires).
-        let (exe, is32): (URL?, Bool) = await Task.detached { [orchestrator] in
+        let dxvkConfigured = backend.libDir(for: .dxvk) != nil
+        let choice = config.graphics
+        // Resolve the exe ONCE off-main (the install-dir scan can be a large walk), read its bitness, and — for
+        // Automatic only — whether it's a DirectX 9-only title (→ DXVK). The SAME exe is handed to
+        // `launchInBottle` (so the decision and the launch can't disagree) and to `watchGraphics` (which reads
+        // its imports only if a failure actually fires). The DX9 import read is skipped for an explicit pin.
+        let (exe, is32, isD3D9): (URL?, Bool, Bool) = await Task.detached { [orchestrator] in
             let exe = orchestrator.resolvedExecutable(app: game, config: config)
-            return (exe, exe.map { WindowsExecutable.is32Bit($0) } ?? false)
+            let is32 = exe.map { WindowsExecutable.is32Bit($0) } ?? false
+            let d3d9 = choice == .auto ? (exe.map { BackendChooser.isD3D9Only(exe: $0) } ?? false) : false
+            return (exe, is32, d3d9)
         }.value
         // A learned hint only counts if it was learned under the CURRENT GPTK runtime — a GPTK upgrade may
         // fix the title, so a stale hint is dropped (passed as nil) and GPTK is re-probed.
         let learned = config.learnedUnderRuntime == cfg.gptkRuntimeName ? config.learnedBackend : nil
-        let chosen = BackendChooser.choose(config.graphics, is32Bit: is32, learned: learned)
+        let chosen = BackendChooser.choose(choice, is32Bit: is32, isD3D9Only: isD3D9, learned: learned)
         if let refusal = Self.bitnessRefusal(
-            name: game.name, choice: config.graphics, chosen: chosen,
-            is32: is32, dxmtConfigured: dxmtConfigured, dxmtSupports32Bit: cfg.dxmtSupports32Bit) {
+            name: game.name, choice: choice, chosen: chosen, is32: is32,
+            dxmtConfigured: dxmtConfigured, dxmtSupports32Bit: cfg.dxmtSupports32Bit,
+            dxvkConfigured: dxvkConfigured, dxvkSupports32Bit: cfg.dxvkSupports32Bit) {
             setStatus(refusal)
             return
         }
@@ -278,11 +284,12 @@ public final class GameLibraryViewModel {
                 // The game IS running, but config.json is unwritable — say so (settings won't stick either).
                 setStatus("Launched \(game.name) — play date not saved.")
             }
-            // Automatic learns: an AUTO game GPTK can't drive gets remembered as DXMT for next time. The
-            // eligibility is RE-checked with fresh state when the failure actually fires (see `watchGraphics`),
-            // so a pin/uninstall between now and then can't clobber the user. Last, so a detected fallback
-            // overrides the "Launched" status.
-            let learnAppID = config.graphics == .auto && chosen == .gptk ? game.appID : nil
+            // Automatic learns a reactive reroute: an AUTO game the chosen Metal backend can't drive gets
+            // remembered as the next backend (GPTK → DXMT → DXVK) for next time. Eligible for a GPTK or DXMT
+            // launch (DXVK is the terminal fallback — never re-learned). Eligibility is RE-checked with fresh
+            // state when the failure fires (see `watchGraphics`), so a pin/uninstall can't clobber the user.
+            // Last, so a detected fallback overrides the "Launched" status.
+            let learnAppID = config.graphics == .auto && (chosen == .gptk || chosen == .dxmt) ? game.appID : nil
             watchGraphics(gameID(game), log: paths.log(forAppID: game.appID), name: game.name,
                           backend: chosen, exe: exe, autoLearnAppID: learnAppID)
         } catch {
@@ -417,12 +424,18 @@ public final class GameLibraryViewModel {
         // Read the exe's bitness off-main — a PE-header read on a possibly-slow/external volume must not block
         // the UI (mirrors `play`). Manual games carry no learned hint (that reactive machinery is Steam-only),
         // so Automatic here is the pure forward choice: 32-bit → DXMT, else GPTK.
-        let is32 = await Task.detached { WindowsExecutable.is32Bit(game.executablePath) }.value
+        let choice = game.graphics
+        let (is32, isD3D9) = await Task.detached {
+            (WindowsExecutable.is32Bit(game.executablePath),
+             choice == .auto ? BackendChooser.isD3D9Only(exe: game.executablePath) : false)
+        }.value
         let dxmtConfigured = cfg.libDir(for: .dxmt) != nil
-        let chosen = BackendChooser.choose(game.graphics, is32Bit: is32)
+        let dxvkConfigured = cfg.libDir(for: .dxvk) != nil
+        let chosen = BackendChooser.choose(choice, is32Bit: is32, isD3D9Only: isD3D9)
         if let refusal = Self.bitnessRefusal(
-            name: game.name, choice: game.graphics, chosen: chosen,
-            is32: is32, dxmtConfigured: dxmtConfigured, dxmtSupports32Bit: cfg.dxmtSupports32Bit) {
+            name: game.name, choice: choice, chosen: chosen, is32: is32,
+            dxmtConfigured: dxmtConfigured, dxmtSupports32Bit: cfg.dxmtSupports32Bit,
+            dxvkConfigured: dxvkConfigured, dxvkSupports32Bit: cfg.dxvkSupports32Bit) {
             setStatus(refusal)
             return
         }
@@ -568,67 +581,75 @@ public final class GameLibraryViewModel {
         }
     }
 
-    /// React to a detected backend non-engagement. `dxmtMightHelp` — a PE import-table read — is computed
-    /// HERE, only on the rare failure (never on a healthy launch). An `.auto` Steam GPTK game DXMT could help
-    /// is rerouted (`learnDXMT`); everything else gets an honest message.
+    /// React to a detected backend non-engagement. The might-help PE import-table reads are computed HERE,
+    /// only on the rare failure (never on a healthy launch). An `.auto` Steam game whose failed backend has an
+    /// INSTALLED alternative that could help is REROUTED (`learn`) along GPTK → DXMT → DXVK; everything else
+    /// (a pin, a manual game, or no installed alternative) gets an honest message.
     private func handleGraphicsFallback(
         name: String, backend graphics: GraphicsBackend, exe: URL?, autoLearnAppID: Int?) async {
-        let dxmtMightHelp = await Task.detached { exe.map { BackendChooser.dxmtMightHelp(exe: $0) } ?? true }.value
-        if graphics == .gptk, dxmtMightHelp, let appID = autoLearnAppID, backend.libDir(for: .dxmt) != nil {
-            await learnBackend(appID: appID, name: name, dxmtMightHelp: dxmtMightHelp)
+        let (dxmtMightHelp, dxvkMightHelp) = await Task.detached {
+            (exe.map { BackendChooser.dxmtMightHelp(exe: $0) } ?? true,
+             exe.map { BackendChooser.dxvkMightHelp(exe: $0) } ?? true)
+        }.value
+        let alt = Self.fallbackAlternative(after: graphics, dxmtMightHelp: dxmtMightHelp, dxvkMightHelp: dxvkMightHelp)
+        let altInstalled = alt.map { backend.libDir(for: $0) != nil } ?? false
+        if let appID = autoLearnAppID, let alt, altInstalled {
+            await learn(appID: appID, name: name, from: graphics, target: alt)
         } else {
-            setStatus(fallbackMessage(name: name, backend: graphics, dxmtMightHelp: dxmtMightHelp))
+            setStatus(Self.graphicsFallbackMessage(
+                name: name, backend: graphics, alternative: alt, alternativeInstalled: altInstalled))
         }
     }
 
-    /// Record a `.dxmt` LEARNED hint (not the user's `graphics`) for an `.auto` Steam game GPTK couldn't
-    /// drive, so the next launch uses DXMT while `.auto` — and the settings UI — stay intact. The hint is
-    /// stamped with the current GPTK runtime so a later GPTK upgrade re-probes GPTK. Re-reads current state
-    /// first, so a backend the user pinned (or a DXMT uninstalled) since launch is never clobbered, and the
-    /// "will use DXMT next time" line is shown only if the write actually stuck.
-    private func learnBackend(appID: Int, name: String, dxmtMightHelp: Bool) async {
-        guard await configStore.load().config(for: appID).graphics == .auto, backend.libDir(for: .dxmt) != nil
-        else { setStatus(fallbackMessage(name: name, backend: .gptk, dxmtMightHelp: dxmtMightHelp)); return }
+    /// Record a LEARNED reroute hint (not the user's `graphics`) for an `.auto` game the `from` backend
+    /// couldn't drive, so the next launch uses `target` while `.auto` — and the settings UI — stay intact. The
+    /// hint is stamped with the current GPTK runtime so a later GPTK upgrade re-probes GPTK from scratch.
+    /// Re-reads current state first, so a backend the user pinned (or a `target` uninstalled) since launch is
+    /// never clobbered, and the "will use X next launch" line is shown only if the write actually stuck.
+    private func learn(appID: Int, name: String, from graphics: GraphicsBackend, target: GraphicsBackend) async {
+        guard await configStore.load().config(for: appID).graphics == .auto, backend.libDir(for: target) != nil
+        else {
+            setStatus(Self.graphicsFallbackMessage(name: name, backend: graphics, alternative: target,
+                alternativeInstalled: backend.libDir(for: target) != nil))
+            return
+        }
         let runtime = backend.gptkRuntimeName   // captured out of the @Sendable mutate closure
         do {
             _ = try await configStore.updateGame(appID: appID) {
-                $0.learnedBackend = .dxmt
+                $0.learnedBackend = target
                 $0.learnedUnderRuntime = runtime
             }
-            setStatus("\(name): GPTK / D3DMetal couldn't run this game — Silo will use DXMT next launch.")
+            setStatus("\(name): \(graphics.displayName) couldn't run this game — Silo will use \(target.badge) next launch.")
         } catch {   // persist failed — don't promise a switch that didn't stick
-            setStatus("\(name): GPTK / D3DMetal couldn't run this game. Set its graphics to DXMT.")
+            setStatus("\(name): \(graphics.displayName) couldn't run this game. Set its graphics to \(target.badge).")
         }
     }
 
-    /// `graphicsFallbackMessage` with `dxmtAvailable` read live from the current config.
-    private func fallbackMessage(name: String, backend graphics: GraphicsBackend, dxmtMightHelp: Bool) -> String {
-        Self.graphicsFallbackMessage(
-            name: name, backend: graphics, dxmtAvailable: backend.libDir(for: .dxmt) != nil, dxmtMightHelp: dxmtMightHelp)
+    /// The best alternative backend that could plausibly drive a game `graphics` failed on (ignoring whether
+    /// it's installed — a message can tell the user to set it up). GPTK → DXMT (if it can translate) → DXVK
+    /// (broadest); DXMT → DXVK; DXVK → nil (the last resort). Pure + table-tested.
+    static func fallbackAlternative(
+        after graphics: GraphicsBackend, dxmtMightHelp: Bool, dxvkMightHelp: Bool
+    ) -> GraphicsBackend? {
+        switch graphics {
+        case .gptk: return dxmtMightHelp ? .dxmt : (dxvkMightHelp ? .dxvk : nil)
+        case .dxmt: return dxvkMightHelp ? .dxvk : nil
+        case .dxvk: return nil
+        }
     }
 
     /// The user-facing message when a backend didn't engage. Pure + table-testable. Never claims a working
-    /// "fallback". Steers to DXMT (Steam and manual games both have a per-game Graphics setting) only when
-    /// DXMT could actually translate this game (`dxmtMightHelp`) — a D3D12 or D3D9-only title, which DXMT
-    /// can't run, gets no false steer.
+    /// "fallback". Steers to the best `alternative` that could translate this game (nil → no steer, e.g. a
+    /// D3D12 title only GPTK can run, or DXVK — the last resort — failing), with install-aware text.
     static func graphicsFallbackMessage(
-        name: String, backend: GraphicsBackend, dxmtAvailable: Bool, dxmtMightHelp: Bool
+        name: String, backend: GraphicsBackend, alternative: GraphicsBackend?, alternativeInstalled: Bool
     ) -> String {
-        switch backend {
-        case .gptk:
-            guard dxmtMightHelp else {
-                // DXMT can't help (D3D12 → GPTK is the only Metal path; D3D9-only → Wine's wined3d).
-                return "\(name): GPTK / D3DMetal couldn't drive this game's graphics."
-            }
-            return "\(name): GPTK / D3DMetal couldn't drive this game's graphics. "
-                + dxmtSteer(dxmtAvailable: dxmtAvailable)
-        case .dxmt:
-            return "\(name): DXMT couldn't drive this game's graphics. "
-                + "Check the DXMT runtime in Settings → DXMT."
-        case .dxvk:
-            return "\(name): DXVK / Vulkan couldn't drive this game's graphics. "
-                + "Check the DXVK runtime in Settings → DXVK."
-        }
+        let base = "\(name): \(backend.displayName) couldn't drive this game's graphics."
+        guard let alt = alternative else { return base }
+        let steer = alternativeInstalled
+            ? "Switch this game's graphics to \(alt.badge) in its settings."
+            : "Set up \(alt.badge) in Settings → \(alt.badge) first."
+        return base + " " + steer
     }
 
     /// The refusal message if the resolved backend can't run this executable's bitness — a 32-bit game pinned
@@ -636,10 +657,11 @@ public final class GameLibraryViewModel {
     /// by `play` and `playManual` so their guards (and the "needs the 32-bit DXMT build" text) can't drift.
     private static func bitnessRefusal(
         name: String, choice: GraphicsChoice, chosen: GraphicsBackend,
-        is32: Bool, dxmtConfigured: Bool, dxmtSupports32Bit: Bool
+        is32: Bool, dxmtConfigured: Bool, dxmtSupports32Bit: Bool,
+        dxvkConfigured: Bool, dxvkSupports32Bit: Bool
     ) -> String? {
         // A 32-bit game under an EXPLICIT GPTK pin is a dead end (Apple ships no i386 D3DMetal); Automatic
-        // routes 32-bit to DXMT, so this is only reachable when the user pinned GPTK. Steer to DXMT.
+        // routes 32-bit to DXMT/DXVK, so this is only reachable when the user pinned GPTK. Steer to DXMT.
         if choice == .gptk, is32 {
             return unsupported32BitMessage(name: name, dxmtAvailable: dxmtConfigured)
         }
@@ -647,6 +669,10 @@ public final class GameLibraryViewModel {
         // silent black screen. (An unconfigured DXMT is caught later by the resolver's "install DXMT" message.)
         if is32, chosen == .dxmt, dxmtConfigured, !dxmtSupports32Bit {
             return "\(name) needs the 32-bit DXMT build — update DXMT in Settings."
+        }
+        // Likewise a 32-bit DirectX 9 game routes to DXVK and needs its i386 modules.
+        if is32, chosen == .dxvk, dxvkConfigured, !dxvkSupports32Bit {
+            return "\(name) needs the 32-bit DXVK build — update DXVK in Settings."
         }
         return nil
     }

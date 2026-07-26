@@ -43,12 +43,21 @@
     `runFullSetup` installs DXVK best-effort so the Automatic DX9 path works out of the box);
     `BackendSettingsViewModel.applyDXVKLibDir`/`clearDXVKDefault`. +3 tests, 433 green. DXVK is now installable
     end-to-end (the graphics picker's DXVK pin resolves once a runtime is installed).
-  - **Still pending:** Phase 0 render proof (needs a DX9 game installed — HUMAN-INPUT; then the DXVK version↔
-    MoltenVK-1.4.1 pairing + exact engagement log string are confirmed), Phase 4 (DX9-first routing + fallback
-    signatures). **Phase-0/4 validation item:** native DXVK seeds its dlls into the SHARED Steam prefix's
-    system32 — must confirm they stay dormant for the co-resident Steam client + GPTK/DXMT games (which force
-    `=b`); if wine's default load order picks them up for a non-`=n` launch, add
-    `d3d9,d3d10core,d3d11,dxgi=builtin` to the shared-bottle default overrides.
+  - **Phase 4 (landed):** DX9-first Automatic routing — `BackendChooser.choose` gains an `isD3D9Only` signal
+    (`BackendChooser.isD3D9Only` reads the PE imports: d3d9 and NONE of d3d10/11/12 → route to DXVK, the only
+    DX9 translator, bitness-independent); computed off-main in `play`/`playManual` for `.auto` only.
+    Multi-target reactive learning generalized GPTK → DXMT → DXVK (`fallbackAlternative` + `learn` +
+    `dxvkMightHelp`; `learnedBackend` now holds `.dxmt` OR `.dxvk`, DXVK terminal). `graphicsFallbackMessage`
+    steers to the best installed alternative (install-aware). `bitnessRefusal` guards 32-bit DXVK.
+    `GraphicsFallback`'s wined3d signal reconfirmed valid for DXVK. +8 tests incl. a full DX9-Steam-game →
+    native-DXVK integration test (base runtime, `=n`, `CX_LIBVULKAN`, seeded dlls). 438 green, zero warnings.
+  - **Still pending — only on-device items now:** Phase 0 render proof (needs a DX9 game installed —
+    HUMAN-INPUT; confirms the DXVK-v2.6.2↔MoltenVK-1.4.1 pairing actually renders + captures the exact DXVK
+    engagement log string for `GraphicsFallback.engagementSignatures(.dxvk)`, currently `[]`). **Deferred
+    correctness item (needs the same on-device observation):** native DXVK seeds its dlls into the SHARED Steam
+    prefix's system32 — confirm they stay dormant for the co-resident Steam client (GPTK/DXMT games already
+    force `=b`); if the client picks them up, add `d3d9,d3d10core,d3d11,dxgi=builtin` to the shared-bottle
+    default overrides (`BottleDefaults`).
 - **🎮 Game-controller support: re-enable SDL in the Wine build (2026-07-26, `main`; 416 tests green — CODE
   DONE, needs a new `wine-cx-*` CI release + on-device controller verification).** Controllers didn't work
   because Wine was built `--without-sdl` and `libSDL2` was stripped on install (M75→M80) — a real fix for a
