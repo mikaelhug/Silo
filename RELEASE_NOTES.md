@@ -1,10 +1,9 @@
-# Silo 0.4.1
+# Silo 0.4.2
 
-Add non-Steam games straight from their installer — Silo finds the installed games for you.
+## Controller support
 
-## Highlights
-- **Install-and-detect for non-Steam games.** After you run a game's installer, Silo reads the shortcuts it created and lists the installed games automatically the moment the installer closes — each with the right executable, launch arguments, and working directory, so you no longer hunt for the correct `.exe`. One installer that adds several games puts them all in a single bottle.
-- **`.msi` installers supported.** Windows Installer packages now run directly when adding a game.
+- **Game controllers now work with Silo Wine.** Silo preserves the pinned SDL 2.30.12 library included in `wine-cx-26.3.0`, allowing WineBus to map supported controllers to XInput.
+- **Reinstall Wine once after updating.** Existing Wine installations were created by older Silo versions that removed this library. Remove and reinstall `wine-cx-26.3.0` from the Wine settings after updating to restore it.
 
 ---
 
