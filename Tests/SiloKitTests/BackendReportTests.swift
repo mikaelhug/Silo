@@ -70,7 +70,19 @@ struct BackendReportTests {
         print("\n=== What actually happened on the last launch of each game ===")
         for log in logs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
         where log.pathExtension == "log" && !log.lastPathComponent.hasPrefix("steam-bottle") {
-            let text = log.tailString()
+            // A game wrapped in `explorer /desktop=` logs nothing of its own here — the child's output does
+            // not reach Silo's log (measured: 39 KB of wine output, zero DXVK lines). DXVK still writes its
+            // OWN log beside this one, so fold that in rather than reporting a working game as `unknown`.
+            var text = log.tailString()
+            let sidecars = (try? FileManager.default.contentsOfDirectory(atPath: paths.logsDir.path)) ?? []
+            if text.contains("/desktop=Silo") {
+                for name in sidecars where name.hasSuffix("_d3d9.log") || name.hasSuffix("_d3d11.log") {
+                    if let extra = try? String(contentsOf: paths.logsDir.appendingPathComponent(name),
+                                               encoding: .utf8), text.contains(name.components(separatedBy: "_")[0]) {
+                        text += "\n" + extra
+                    }
+                }
+            }
             guard text.contains("Silo launch") else { continue }
             // The backend is recorded in the launch header Silo writes (its WINEDLLOVERRIDES clause). Match
             // on each backend's DISTINGUISHING token rather than the whole clause: the exact set changes
