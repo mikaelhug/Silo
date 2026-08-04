@@ -69,3 +69,33 @@ struct LaunchLogSectionTests {
         #expect(LaunchPlan.lastLaunchSection(of: "").isEmpty)
     }
 }
+
+/// The decision must PERSIST, not be re-derived from the log each launch.
+@Suite("Virtual-desktop persistence")
+struct VirtualDesktopPersistenceTests {
+
+    /// REGRESSION: a wrapped launch runs the game under `explorer /desktop=`, whose child's output never
+    /// reaches Silo's log — verified on-device, where a working wrapped Alien Swarm launch captured 39 KB of
+    /// wine output and ZERO DXVK lines. Deriving the flag from the log alone therefore oscillates:
+    /// wrapped run succeeds → no failure in the log → next run unwrapped → fails → wrapped → …
+    @Test("once set, the flag alone wraps the launch — no log evidence required")
+    func flagAloneIsEnough() {
+        let exe = URL(fileURLWithPath: "/games/Alien Swarm/swarm.exe")
+        var config = GameConfig(appID: 630)
+        #expect(LaunchOrchestrator.invocation(for: exe, virtualDesktop: config.needsVirtualDesktop).first != "explorer")
+        config.needsVirtualDesktop = true
+        #expect(LaunchOrchestrator.invocation(for: exe, virtualDesktop: config.needsVirtualDesktop).first == "explorer")
+    }
+
+    /// And it survives a config round-trip, so the game is not re-broken on the next app launch.
+    @Test("the flag round-trips through config.json, and old configs default to false")
+    func roundTrips() throws {
+        var config = GameConfig(appID: 630)
+        config.needsVirtualDesktop = true
+        let data = try JSONEncoder().encode(config)
+        #expect(try JSONDecoder().decode(GameConfig.self, from: data).needsVirtualDesktop)
+        // A config written before this field existed must decode, defaulting to false.
+        let legacy = Data(#"{"appID":630,"customArgs":[]}"#.utf8)
+        #expect(try JSONDecoder().decode(GameConfig.self, from: legacy).needsVirtualDesktop == false)
+    }
+}

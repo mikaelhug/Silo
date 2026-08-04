@@ -280,10 +280,24 @@ public final class GameLibraryViewModel {
                 setStatus("\(game.name) needs Steam, which couldn't start\(why).")
                 return
             }
+            // PERSIST the virtual-desktop decision before launching. Deriving it from the previous log
+            // alone oscillates: a wrapped launch runs the game under `explorer /desktop=`, whose child's
+            // output never reaches Silo's log, so the next launch sees no failure, runs UNWRAPPED, and fails
+            // again. Once the failure has been seen, the flag is the memory.
+            let logURL = paths.log(forAppID: game.appID)
+            var launchConfig = config
+            if !launchConfig.needsVirtualDesktop {
+                let previous = LaunchPlan.lastLaunchSection(
+                    of: (try? String(contentsOf: logURL, encoding: .utf8)) ?? "")
+                if GraphicsFallback.requestedUnavailableDisplayMode(previous) {
+                    launchConfig.needsVirtualDesktop = true
+                    _ = try? await configStore.updateGame(appID: game.appID) { $0.needsVirtualDesktop = true }
+                }
+            }
             try await orchestrator.launchInBottle(
-                app: game, config: config, backend: backend, graphics: chosen,
+                app: game, config: launchConfig, backend: backend, graphics: chosen,
                 wine: context.wineBinary, prefix: context.prefix,
-                logURL: paths.log(forAppID: game.appID),
+                logURL: logURL,
                 gameExe: exe)
             do {
                 _ = try await configStore.updateGame(appID: game.appID) { $0.lastPlayed = Date() }
