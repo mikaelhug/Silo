@@ -535,6 +535,20 @@ public struct SteamBottle: Sendable {
 
     // MARK: - steamwebhelper wrapper
 
+    /// Whether the bottle's Steam has ever completed a sign-in — the prerequisite for a game's
+    /// `SteamAPI_Init` to succeed. **This is a different question from "is Steam running":** a client sitting
+    /// on the LOGIN SCREEN registers its `ActiveProcess` pid and holds a live wineserver, so readiness alone
+    /// reports ready, the game launches, `SteamAPI_Init` fails, and it exits within seconds while the UI
+    /// says "Launched". The real completion signal is the Steam Guard **machine token** (`ssfn*`), not
+    /// `loginusers.vdf` — Steam writes a loginusers entry before the login finishes, but only mints an ssfn
+    /// once the account is fully authenticated on this machine. Cheap stat-only probe; fails OPEN (an
+    /// unreadable client dir returns true) so it can never block a launch on a filesystem hiccup.
+    public var isSignedIn: Bool {
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: clientDir, includingPropertiesForKeys: nil) else { return true }
+        return entries.contains { $0.lastPathComponent.hasPrefix("ssfn") }
+    }
+
     /// Forget any cached Steam login in the bottle so the next launch shows a FRESH login. Removes
     /// `loginusers.vdf` (the auto-login account list) and Steam Guard machine tokens (`ssfn*`). Necessary
     /// because a stale/seeded login auto-retries and fails ("Received logon failure response") forever,

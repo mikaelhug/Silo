@@ -127,7 +127,9 @@ public struct EnvFlags: Codable, Sendable, Hashable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let mode = try c.decodeIfPresent(SyncMode.self, forKey: .syncMode) {
+        // Raw string, not the enum: an unknown sync mode written by a NEWER Silo must not throw here, or
+        // the whole config document is discarded on downgrade (see GameConfig.init(from:)).
+        if let mode = (try c.decodeIfPresent(String.self, forKey: .syncMode)).flatMap(SyncMode.init(rawValue:)) {
             syncMode = mode
         } else {
             let legacyMsync = try c.decodeIfPresent(Bool.self, forKey: .msync) ?? false

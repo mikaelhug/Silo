@@ -76,7 +76,7 @@ struct SteamClientSessionTests {
         #expect(clock.now - start < .seconds(5))    // far under the 10s failsafe → the watch resolved it
     }
 
-    @Test("failsafe resolves the wait when the readiness signal never arrives")
+    @Test("a readiness timeout is REPORTED, not passed off as a successful start")
     func failsafeFallback() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (session, paths) = make(tmp)
@@ -87,7 +87,11 @@ struct SteamClientSessionTests {
         let start = clock.now
         let running = await session.ensureRunning()
 
-        #expect(running)                            // failsafe lets the launch proceed rather than hang
+        // The failsafe still unblocks the wait (a launch must never hang), but a Steam that never registered
+        // is a FAILURE: reporting success here produced a full readiness-timeout spinner followed by a
+        // cheerful "Launched <game>." over a client that isn't there.
+        #expect(!running)
+        #expect(session.launchError != nil)
         #expect(clock.now - start >= .seconds(0.25))   // it actually waited the failsafe, not an instant return
     }
 

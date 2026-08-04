@@ -58,8 +58,16 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
         appID = try c.decode(Int.self, forKey: .appID)
         envFlags = try c.decodeIfPresent(EnvFlags.self, forKey: .envFlags) ?? EnvFlags()
         presence = try c.decodeIfPresent(SteamPresenceStrategy.self, forKey: .presence) ?? .steamAppIDFile
-        graphics = try c.decodeIfPresent(GraphicsChoice.self, forKey: .graphics) ?? .auto
-        learnedBackend = try c.decodeIfPresent(GraphicsBackend.self, forKey: .learnedBackend)
+        // Decoded as RAW STRINGS, not as the enums. A strict decode of an unknown case THROWS, and that
+        // throw propagates all the way out of `AppState` — `ConfigStore.load()` then falls back to the .bak
+        // (which has the same value), fails again, and returns a FRESH AppState: every runtime path, every
+        // per-game setting and every manual game silently gone, with the next save overwriting the file.
+        // That makes adding any future backend a one-way door — roll back one version and the user is wiped.
+        // `ManualGame.graphics` and `EnvFlags.metalBackend` already take this precaution; these did not.
+        graphics = (try c.decodeIfPresent(String.self, forKey: .graphics))
+            .flatMap(GraphicsChoice.init(rawValue:)) ?? .auto
+        learnedBackend = (try c.decodeIfPresent(String.self, forKey: .learnedBackend))
+            .flatMap(GraphicsBackend.init(rawValue:))
         learnedUnderRuntime = try c.decodeIfPresent(String.self, forKey: .learnedUnderRuntime)
         executableRelativePath = try c.decodeIfPresent(String.self, forKey: .executableRelativePath)
         customArgs = try c.decodeIfPresent([String].self, forKey: .customArgs) ?? []

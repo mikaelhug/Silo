@@ -32,6 +32,9 @@ struct GameLibraryViewModelTests {
         fm.createFile(atPath: paths.steamBottleExe.path, contents: Data())
         // A WARMED client (steamui.dll + a CEF webhelper) — what steamReady now keys on, not the bootstrapper.
         fm.createFile(atPath: client.appendingPathComponent("steamui.dll").path, contents: Data())
+        // …and a Steam Guard machine token, i.e. an account that has actually SIGNED IN. `play` refuses to
+        // launch without one: a client parked on the login screen looks "ready" but fails SteamAPI_Init.
+        fm.createFile(atPath: client.appendingPathComponent("ssfn1234567890").path, contents: Data())
         let cef = paths.steamBottleCEFDir.appendingPathComponent("cef.win7x64")
         try fm.createDirectory(at: cef, withIntermediateDirectories: true)
         fm.createFile(atPath: cef.appendingPathComponent("steamwebhelper.exe").path, contents: Data())

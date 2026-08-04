@@ -196,8 +196,14 @@ public final class SteamClientSession {
 
     private func startSteam() async {
         guard await launchSteamProcess() != nil else { return }   // spawned detached; we don't track its PID
-        launchError = nil
-        await awaitSteamReady()
+        // A returned PID only proves `wine` was exec'd, NOT that Steam came up. Clearing launchError here and
+        // ignoring the readiness result meant a client that never registered produced a full 20 s spinner and
+        // then a cheerful "Launched <game>." — so record the timeout as the failure it is.
+        if await awaitSteamReady() {
+            launchError = nil
+        } else {
+            launchError = "it didn't finish starting up"
+        }
     }
 
     /// Wait until the co-resident Steam client is ready for a game's Steamworks — i.e. it has registered a
@@ -205,10 +211,12 @@ public final class SteamClientSession {
     /// the INSTANT that happens via a kqueue watch on `user.reg`: no fixed wait, no polling. The
     /// `readinessTimeout` is purely a failsafe so a missing signal can't hang a launch — in normal operation
     /// the event resolves first. Returns immediately when readiness is already present or disabled (tests).
-    private func awaitSteamReady() async {
-        guard readinessTimeout > 0 else { return }
+    /// - Returns: true if Steam actually signalled readiness; false if only the failsafe fired.
+    @discardableResult
+    private func awaitSteamReady() async -> Bool {
+        guard readinessTimeout > 0 else { return true }
         let prefix = bottle.prefix
-        if SteamReadiness.isReady(prefix: prefix) { return }
+        if SteamReadiness.isReady(prefix: prefix) { return true }
         let timeout = readinessTimeout
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let gate = ReadyGate(continuation)
@@ -226,6 +234,7 @@ public final class SteamClientSession {
                 gate.finish()
             }
         }
+        return SteamReadiness.isReady(prefix: prefix)   // false ⇒ the failsafe fired, Steam never registered
     }
 
     /// Launch the bottle's Steam client (re-applying the steamwebhelper wrapper first); returns the PID,

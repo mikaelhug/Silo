@@ -280,6 +280,14 @@ public final class GameLibraryViewModel {
                 setStatus("\(game.name) needs Steam, which couldn't start\(why).")
                 return
             }
+            // Running is NOT signed in. A client parked on the login screen satisfies every readiness signal,
+            // so the game would launch, fail SteamAPI_Init and vanish in ~2s while the status said
+            // "Launched" — no graphics signature fires for a Steamworks failure, so nothing would explain it.
+            let signedIn = await Task.detached(operation: { [bottle] in bottle.isSignedIn }).value
+            guard signedIn else {
+                setStatus("\(game.name) needs you to sign in to Steam once — it's open now.")
+                return
+            }
             try await orchestrator.launchInBottle(
                 app: game, config: config, backend: backend, graphics: chosen,
                 wine: context.wineBinary, prefix: context.prefix,
