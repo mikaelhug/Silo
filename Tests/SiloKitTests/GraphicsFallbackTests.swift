@@ -67,6 +67,27 @@ struct GraphicsFallbackTests {
         #expect(GraphicsFallback.classify(log, backend: .dxvk) == .engaged)
     }
 
+    @Test("a DirectX 9 launch under DXVK is detected — engaged AND failed (no d3d11 feature-level line)")
+    func dxvkD3D9PathDetected() {
+        // A d3d9 game never emits the d3d11 `Using feature level …` line, so the shared
+        // `DxvkAdapter::createDevice` logging is the only proof either way. Success:
+        let engaged = """
+        info:  DXVK: v1.10.3
+        info:  Apple M4 Pro:
+        info:  Device properties:
+        info:    Device name:     : Apple M4 Pro
+        """
+        #expect(!engaged.contains("Using feature level"))          // the d3d11-only signal is absent…
+        #expect(GraphicsFallback.classify(engaged, backend: .dxvk) == .engaged)   // …yet still confirmed
+
+        // Failure: D3D9Interface::CreateDevice catches the DxvkError and logs its message verbatim.
+        let failed = """
+        info:  DXVK: v1.10.3
+        err:   DxvkAdapter: Failed to create device
+        """
+        #expect(GraphicsFallback.classify(failed, backend: .dxvk) == .fallback)
+    }
+
     @Test("a DXVK launch that could not create a device is flagged (both 1.x and 2.x wordings)")
     func dxvkDeviceCreationFailureDetected() {
         // DXVK 1.x: probes every level, then gives up (what a STOCK MoltenVK produces).

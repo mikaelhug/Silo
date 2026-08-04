@@ -25,12 +25,17 @@ public enum GraphicsFallback: Sendable {
         switch backend {
         case .gptk: []
         case .dxmt: ["DXMT: created Metal device"]
-        // DXVK logs the feature level it settled on the moment it creates the D3D device — captured on-device
-        // 2026-08-04: `D3D11CoreCreateDevice: Using feature level D3D_FEATURE_LEVEL_11_0` (DXVK 1.10.3). The
-        // substring stops before the level itself so any level (11_1/11_0/10_1/…) counts, and before the
-        // `D3D11CoreCreateDevice`/`D3D11InternalCreateDevice` prefix, which differs across DXVK versions.
-        // Distinct from the failure line ("Requested feature level not supported"), so no false positives.
-        case .dxvk: ["Using feature level D3D_FEATURE_LEVEL"]
+        // DXVK, captured on-device 2026-08-04 (v1.10.3):
+        // - `Device properties:` is logged by `DxvkAdapter::createDevice` AFTER `vkCreateDevice` succeeds
+        //   (the throw sits 12 lines above the log), on the path SHARED by d3d9/d3d10core/d3d11 — so it is
+        //   the API-agnostic "DXVK got a real GPU device" proof. **This is what makes a DirectX 9 launch
+        //   detectable at all**: the feature-level line below is emitted only by the d3d11 entry point, so
+        //   without this a DX9 game — DXVK's whole reason for existing here — was silent either way.
+        //   Verified in both directions: present on the successful run, ABSENT on the failing one.
+        // - The d3d11 feature-level line is kept as the more specific signal; the substring stops before the
+        //   level so any level counts, and before the `D3D11CoreCreateDevice`/`D3D11InternalCreateDevice`
+        //   prefix, which differs across DXVK versions.
+        case .dxvk: ["Device properties:", "Using feature level D3D_FEATURE_LEVEL"]
         }
     }
 
@@ -61,7 +66,14 @@ public enum GraphicsFallback: Sendable {
         // on-device 2026-08-04 (this is what a STOCK MoltenVK produces at every feature level). Both the
         // 1.x and 2.x wordings are matched. Earlier + far more specific than the generic wined3d signals.
         case .dxvk: [
-            "Requested feature level not supported",     // DXVK 1.x: probed every level, none worked
+            // API-agnostic: the DxvkError thrown when `vkCreateDevice` fails, surfaced by every entry point
+            // (d3d9's `D3D9Interface::CreateDevice` catch logs `e.message()` verbatim) — so unlike the
+            // d3d11-only lines below, this ALSO catches a DirectX 9 failure. DXVK logs a near-identical
+            // string on an NVIDIA-only CUDA-interop *retry*, which is unreachable on Apple Silicon (no nvx
+            // extensions); were it ever hit, `classify`'s engagement-wins precedence covers the retry-then-
+            // succeeds case, since the success also logs `Device properties:`.
+            "DxvkAdapter: Failed to create device",
+            "Requested feature level not supported",     // DXVK 1.x d3d11: probed every level, none worked
             "Minimum required feature level",            // DXVK 2.x: "…D3D_FEATURE_LEVEL_9_1 not supported"
             "Maximum supported feature level: 0",        // DXVK 2.x: the driver exposed nothing usable
         ]
