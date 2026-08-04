@@ -19,9 +19,6 @@ struct DXVKManagerView: View {
                 if vm.isInstalling { ProgressView().controlSize(.small) }
             } header: {
                 Text("DXVK runtime")
-            } footer: {
-                Text("DXVK runs DirectX 9 games (which GPTK and DXMT can't) and is the compatibility fallback "
-                     + "for DirectX 10/11 titles the Metal backends can't drive.")
             }
 
             RuntimeInstalledSection(title: "Installed DXVK", vm: vm)
