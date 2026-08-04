@@ -52,7 +52,8 @@ public struct LaunchOrchestrator: Sendable {
         gameExe: URL,
         workingDirectory: URL? = nil,
         prefix: URL,
-        logURL: URL
+        logURL: URL,
+        steamArguments: [String] = []
     ) throws -> LaunchPlan {
         guard let wine = wine ?? backend.wineBinaryPath else {
             throw LaunchError.wineNotConfigured
@@ -115,7 +116,9 @@ public struct LaunchOrchestrator: Sendable {
 
         return LaunchPlan(
             executable: wine,
-            arguments: Self.invocation(for: gameExe) + config.customArgs,
+            // Steam's own launch options first, then the user's — so a hand-added `-windowed` extends the
+            // `-game dab` the game cannot start without, rather than replacing it.
+            arguments: Self.invocation(for: gameExe) + steamArguments + config.customArgs,
             environment: environment,
             // A game may resolve its data relative to a "start in" dir that isn't the exe's own folder
             // (e.g. an installer shortcut's WORKING_DIR). Honor it when set; otherwise default to the exe dir.
@@ -162,7 +165,9 @@ public struct LaunchOrchestrator: Sendable {
         try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)
         let plan = try Self.makePlan(
             config: config, backend: backend, graphics: graphics, wine: launchWine,
-            gameExe: gameExe, prefix: prefix, logURL: logURL)
+            gameExe: gameExe, prefix: prefix, logURL: logURL,
+            steamArguments: SteamAppInfo.windowsLaunch(steamRoot: app.libraryPath,
+                                                       appID: app.appID)?.arguments ?? [])
         return try await spawn(plan)
     }
 
@@ -279,6 +284,13 @@ public struct LaunchOrchestrator: Sendable {
                 throw LaunchError.executableNotFound(pinned)
             }
             return pinned
+        }
+        // Steam knows exactly which binary it would run — use that before guessing. `hl2.exe` is the case
+        // that matters: the heuristic picked the biggest exe in the tree (`bin/elementviewer.exe`, a 3 MB
+        // model viewer) over a 250 KB launcher at the root.
+        if let entry = SteamAppInfo.windowsLaunch(steamRoot: app.libraryPath, appID: app.appID) {
+            let exe = installURL.appendingPathComponent(entry.executable)
+            if FileManager.default.fileExists(atPath: exe.path) { return exe }
         }
         if let found = ExecutableResolver.firstExecutable(in: installURL) { return found }
         throw LaunchError.executableNotFound(installURL)
