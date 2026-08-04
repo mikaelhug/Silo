@@ -125,13 +125,20 @@ GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + override
   DXMT and DXVK games co-reside in the one bottle (backend-ness is per-launch: runtime + `WINEDLLOVERRIDES` +
   the seeded prefix dlls, never baked into the shared prefix; a DXMT clone / the base runtime for DXVK joins
   the Steam client's prefix-keyed wineserver). Each game has a `GameConfig.graphics` choice
-  (`GraphicsChoice = .auto | .gptk | .dxmt | .dxvk`, default `.auto`). **Automatic** (`BackendChooser.choose`):
-  **DX9-only → DXVK** (imports d3d9 and none of d3d10/11/12, via `isD3D9Only` off the PE imports — the only DX9
-  translator, bitness-independent); else 32-bit → DXMT (GPTK is 64-bit-only); else GPTK. **Reactive learning
-  walks GPTK → DXMT → DXVK**: if a Metal backend can't drive an `.auto` game (`GraphicsFallback`) and the next
-  backend could plausibly help (`dxmtMightHelp`/`dxvkMightHelp` off the imports) and is installed, `play`
-  persists a `learnedBackend` hint (`.dxmt` or `.dxvk`; DXVK terminal) for next launch — `.auto` intent and the
-  settings UI stay intact, and a GPTK upgrade re-probes GPTK. OpenGL titles need no backend — wine's own GL.
+  (`GraphicsChoice = .auto | .gptk | .dxmt | .dxvk`, default `.auto`). **One signal drives every decision: the
+  `D3DProfile`** (`D3DProfile.scan`, computed once per launch off-main) — which unions the PE imports of the
+  game's exe **AND the DLLs shipped beside it** (depth ≤2, redist dirs skipped, file-capped). Scanning only the
+  `.exe` is not enough: the renderer usually lives in a DLL (Source → `bin/shaderapidx9.dll`, Unity →
+  `UnityPlayer.dll`, UE → its `Binaries/Win64` DLLs) while the exe is a thin stub. **Automatic**
+  (`BackendChooser.choose`): **DX9-only → DXVK** (`profile.isD3D9Only` — the only DX9 translator,
+  bitness-independent); else 32-bit → DXMT/learned (GPTK is 64-bit-only, but DXMT *and* DXVK both ship i386, so
+  a 32-bit hint IS honored); else GPTK (or the learned hint). **Reactive learning walks GPTK → DXMT → DXVK**:
+  if a backend can't drive an `.auto` game (`GraphicsFallback`) and the next rung could plausibly help
+  (`dxmtMightHelp`/`dxvkMightHelp` — now **pure** functions of the same profile, so the ladder can never
+  contradict the forward choice) and is installed, `play` persists a `learnedBackend` hint (`.dxmt` or
+  `.dxvk`; DXVK terminal) — `.auto` intent and the settings UI stay intact, a GPTK upgrade re-probes GPTK, and
+  a hint whose runtime was uninstalled is dropped. An `isUnknown` profile (dynamic `LoadLibrary`, packed exe)
+  fails **open**: normal GPTK-first path, both rungs still allowed. OpenGL titles need no backend — wine's GL.
 - **Manual (non-Steam) games** carry a per-game `GraphicsChoice` (`ManualGame.graphics`, default `.auto`) —
   the SAME Automatic selector as Steam games (incl. DX9→DXVK), resolved forward by `BackendChooser.choose` in
   `playManual`. They do NOT carry the reactive learned hint (that machinery is Steam-only), so Automatic for a

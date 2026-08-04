@@ -65,71 +65,44 @@ struct BackendChooserTests {
         #expect(BackendChooser.choose(.dxmt, is32Bit: true, learned: .dxvk) == .dxmt)
     }
 
-    // MARK: - dxmtMightHelp()
+    // MARK: - The ladder gates (pure — one D3DProfile drives GPTK → DXMT → DXVK)
 
     @Test("dxmtMightHelp: D3D10/11 → yes; D3D12 or D3D9-only → no; unknown → yes (permissive)")
-    func mightHelp() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        func pe(_ n: String, _ imports: [String]) throws -> URL {
-            try writePE(tmp, n, magic: 0x20b, machine: 0x8664, imports: imports)
-        }
-        #expect(BackendChooser.dxmtMightHelp(exe: try pe("d11.exe", ["d3d11.dll", "kernel32.dll"])))
-        #expect(!BackendChooser.dxmtMightHelp(exe: try pe("d12.exe", ["d3d12.dll", "d3d11.dll"])))   // needs D3D12
-        #expect(!BackendChooser.dxmtMightHelp(exe: try pe("d9.exe", ["d3d9.dll"])))                  // D3D9-only
-        #expect(BackendChooser.dxmtMightHelp(exe: try pe("d9x.exe", ["d3d9.dll", "d3d10core.dll"]))) // has D3D10
-        #expect(BackendChooser.dxmtMightHelp(exe: try pe("none.exe", ["kernel32.dll"])))             // dynamic → try
-    }
-
-    @Test("dxmtMightHelp catches a DELAY-loaded d3d12 → DXMT can't help (no wasted reroute)")
-    func mightHelpDelayLoadedD3D12() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        // A title that delay-loads d3d12 (common) — the delay directory is the only place the name appears.
-        let exe = try PEFixture.write(
-            PEFixture.withDelayImports(magic: 0x20b, machine: 0x8664, imports: ["d3d12.dll"]), into: tmp, "dl12.exe")
-        #expect(WindowsExecutable.importedDLLs(of: exe) == ["d3d12.dll"])
-        #expect(!BackendChooser.dxmtMightHelp(exe: exe))   // needs D3D12 → DXMT is pointless
-    }
-
-    // MARK: - isD3D9Only() + DX9-first routing
-
-    @Test("isD3D9Only: pure d3d9 → yes; d3d9+d3d11 / d3d12 / no-d3d9 → no (fail-closed)")
-    func isD3D9OnlyDetection() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        func pe(_ n: String, _ imports: [String]) throws -> URL {
-            try writePE(tmp, n, magic: 0x20b, machine: 0x8664, imports: imports)
-        }
-        #expect(BackendChooser.isD3D9Only(exe: try pe("d9.exe", ["d3d9.dll", "kernel32.dll"])))        // pure DX9
-        #expect(!BackendChooser.isD3D9Only(exe: try pe("d9x.exe", ["d3d9.dll", "d3d11.dll"])))         // also DX11
-        #expect(!BackendChooser.isD3D9Only(exe: try pe("d11.exe", ["d3d11.dll"])))                     // not DX9
-        #expect(!BackendChooser.isD3D9Only(exe: try pe("none.exe", ["kernel32.dll"])))                 // fail-closed
-        // A 32-bit DirectX 9 title (the classic case) is still detected.
-        #expect(BackendChooser.isD3D9Only(exe: try writePE(tmp, "d9-32.exe", magic: 0x10b, machine: 0x014c, imports: ["d3d9.dll"])))
-    }
-
-    @Test("auto + DX9-only → DXVK, regardless of bitness and even over a learned hint")
-    func chooseDX9FirstToDXVK() {
-        #expect(BackendChooser.choose(.auto, is32Bit: false, isD3D9Only: true) == .dxvk)   // 64-bit DX9 → DXVK
-        #expect(BackendChooser.choose(.auto, is32Bit: true, isD3D9Only: true) == .dxvk)    // 32-bit DX9 → DXVK (not DXMT)
-        // DX9 wins over a stale learned DXMT hint (a DX9 title should never have learned DXMT, but be safe).
-        #expect(BackendChooser.choose(.auto, is32Bit: false, isD3D9Only: true, learned: .dxmt) == .dxvk)
-        // An explicit pin still wins over DX9-first (the user asked for it).
-        #expect(BackendChooser.choose(.gptk, is32Bit: false, isD3D9Only: true) == .gptk)
-        // Non-DX9 auto is unchanged (64-bit → GPTK, 32-bit → DXMT).
-        #expect(BackendChooser.choose(.auto, is32Bit: false, isD3D9Only: false) == .gptk)
-        #expect(BackendChooser.choose(.auto, is32Bit: true, isD3D9Only: false) == .dxmt)
+    func mightHelp() {
+        #expect(BackendChooser.dxmtMightHelp(profile: D3DProfile(usesD3D1x: true)))
+        #expect(!BackendChooser.dxmtMightHelp(profile: D3DProfile(usesD3D12: true)))                  // needs D3D12
+        #expect(!BackendChooser.dxmtMightHelp(profile: D3DProfile(usesD3D9: true)))                   // D3D9-only
+        #expect(BackendChooser.dxmtMightHelp(profile: D3DProfile(usesD3D9: true, usesD3D1x: true)))   // has D3D10/11
+        #expect(BackendChooser.dxmtMightHelp(profile: D3DProfile()))                                  // unknown → try
     }
 
     @Test("dxvkMightHelp: D3D9/10/11 → yes; pure D3D12 → no; unknown → yes (broadest net)")
-    func dxvkMightHelp() throws {
-        let tmp = try TempDir(); defer { tmp.cleanup() }
-        func pe(_ n: String, _ imports: [String]) throws -> URL {
-            try writePE(tmp, n, magic: 0x20b, machine: 0x8664, imports: imports)
-        }
-        #expect(BackendChooser.dxvkMightHelp(exe: try pe("d9.exe", ["d3d9.dll"])))                     // DXVK does DX9
-        #expect(BackendChooser.dxvkMightHelp(exe: try pe("d11.exe", ["d3d11.dll"])))                   // and DX11
-        #expect(BackendChooser.dxvkMightHelp(exe: try pe("none.exe", ["kernel32.dll"])))               // dynamic → try
-        #expect(!BackendChooser.dxvkMightHelp(exe: try pe("d12.exe", ["d3d12.dll"])))                  // pure D3D12 → no
+    func dxvkMightHelp() {
+        #expect(BackendChooser.dxvkMightHelp(profile: D3DProfile(usesD3D9: true)))     // DXVK does DX9
+        #expect(BackendChooser.dxvkMightHelp(profile: D3DProfile(usesD3D1x: true)))    // and DX10/11
+        #expect(BackendChooser.dxvkMightHelp(profile: D3DProfile()))                   // unknown → try
+        #expect(!BackendChooser.dxvkMightHelp(profile: D3DProfile(usesD3D12: true)))   // pure D3D12 → can't
         // D3D12 alongside D3D11 → DXVK could still drive the d3d11 path, so it's worth trying.
-        #expect(BackendChooser.dxvkMightHelp(exe: try pe("d12x.exe", ["d3d12.dll", "d3d11.dll"])))
+        #expect(BackendChooser.dxvkMightHelp(profile: D3DProfile(usesD3D1x: true, usesD3D12: true)))
+    }
+
+    // MARK: - DX9-first routing
+
+    @Test("auto + DX9-only → DXVK, regardless of bitness and even over a learned hint")
+    func chooseDX9FirstToDXVK() {
+        let dx9 = D3DProfile(usesD3D9: true)
+        #expect(BackendChooser.choose(.auto, is32Bit: false, profile: dx9) == .dxvk)   // 64-bit DX9 → DXVK
+        #expect(BackendChooser.choose(.auto, is32Bit: true, profile: dx9) == .dxvk)    // 32-bit DX9 → DXVK (not DXMT)
+        // DX9 wins over a stale learned DXMT hint (a DX9 title should never have learned DXMT, but be safe).
+        #expect(BackendChooser.choose(.auto, is32Bit: false, profile: dx9, learned: .dxmt) == .dxvk)
+        // An explicit pin still wins over DX9-first (the user asked for it).
+        #expect(BackendChooser.choose(.gptk, is32Bit: false, profile: dx9) == .gptk)
+        // A game that ALSO uses D3D10/11 is NOT DX9-only → normal GPTK-first path (no needless Vulkan hop).
+        let mixed = D3DProfile(usesD3D9: true, usesD3D1x: true)
+        #expect(BackendChooser.choose(.auto, is32Bit: false, profile: mixed) == .gptk)
+        #expect(BackendChooser.choose(.auto, is32Bit: true, profile: mixed) == .dxmt)
+        // Unknown profile (dynamic loader) → the normal path, never a speculative DXVK route.
+        #expect(BackendChooser.choose(.auto, is32Bit: false, profile: D3DProfile()) == .gptk)
+        #expect(BackendChooser.choose(.auto, is32Bit: true, profile: D3DProfile()) == .dxmt)
     }
 }

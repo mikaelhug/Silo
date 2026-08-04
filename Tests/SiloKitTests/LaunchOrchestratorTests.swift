@@ -517,4 +517,25 @@ struct ExecutableResolverTests {
         let dir = try tmp.makeDir("Empty")
         #expect(ExecutableResolver.firstExecutable(in: dir) == nil)
     }
+
+    @Test("A bundled redistributable never wins the size tie-break, even when it's the biggest exe")
+    func redistNeverWinsOnSize() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let game = try tmp.makeDir("Some Game")   // dir name does NOT match the exe → size decides
+        // Exactly the real Steam layout: a ~25 MB VC redist dwarfs the actual game binary. Picking it would
+        // poison BOTH the bitness read (wrong backend) and the D3DProfile scan rooted at its directory.
+        try tmp.write("Some Game/_CommonRedist/vcredist/VC_redist.x64.exe", String(repeating: "R", count: 50_000))
+        try tmp.write("Some Game/UEPrereqSetup_x64.exe", String(repeating: "P", count: 40_000))
+        try tmp.write("Some Game/Binaries/Win64/Shipping.exe", String(repeating: "G", count: 5_000))
+        #expect(ExecutableResolver.firstExecutable(in: game)?.lastPathComponent == "Shipping.exe")
+    }
+
+    @Test("Fails OPEN: an install containing only redist-looking exes still resolves one")
+    func redistFilterFailsOpen() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let game = try tmp.makeDir("Odd")
+        try tmp.write("Odd/vcredist_x64.exe", String(repeating: "R", count: 100))
+        // Better to launch something the user can re-point than to resolve nothing at all.
+        #expect(ExecutableResolver.firstExecutable(in: game)?.lastPathComponent == "vcredist_x64.exe")
+    }
 }

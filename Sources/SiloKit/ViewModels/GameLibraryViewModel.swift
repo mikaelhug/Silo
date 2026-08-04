@@ -238,15 +238,16 @@ public final class GameLibraryViewModel {
         let dxmtConfigured = backend.libDir(for: .dxmt) != nil
         let dxvkConfigured = backend.libDir(for: .dxvk) != nil
         let choice = config.graphics
-        // Resolve the exe ONCE off-main (the install-dir scan can be a large walk), read its bitness, and — for
-        // Automatic only — whether it's a DirectX 9-only title (→ DXVK). The SAME exe is handed to
-        // `launchInBottle` (so the decision and the launch can't disagree) and to `watchGraphics` (which reads
-        // its imports only if a failure actually fires). The DX9 import read is skipped for an explicit pin.
-        let (exe, is32, isD3D9): (URL?, Bool, Bool) = await Task.detached { [orchestrator] in
+        // Resolve the exe ONCE off-main (the install-dir scan can be a large walk), read its bitness, and
+        // build the game's `D3DProfile` — the single signal BOTH the forward choice and the reactive ladder
+        // use, so they can't disagree. The SAME exe is handed to `launchInBottle` (so the decision and the
+        // launch can't disagree either). The profile scan is skipped for an explicit pin (nothing reads it).
+        let (exe, is32, profile): (URL?, Bool, D3DProfile) = await Task.detached { [orchestrator] in
             let exe = orchestrator.resolvedExecutable(app: game, config: config)
             let is32 = exe.map { WindowsExecutable.is32Bit($0) } ?? false
-            let d3d9 = choice == .auto ? (exe.map { BackendChooser.isD3D9Only(exe: $0) } ?? false) : false
-            return (exe, is32, d3d9)
+            let profile = choice == .auto ? (exe.map { D3DProfile.scan(executable: $0) } ?? D3DProfile())
+                                          : D3DProfile()
+            return (exe, is32, profile)
         }.value
         // A learned hint only counts if it was learned under the CURRENT GPTK runtime — a GPTK upgrade may
         // fix the title, so a stale hint is dropped (passed as nil) and GPTK is re-probed. A hint pointing at
@@ -256,7 +257,7 @@ public final class GameLibraryViewModel {
         // choice; if that backend also can't drive the game, the reactive path re-learns an installed one.
         var learned = config.learnedUnderRuntime == cfg.gptkRuntimeName ? config.learnedBackend : nil
         if let hint = learned, cfg.libDir(for: hint) == nil { learned = nil }
-        let chosen = BackendChooser.choose(choice, is32Bit: is32, isD3D9Only: isD3D9, learned: learned)
+        let chosen = BackendChooser.choose(choice, is32Bit: is32, profile: profile, learned: learned)
         if let refusal = Self.bitnessRefusal(
             name: game.name, choice: choice, chosen: chosen, is32: is32,
             dxmtConfigured: dxmtConfigured, dxmtSupports32Bit: cfg.dxmtSupports32Bit,
@@ -296,7 +297,7 @@ public final class GameLibraryViewModel {
             // Last, so a detected fallback overrides the "Launched" status.
             let learnAppID = config.graphics == .auto && (chosen == .gptk || chosen == .dxmt) ? game.appID : nil
             watchGraphics(gameID(game), log: paths.log(forAppID: game.appID), name: game.name,
-                          backend: chosen, exe: exe, autoLearnAppID: learnAppID)
+                          backend: chosen, profile: profile, autoLearnAppID: learnAppID)
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
         }
@@ -430,13 +431,13 @@ public final class GameLibraryViewModel {
         // the UI (mirrors `play`). Manual games carry no learned hint (that reactive machinery is Steam-only),
         // so Automatic here is the pure forward choice: 32-bit → DXMT, else GPTK.
         let choice = game.graphics
-        let (is32, isD3D9) = await Task.detached {
+        let (is32, profile) = await Task.detached {
             (WindowsExecutable.is32Bit(game.executablePath),
-             choice == .auto ? BackendChooser.isD3D9Only(exe: game.executablePath) : false)
+             choice == .auto ? D3DProfile.scan(executable: game.executablePath) : D3DProfile())
         }.value
         let dxmtConfigured = cfg.libDir(for: .dxmt) != nil
         let dxvkConfigured = cfg.libDir(for: .dxvk) != nil
-        let chosen = BackendChooser.choose(choice, is32Bit: is32, isD3D9Only: isD3D9)
+        let chosen = BackendChooser.choose(choice, is32Bit: is32, profile: profile)
         if let refusal = Self.bitnessRefusal(
             name: game.name, choice: choice, chosen: chosen, is32: is32,
             dxmtConfigured: dxmtConfigured, dxmtSupports32Bit: cfg.dxmtSupports32Bit,
@@ -467,9 +468,10 @@ public final class GameLibraryViewModel {
                 setStatus("Launched \(game.name) — play date not saved.")
             }
             // Watch the ACTUALLY-chosen backend engage; manual games never auto-learn (no reactive reroute) —
-            // an Automatic manual game GPTK can't drive surfaces the honest "switch to DXMT" fallback message.
+            // an Automatic manual game GPTK can't drive surfaces the honest "switch to X" fallback message,
+            // steered by the same profile the forward choice used.
             watchGraphics(.manual(game.id), log: paths.manualLog(game.id),
-                          name: game.name, backend: chosen, exe: game.executablePath)
+                          name: game.name, backend: chosen, profile: profile)
         } catch {
             setStatus("\(game.name): \(Self.resolveMessage(error))")
         }
@@ -573,7 +575,7 @@ public final class GameLibraryViewModel {
     /// next launch uses it. Nothing happens until a failure fires, so the failure-only work (reading the exe's
     /// imports, a fresh config read) is deferred to `handleGraphicsFallback` rather than done on every launch.
     private func watchGraphics(_ id: GameID, log: URL, name: String, backend graphics: GraphicsBackend,
-                               exe: URL?, autoLearnAppID: Int? = nil) {
+                               profile: D3DProfile, autoLearnAppID: Int? = nil) {
         monitors[id]?.stop()   // supersede any prior launch's monitor for the same game
         let monitor = GraphicsFallbackMonitor()
         monitors[id] = monitor
@@ -581,22 +583,23 @@ public final class GameLibraryViewModel {
             guard let self else { return }
             self.monitors[id] = nil          // fires at most once, then drops itself
             Task { @MainActor in
-                await self.handleGraphicsFallback(name: name, backend: graphics, exe: exe, autoLearnAppID: autoLearnAppID)
+                await self.handleGraphicsFallback(
+                    name: name, backend: graphics, profile: profile, autoLearnAppID: autoLearnAppID)
             }
         }
     }
 
-    /// React to a detected backend non-engagement. The might-help PE import-table reads are computed HERE,
-    /// only on the rare failure (never on a healthy launch). An `.auto` Steam game whose failed backend has an
-    /// INSTALLED alternative that could help is REROUTED (`learn`) along GPTK → DXMT → DXVK; everything else
-    /// (a pin, a manual game, or no installed alternative) gets an honest message.
+    /// React to a detected backend non-engagement. Uses the SAME `D3DProfile` the forward choice was made
+    /// from (scanned once at launch), so the ladder can't contradict the initial routing — and no file I/O
+    /// happens on this path at all. An `.auto` Steam game whose failed backend has an INSTALLED alternative
+    /// that could help is REROUTED (`learn`) along GPTK → DXMT → DXVK; everything else (a pin, a manual game,
+    /// or no installed alternative) gets an honest message.
     private func handleGraphicsFallback(
-        name: String, backend graphics: GraphicsBackend, exe: URL?, autoLearnAppID: Int?) async {
-        let (dxmtMightHelp, dxvkMightHelp) = await Task.detached {
-            (exe.map { BackendChooser.dxmtMightHelp(exe: $0) } ?? true,
-             exe.map { BackendChooser.dxvkMightHelp(exe: $0) } ?? true)
-        }.value
-        let alt = Self.fallbackAlternative(after: graphics, dxmtMightHelp: dxmtMightHelp, dxvkMightHelp: dxvkMightHelp)
+        name: String, backend graphics: GraphicsBackend, profile: D3DProfile, autoLearnAppID: Int?) async {
+        let alt = Self.fallbackAlternative(
+            after: graphics,
+            dxmtMightHelp: BackendChooser.dxmtMightHelp(profile: profile),
+            dxvkMightHelp: BackendChooser.dxvkMightHelp(profile: profile))
         let altInstalled = alt.map { backend.libDir(for: $0) != nil } ?? false
         if let appID = autoLearnAppID, let alt, altInstalled {
             await learn(appID: appID, name: name, from: graphics, target: alt)

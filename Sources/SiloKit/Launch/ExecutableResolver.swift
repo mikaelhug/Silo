@@ -2,7 +2,34 @@ import Foundation
 
 /// Finds a game's main `.exe` inside its install directory when the user hasn't pinned one.
 public enum ExecutableResolver {
-    /// First `.exe` under `installURL`: prefer one named like the install folder, else the largest.
+    /// Directory names holding redistributables/prerequisites rather than the game.
+    private static let excludedDirs: Set<String> = [
+        "_commonredist", "commonredist", "redist", "_redist", "redistributables",
+        "directx", "dotnet", "dotnetfx", "vcredist", "installers", "prerequisites",
+    ]
+    /// Filename prefixes of bundled installers/helpers that are never the game. Load-bearing for the
+    /// "largest exe" tie-break: a Steam install routinely ships `VC_redist.x64.exe` (~25 MB) or
+    /// `UEPrereqSetup_x64.exe`, which would otherwise WIN the size contest and become "the game" — poisoning
+    /// both the bitness read (→ wrong backend) and the `D3DProfile` scan rooted at its directory.
+    private static let excludedNamePrefixes = [
+        "vcredist", "vc_redist", "dxsetup", "dxwebsetup", "directx", "ueprereqsetup", "uepreqsetup",
+        "unitycrashhandler", "crashreportclient", "unins", "dotnetfx", "oalinst", "steamworksshared",
+    ]
+
+    /// Whether `url` is a bundled redistributable/helper rather than a game executable — by its own name or
+    /// by sitting inside a redist directory.
+    static func isAuxiliaryExecutable(_ url: URL, relativeTo installURL: URL) -> Bool {
+        let name = url.deletingPathExtension().lastPathComponent.lowercased()
+        if excludedNamePrefixes.contains(where: { name.hasPrefix($0) }) { return true }
+        let base = installURL.standardizedFileURL.path
+        let path = url.standardizedFileURL.deletingLastPathComponent().path
+        guard path.hasPrefix(base) else { return false }
+        let components = String(path.dropFirst(base.count)).split(separator: "/").map { $0.lowercased() }
+        return components.contains { excludedDirs.contains($0) }
+    }
+
+    /// First `.exe` under `installURL`: prefer one named like the install folder, else the largest —
+    /// **ignoring bundled redistributables/installers**, which are often the biggest `.exe` present.
     public static func firstExecutable(in installURL: URL, fileManager: FileManager = .default) -> URL? {
         guard let enumerator = fileManager.enumerator(
             at: installURL,
@@ -15,14 +42,18 @@ public enum ExecutableResolver {
             exes.append(url)
         }
         guard !exes.isEmpty else { return nil }
+        // Drop redists/installers, but fail open: if that leaves nothing, fall back to the full list rather
+        // than resolving no executable at all.
+        let candidates = exes.filter { !isAuxiliaryExecutable($0, relativeTo: installURL) }
+        let pool = candidates.isEmpty ? exes : candidates
 
         let target = installURL.lastPathComponent.lowercased()
-        if let match = exes.first(where: {
+        if let match = pool.first(where: {
             $0.deletingPathExtension().lastPathComponent.lowercased() == target
         }) {
             return match
         }
-        return exes.max { size(of: $0, fileManager) < size(of: $1, fileManager) }
+        return pool.max { size(of: $0, fileManager) < size(of: $1, fileManager) }
     }
 
     private static func size(of url: URL, _ fileManager: FileManager) -> Int {

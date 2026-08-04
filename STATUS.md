@@ -3,6 +3,26 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🎯 Backend detection unified + DX9 detection fixed (2026-08-04, `main`; 451 tests green, zero warnings).**
+  Follow-up to an adversarial audit of the Automatic selector: the DX9 route was mostly unreachable in
+  practice, and the three backends decided from separate, weaker signals. Now **one `D3DProfile` drives all**.
+  - **New `D3DProfile` (`Launch/D3DProfile.swift`)** — `usesD3D9`/`usesD3D1x`/`usesD3D12`, derived by
+    `scan(executable:)` from the game exe **plus the DLLs shipped beside it** (breadth-first, depth ≤2, redist
+    dirs excluded, 256-file cap, memory-mapped header reads, fail-open). **This is the fix:** scanning only the
+    `.exe` missed most real DX9 titles, because the renderer lives in a DLL — Source (`bin/shaderapidx9.dll`),
+    Unity (`UnityPlayer.dll`), UE (`Binaries/Win64`). Those games previously went GPTK → fail → DXMT → fail →
+    DXVK (3 launches); they now route to DXVK on the **first** launch. Regression-verified: crippling the scan
+    back to exe-only makes the two "THE FIX" tests fail.
+  - **All three decisions read that one profile.** `choose(_:is32Bit:profile:learned:)`, and
+    `dxmtMightHelp`/`dxvkMightHelp` are now **pure** functions of the profile (no file I/O) instead of each
+    re-reading the exe — so the forward choice and the reactive ladder can't contradict each other. The
+    fallback path now does zero I/O and reuses the launch-time profile.
+  - **`ExecutableResolver` no longer picks a redistributable as "the game".** It took the *largest* exe
+    recursively, so a Steam install's `VC_redist.x64.exe` (~25 MB) or `UEPrereqSetup_x64.exe` could win —
+    poisoning the bitness read (wrong backend) *and* rooting the profile scan in the wrong directory. Redist
+    dirs + installer name prefixes are excluded, failing open if that leaves nothing.
+  - Tests: new `D3DProfileTests` (sibling-DLL, subdirectory, redist exclusion, mixed-API, unknown, garbage) +
+    resolver redist cases; `BackendChooserTests` ladder gates rewritten as pure profile tables.
 - **🌋 DXVK / Vulkan — third graphics backend, Phase 2 model threading (2026-07-26, `main`; 430 tests green).**
   Adding DXVK (D3D9/10/11 → Vulkan → MoltenVK → Metal) as a third backend so **DirectX 9** games (which
   neither GPTK nor DXMT can translate — today they black-screen on wined3d) and the D3D10/11 titles the Metal

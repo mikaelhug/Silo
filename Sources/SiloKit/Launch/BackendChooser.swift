@@ -16,25 +16,22 @@ import Foundation
 /// is routed straight to **DXVK** (bitness-independent — DXVK ships both ABIs). DXVK is also the deepest
 /// reactive fallback for the DX10/11 long tail (GPTK → DXMT → DXVK). OpenGL titles still run on wine's own GL.
 ///
-/// `choose` is pure (pre-computed bitness + DX9 flag + learned hint); `dxmtMightHelp`/`dxvkMightHelp`/
-/// `isD3D9Only` read the import table.
+/// **One signal, three decisions.** The forward choice and both reactive gates read the SAME `D3DProfile`
+/// (scanned once per launch from the game's exe *and* its DLLs — see `D3DProfile.scan`), so they can never
+/// disagree about what the game needs. All three functions here are **pure**; the caller does the I/O.
 enum BackendChooser {
-    /// DLLs whose translation DXMT provides (so a GPTK failure on one of these is worth retrying on DXMT).
-    private static let dxmtTranslatable: Set<String> = ["d3d11.dll", "d3d10.dll", "d3d10core.dll", "d3d10_1.dll"]
-    /// DLLs no current backend but GPTK can translate — DXMT/DXVK are pointless for these.
-    private static let d3d12: Set<String> = ["d3d12.dll", "d3d12core.dll"]
-
-    /// The backend a launch should use for `choice`, given the game's bitness, whether it's a DX9-only title
-    /// (both from `WindowsExecutable`), and any reactively-`learned` hint. A user's explicit pin always wins;
-    /// a DX9-only Automatic game goes to DXVK (the only DX9 translator — bitness-independent); else a 32-bit
-    /// Automatic game must use DXMT (GPTK is 64-bit-only); else a 64-bit Automatic game uses the learned hint
-    /// if one exists, else GPTK. Pure — the caller supplies the pre-read signals (a stale hint from a
-    /// superseded GPTK runtime is passed as `nil` so GPTK is re-probed).
+    /// The backend a launch should use for `choice`, given the game's bitness, its `D3DProfile`, and any
+    /// reactively-`learned` hint. A user's explicit pin always wins; a DX9-only Automatic game goes to DXVK
+    /// (the only DX9 translator — bitness-independent); else a 32-bit Automatic game must use DXMT/DXVK (GPTK
+    /// is 64-bit-only); else a 64-bit Automatic game uses the learned hint if one exists, else GPTK. Pure —
+    /// the caller supplies the pre-read signals (a stale hint from a superseded GPTK runtime is passed as
+    /// `nil` so GPTK is re-probed).
     static func choose(
-        _ choice: GraphicsChoice, is32Bit: Bool, isD3D9Only: Bool = false, learned: GraphicsBackend? = nil
+        _ choice: GraphicsChoice, is32Bit: Bool, profile: D3DProfile = D3DProfile(),
+        learned: GraphicsBackend? = nil
     ) -> GraphicsBackend {
         if let explicit = choice.explicitBackend { return explicit }   // a user pin always wins
-        if isD3D9Only { return .dxvk }                                 // only DXVK translates DirectX 9
+        if profile.isD3D9Only { return .dxvk }                         // only DXVK translates DirectX 9
         if is32Bit {
             // GPTK is 64-bit-only (Apple ships no i386 D3DMetal), so a 32-bit game can only run on DXMT or
             // DXVK — and BOTH ship i386 modules. A learned hint between those two MUST be honored: a 32-bit
@@ -47,38 +44,23 @@ enum BackendChooser {
         return learned ?? .gptk                                        // 64-bit Automatic: learned hint, else GPTK
     }
 
-    /// Whether an Automatic game should route to DXVK up front: it imports `d3d9` and NONE of D3D10/11/12 —
-    /// a pure DirectX 9 title, which neither GPTK nor DXMT can translate. Conservative (a game that ALSO
-    /// imports d3d11 stays on the GPTK/DXMT path, where DXVK's extra Vulkan→Metal hop isn't worth it). A read
-    /// of the PE import table (regular + delay-load); fail-**closed** — an unreadable/import-less exe is NOT
-    /// treated as DX9-only (it takes the normal GPTK-first path).
-    static func isD3D9Only(exe: URL) -> Bool {
-        let imports = WindowsExecutable.importedDLLs(of: exe)
-        guard imports.contains("d3d9.dll") else { return false }
-        return imports.isDisjoint(with: dxmtTranslatable) && imports.isDisjoint(with: d3d12)
-    }
-
-    /// Whether reactively switching a GPTK-failed game to DXMT could plausibly help. Fail-**open**: an exe
-    /// with no static Direct3D imports (dynamic `LoadLibrary` loaders — common) returns `true` so DXMT still
-    /// gets a chance. Only suppresses the switch when we're CONFIDENT DXMT can't help: the exe imports D3D12
-    /// (DXMT has no d3d12), or imports D3D9 and NONE of D3D10/11 (DXMT has no d3d9).
-    static func dxmtMightHelp(exe: URL) -> Bool {
-        let imports = WindowsExecutable.importedDLLs(of: exe)
-        if imports.isEmpty { return true }                                  // unknown → let DXMT try
-        if !imports.isDisjoint(with: d3d12) { return false }                // needs D3D12 → GPTK only
-        let usesD3D1x = !imports.isDisjoint(with: dxmtTranslatable)
-        if imports.contains("d3d9.dll"), !usesD3D1x { return false }        // D3D9-only → DXMT can't
+    /// Whether reactively switching a GPTK-failed game to DXMT could plausibly help. Fail-**open**: an
+    /// `isUnknown` profile (a dynamic `LoadLibrary` loader, or a packed binary — common) returns `true` so
+    /// DXMT still gets a chance. Only suppresses the switch when we're CONFIDENT DXMT can't help: the game
+    /// needs D3D12 (DXMT has none), or is DX9-only (DXMT has no d3d9 — that game belongs on DXVK).
+    static func dxmtMightHelp(profile: D3DProfile) -> Bool {
+        if profile.isUnknown { return true }        // unknown → let DXMT try
+        if profile.usesD3D12 { return false }       // needs D3D12 → GPTK is the only Metal path
+        if profile.isD3D9Only { return false }      // DX9-only → DXMT can't; DXVK is the answer
         return true
     }
 
     /// Whether reactively switching a failed game to DXVK could plausibly help — the broadest net (DXVK covers
-    /// D3D9/10/11). Fail-**open**; only suppressed when the exe imports D3D12 and nothing DXVK can translate
-    /// (DXVK has no d3d12). Unlike `dxmtMightHelp` there is no D3D9 exclusion — DXVK is exactly the D3D9 path.
-    static func dxvkMightHelp(exe: URL) -> Bool {
-        let imports = WindowsExecutable.importedDLLs(of: exe)
-        if imports.isEmpty { return true }                                  // unknown → let DXVK try
-        if !imports.isDisjoint(with: d3d12), imports.isDisjoint(with: dxmtTranslatable),
-           !imports.contains("d3d9.dll") { return false }                   // pure D3D12 → DXVK can't
+    /// D3D9/10/11). Fail-**open**; only suppressed when the game needs D3D12 and nothing DXVK can translate.
+    /// Unlike `dxmtMightHelp` there is no D3D9 exclusion — DXVK is exactly the DirectX 9 path.
+    static func dxvkMightHelp(profile: D3DProfile) -> Bool {
+        if profile.isUnknown { return true }                                    // unknown → let DXVK try
+        if profile.usesD3D12, !profile.usesD3D1x, !profile.usesD3D9 { return false }   // pure D3D12 → can't
         return true
     }
 }
