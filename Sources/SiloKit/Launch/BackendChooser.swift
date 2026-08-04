@@ -35,7 +35,15 @@ enum BackendChooser {
     ) -> GraphicsBackend {
         if let explicit = choice.explicitBackend { return explicit }   // a user pin always wins
         if isD3D9Only { return .dxvk }                                 // only DXVK translates DirectX 9
-        if is32Bit { return .dxmt }                                    // GPTK is 64-bit-only; learned is moot
+        if is32Bit {
+            // GPTK is 64-bit-only (Apple ships no i386 D3DMetal), so a 32-bit game can only run on DXMT or
+            // DXVK — and BOTH ship i386 modules. A learned hint between those two MUST be honored: a 32-bit
+            // title DXMT can't drive reactively learns `.dxvk`, and ignoring that here would route it back to
+            // DXMT every launch, forever, while the UI kept promising DXVK. A `.gptk` hint is never valid
+            // for 32-bit, so it falls through to DXMT.
+            if let learned, learned != .gptk { return learned }
+            return .dxmt
+        }
         return learned ?? .gptk                                        // 64-bit Automatic: learned hint, else GPTK
     }
 

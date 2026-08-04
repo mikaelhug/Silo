@@ -97,8 +97,9 @@ source into the DXVK artifact. (2) The Vulkan driver is selected by **dyld NAME 
 `CX_LIBVULKAN` (an absolute path there is silently ignored) — so `makePlan` puts `<dxvk>/lib` FIRST on
 `DYLD_FALLBACK_LIBRARY_PATH` (`URL.dxvkMoltenVKDir`) to pick it. We deliberately do NOT adopt CrossOver's *builtin* DXVK
 (a CX patch) — upstream ships native, which is patch-free and needs no runtime clone. `Scripts/build-dxvk.sh`
-/ `build-dxvk.yml` cross-compile it (meson + llvm-mingw, both ABIs, **no Metal toolchain** — pure Windows-PE,
-so it even runs on a Command-Line-Tools-only box). Constraint #8 binds **Wine** only (neither DXMT nor DXVK is
+/ `build-dxvk.yml` cross-compile it (meson + llvm-mingw, both ABIs). The dlls are pure Windows-PE (no Metal
+toolchain), but the bundled MoltenVK is built from source and needs **full Xcode** — a CLT-only box builds the
+dlls and skips MoltenVK with a warning, producing a NON-shippable artifact; build releases in CI. Constraint #8 binds **Wine** only (neither DXMT nor DXVK is
 Wine); never a third-party prebuilt. *(This REVERSES the earlier "DXVK evaluated and rejected" note — the
 rejection assumed the Vulkan/MoltenVK stack wasn't worth it, but the substrate already ships in Silo's wine
 and DXVK is the only DX9 path, so it earns its place as the third tier below the two Metal backends.)*

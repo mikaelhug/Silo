@@ -45,12 +45,24 @@ struct BackendChooserTests {
         #expect(BackendChooser.choose(.auto, is32Bit: true) == .dxmt)   // GPTK is 64-bit-only
     }
 
-    @Test("auto: a learned hint is consulted only for a 64-bit launch")
+    @Test("auto: a learned hint is consulted for a 64-bit launch")
     func chooseLearnedConsulted64BitAutoOnly() {
         #expect(BackendChooser.choose(.auto, is32Bit: false, learned: .dxmt) == .dxmt)  // 64-bit auto uses the hint
         #expect(BackendChooser.choose(.auto, is32Bit: false, learned: nil) == .gptk)    // no hint → GPTK default
         #expect(BackendChooser.choose(.auto, is32Bit: false, learned: .gptk) == .gptk)  // defensive: hint agrees
-        #expect(BackendChooser.choose(.auto, is32Bit: true, learned: .dxmt) == .dxmt)   // 32-bit: DXMT regardless
+        #expect(BackendChooser.choose(.auto, is32Bit: true, learned: .dxmt) == .dxmt)   // 32-bit hint agrees
+    }
+
+    @Test("auto 32-bit HONOURS a learned DXVK hint — else the DXMT→DXVK reroute loops forever")
+    func choose32BitHonoursLearnedDXVK() {
+        // Regression: DXMT and DXVK BOTH ship i386 modules, so a 32-bit game DXMT can't drive learns `.dxvk`.
+        // Ignoring the hint here sent it back to DXMT every launch while the status bar promised DXVK —
+        // an unbounded loop with a config write per launch, invisible because the message was always right.
+        #expect(BackendChooser.choose(.auto, is32Bit: true, learned: .dxvk) == .dxvk)
+        // A `.gptk` hint is never valid for a 32-bit game (GPTK is 64-bit-only) → DXMT.
+        #expect(BackendChooser.choose(.auto, is32Bit: true, learned: .gptk) == .dxmt)
+        // An explicit pin still wins.
+        #expect(BackendChooser.choose(.dxmt, is32Bit: true, learned: .dxvk) == .dxmt)
     }
 
     // MARK: - dxmtMightHelp()
