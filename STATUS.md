@@ -3,6 +3,35 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🧱 DirectX 9 on Source-engine titles is blocked UPSTREAM, not by Silo (2026-08-04, measured).** After the
+  DXVK runtime was reinstalled (the shipped one carried a STOCK MoltenVK — see below), DXVK finally creates
+  its device, swapchain and presenter on a real game. Rendering still fails: SPIRV-Cross emits Metal that
+  CALLS a depth-comparison sampler it never DECLARES —
+  `error: use of undeclared identifier 's0_2d_shadowSmplr'` — so Source's shadow-mapping pipelines fail and
+  the game runs with audio over a black screen. **Five things were tested; four are dead ends:**
+  | attempt | result |
+  |---|---|
+  | `d3d9.forceSamplerTypeSpecConstants = True` | no change (config confirmed loaded) |
+  | MoltenVK argument buffers OFF | undeclared-sampler gone, replaced by `cannot reserve 'buffer' resource location at index 0` |
+  | Source shadow cvars (`r_flashlightdepthtexture 0`, …) | no change — the shaders compile regardless |
+  | **CrossOver's OWN `d3d9.dll`** | **identical failure** — it is also DXVK **v1.10.3** |
+  | `-windowed` (Alien Swarm) | **fixes its display-mode failure** (2 errors → 0), then hits the same shader wall |
+  - **CrossOver has the same limitation today**, so this is NOT a Silo defect and NOT a reason to adopt their
+    patched DXVK — earlier notes in this file guessed their DXVK was patched around this; it is the same
+    version and fails the same way.
+  - **DXVK 2.x cannot rescue it:** DXVK 2.6.2 requests **Vulkan 1.3**, and the working MoltenVK (CodeWeavers'
+    1.2.10) offers **Vulkan 1.2.290**. Upstream MoltenVK 1.4.1 does offer 1.3 — but DXVK 2.6.2 *still*
+    requires `geometryShader` + `shaderCullDistance`, which only CodeWeavers' patch provides, and that patch
+    lives on 1.2.10. Every combination is blocked; closing it would mean maintaining a private MoltenVK patch
+    set on a newer base, which CLAUDE.md explicitly rejects. This is also why CodeWeavers still ship 1.10.3.
+  - **What still works:** the DX9 routing is correct and DXVK earns its place — the defect is specific to
+    **depth-compare (shadow) samplers**, so a DirectX 9 title that does not use shadow mapping renders fine.
+  - **Silo-side gap this exposed:** Source games need launch arguments Steam would normally supply —
+    `-game te120` (Transmissions), `-game dab` (Double Action; without it `hl2.exe` silently runs the base
+    `hl2` content, which is why it produced sound), and `-windowed` for Alien Swarm. `GameConfig.customArgs`
+    already exists and is applied at launch, so these are settable today; whether Silo should READ Steam's own
+    launch options instead of relying on the user typing them is an open product question.
+
 - **🔎 Round 2 of the verification sweep: the remaining assumed signals, checked against reality
   (2026-08-04, `main`; 489 tests green, zero warnings).** Two areas were still "verified by assumption".
   Both are now checked against this machine, and the report re-checks them so they cannot rot.
