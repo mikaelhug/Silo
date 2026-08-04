@@ -1,0 +1,6 @@
+info:  Game: swarm.exe
+info:  DXVK: v1.10.3+
+info:  Presenter: Actual swap chain properties:
+info:    Present mode: VK_PRESENT_MODE_IMMEDIATE_KHR
+info:    Image count:  2
+info:  Setting display mode: 1512x982@120

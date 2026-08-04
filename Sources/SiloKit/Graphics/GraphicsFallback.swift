@@ -47,11 +47,15 @@ public enum GraphicsFallback: Sendable {
         // `classify` gives engagement precedence, that marker made a hard failure ("DxvkAdapter: Failed to
         // create device", MoltenVK refusing geometryShader) report as `.engaged`. Removed.
         //
-        // The cost is that a successful DirectX 9 launch has no positive marker at all and reads `.unknown`
-        // — d3d9 never logs a feature level. That is the honest state: FAILURE is still detected by the
-        // loader signatures below, which is what the reactive ladder actually needs. Do not add a d3d9
-        // success marker until one is observed in a REAL successful d3d9 log.
-        case .dxvk: ["Using feature level D3D_FEATURE_LEVEL"]
+        // A DirectX 9 launch logs no feature level, so it is proven instead by its SWAP CHAIN: DXVK can only
+        // report actual swap-chain properties once a device exists, and a run that dies in
+        // `DxvkAdapter::createDevice` never reaches it. Derived by diffing a real WORKING DX9 launch
+        // (Alien Swarm, after the shadow-sampler patch) against the real device-failure log — the earlier
+        // `Device properties:` guess failed exactly this test, since DXVK prints that while merely
+        // enumerating. Shader-compile failures still show a swap chain, and rightly so: the BACKEND engaged;
+        // that is a different problem the ladder must not react to by switching backends.
+        case .dxvk: ["Using feature level D3D_FEATURE_LEVEL",
+                     "Presenter: Actual swap chain properties"]
         }
     }
 

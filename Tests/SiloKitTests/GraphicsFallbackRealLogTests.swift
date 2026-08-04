@@ -60,4 +60,19 @@ struct GraphicsFallbackRealLogTests {
         #expect(GraphicsFallback.classify(log, backend: .dxvk) == .fallback)
         #expect(GraphicsFallback.classify(log, backend: .dxvk) != .engaged)
     }
+
+    /// The other half of the DX9 story, now that a DirectX 9 game actually runs: a REAL successful launch
+    /// must be positively recognised, and it is proven by the swap chain — DXVK cannot report actual
+    /// swap-chain properties without a device. Both fixtures are verbatim captures, so this pins the
+    /// distinction the `Device properties:` guess got wrong.
+    @Test("a real successful DirectX 9 launch is recognised as engaged")
+    func realDXVKD3D9SuccessIsEngaged() throws {
+        let ok = try FixtureLoader.text("log_dxvk_d3d9_success_real.txt")
+        let failed = try FixtureLoader.text("log_dxvk_device_failure_real.txt")
+        #expect(!ok.contains("Using feature level"))          // d3d9 never logs one…
+        #expect(GraphicsFallback.classify(ok, backend: .dxvk) == .engaged)
+        // …and the marker is genuinely discriminating: the device-failure log has no swap chain at all.
+        #expect(!failed.contains("Presenter: Actual swap chain properties"))
+        #expect(GraphicsFallback.classify(failed, backend: .dxvk) == .fallback)
+    }
 }
