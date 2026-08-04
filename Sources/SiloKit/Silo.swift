@@ -124,6 +124,13 @@ public enum Silo {
         ]
     }
 
+    /// Directory (inside a game's Wine prefix) holding DXVK's pipeline-state caches — the ONE place the name
+    /// lives, shared by `GraphicsLinker.installDXVKPrefixLoaders` (which creates it) and
+    /// `LaunchOrchestrator.makePlan` (which points `DXVK_STATE_CACHE_PATH` at it). In the prefix rather than
+    /// the game folder so the cache survives a game reinstall, moves with a relocated bottle, and is always
+    /// writable. Cache files are per-executable (`<exe>.dxvk-cache`), so co-resident Steam games don't collide.
+    public static let dxvkCacheDirName = "dxvk-cache"
+
     /// Enforce the co-residency sync rule on a wine environment: `WINEMSYNC=1`, any `WINEESYNC` removed.
     /// Wine starts a SEPARATE wineserver per (prefix, sync-mode), and everything Silo runs in a bottle —
     /// the Steam client, the games co-resident with it, `taskkill`, registry edits, maintenance tools —

@@ -161,6 +161,24 @@ struct MakePlanTests {
         // DXVK ships no framework in lib/external, so no /w/lib/external prepend.
         #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == nil)
         #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/w/lib/external:") == false)
+        // Left alone DXVK writes its logs + shader cache into the GAME FOLDER (verified on-device); both are
+        // redirected — logs to Silo's log dir, the state cache into the prefix (so it survives a reinstall).
+        #expect(plan.environment["DXVK_LOG_PATH"] == log.deletingLastPathComponent().path)
+        #expect(plan.environment["DXVK_STATE_CACHE_PATH"] == prefix.appendingPathComponent("dxvk-cache").path)
+    }
+
+    @Test("Only DXVK gets the DXVK log/cache redirection — GPTK and DXMT plans stay clean")
+    func dxvkEnvIsBackendScoped() throws {
+        let cfg = GameConfig(appID: 220)
+        var b = backend()
+        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
+        b.dxmtLibDirPath = URL(fileURLWithPath: "/d/lib/wine/x86_64-windows")
+        for graphics in [GraphicsBackend.gptk, .dxmt] {
+            let plan = try LaunchOrchestrator.makePlan(
+                config: cfg, backend: b, graphics: graphics, gameExe: gameExe, prefix: prefix, logURL: log)
+            #expect(plan.environment["DXVK_LOG_PATH"] == nil)
+            #expect(plan.environment["DXVK_STATE_CACHE_PATH"] == nil)
+        }
     }
 
     @Test("An unconfigured DXVK leaks no d3d overrides and no DXVK MoltenVK path (falls back to plain wined3d)")

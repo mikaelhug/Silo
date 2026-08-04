@@ -97,6 +97,17 @@ public struct LaunchOrchestrator: Sendable {
             if graphics == .dxvk, let dxvkLib = backend.libDir(for: .dxvk) {
                 environment["DYLD_FALLBACK_LIBRARY_PATH"] =
                     "\(dxvkLib.dxvkMoltenVKDir.path):\(wine.siloDyldFallback)"
+                // Left alone, DXVK writes `<exe>_d3d11.log`, `<exe>_dxgi.log` AND its `<exe>.dxvk-cache`
+                // shader cache into the WORKING DIRECTORY — i.e. straight into the user's game install
+                // folder (verified on-device). Redirect both:
+                // - Logs → Silo's own log dir. Setting `DXVK_LOG_PATH` does NOT silence stderr (verified),
+                //   so `GraphicsFallback`'s engagement/failure signatures still reach the per-game log.
+                // - The state cache → the game's PREFIX (seeded by `installDXVKPrefixLoaders`). This is the
+                //   pipeline-state cache that avoids recompilation stutter on later runs, so it must PERSIST:
+                //   in the prefix it survives a game reinstall/verify, travels when bottles are relocated,
+                //   and is always writable (a read-only game dir would otherwise silently lose it).
+                environment["DXVK_LOG_PATH"] = logURL.deletingLastPathComponent().path
+                environment["DXVK_STATE_CACHE_PATH"] = prefix.appendingPathComponent(Silo.dxvkCacheDirName).path
             }
             environment["WINEDLLOVERRIDES"] = mergeOverride(
                 environment["WINEDLLOVERRIDES"], graphics.dllOverrides)

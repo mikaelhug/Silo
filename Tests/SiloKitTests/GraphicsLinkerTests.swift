@@ -361,6 +361,10 @@ struct GraphicsLinkerTests {
             #expect(FileManager.default.contentsEqual(
                 atPath: sys32.appendingPathComponent(dll).path, andPath: dxvkLibDir.appendingPathComponent(dll).path))
         }
+        // The pipeline-state cache dir is created in the PREFIX (DXVK won't create it itself). Keeping the
+        // shader cache here — not in the game folder, where DXVK defaults it — means it survives a game
+        // reinstall, moves with a relocated bottle, and stays writable.
+        #expect(FileManager.default.fileExists(atPath: prefix.appendingPathComponent("dxvk-cache").path))
     }
 
     @Test("installDXVKPrefixLoaders ALSO seeds syswow64 from the i386 tree (the 32-bit DirectX 9 path)")

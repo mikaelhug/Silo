@@ -221,6 +221,11 @@ public struct GraphicsLinker: Sendable {
             .x86_64: windows.appendingPathComponent("system32"),
             .i386: windows.appendingPathComponent("syswow64"),
         ]
+        // DXVK's pipeline-state cache lives in the prefix (see `Silo.dxvkCacheDirName`) so it persists across
+        // game reinstalls and stays writable; DXVK won't create the directory itself, so do it here.
+        try fileManager.createDirectory(
+            at: prefix.appendingPathComponent(Silo.dxvkCacheDirName), withIntermediateDirectories: true)
+
         for arch in WineArch.allCases {
             let srcWin = sourceRoot.appendingPathComponent("\(arch.rawValue)-windows")
             guard let destDir = dest[arch],
