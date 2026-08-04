@@ -122,6 +122,14 @@ public final class AppEnvironment {
         // Removing the CURRENT default runtime clears its persisted config path, so the readiness gates
         // (all `!= nil` checks) don't stick true against a deleted runtime — every launch would otherwise
         // fail with a dangling path, and onboarding would keep showing the step "Done".
+        // Deleting/replacing a runtime while a game or the Steam client is live would yank the wine tree
+        // out from under a running wineserver — the same corruption the bottle-move guard exists for.
+        for vm in [runtime, dxmtRuntime, dxvkRuntime] {
+            vm.blockedReason = { [weak self] in
+                guard self?.blockedForBottleWork() == true else { return nil }
+                return "Quit any running games and Steam first."
+            }
+        }
         runtime.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearWineDefault() } }
         gptkManager.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearGPTKDefault() } }
         dxmtRuntime.onDefaultRemoved = { [weak self] in Task { await self?.backendSettings.clearDXMTDefault() } }

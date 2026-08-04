@@ -54,6 +54,7 @@ enum BackendChooser {
     /// needs D3D12 (DXMT has none), or is DX9-only (DXMT has no d3d9 — that game belongs on DXVK).
     static func dxmtMightHelp(profile: D3DProfile) -> Bool {
         if profile.isUnknown { return true }        // unknown → let DXMT try
+        if profile.isOpenGLOnly { return false }    // OpenGL — no backend translates it
         if profile.isD3D8Only { return false }      // DX8 → nothing translates it; wined3d is correct
         if profile.usesD3D12 { return false }       // needs D3D12 → GPTK is the only Metal path
         if profile.isD3D9Only { return false }      // DX9-only → DXMT can't; DXVK is the answer
@@ -65,6 +66,7 @@ enum BackendChooser {
     /// Unlike `dxmtMightHelp` there is no D3D9 exclusion — DXVK is exactly the DirectX 9 path.
     static func dxvkMightHelp(profile: D3DProfile) -> Bool {
         if profile.isUnknown { return true }                                    // unknown → let DXVK try
+        if profile.isOpenGLOnly { return false }                                // OpenGL — none translate it
         if profile.isD3D8Only { return false }                                  // DX8 → wined3d is correct
         if profile.usesD3D12, !profile.usesD3D1x, !profile.usesD3D9 { return false }   // pure D3D12 → can't
         return true

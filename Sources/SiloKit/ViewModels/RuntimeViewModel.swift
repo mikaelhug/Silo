@@ -94,6 +94,13 @@ public final class RuntimeViewModel {
     /// Called when the default changes so the backend config can adopt its payload (wine binary / DXMT
     /// lib dir).
     public var onDefaultChanged: ((RuntimeInstall) -> Void)?
+    /// Refuses a destructive runtime change while something is live in a bottle, returning the message to
+    /// show. Silo launches games and the Steam client DETACHED and never owns their lifecycle, so removing
+    /// (or reinstalling, which deletes before it publishes) a runtime would pull the wine tree out from
+    /// under a running wineserver. Bottle relocation and self-update already gate on this; runtime changes
+    /// did not. Nil (the default) means "no guard wired" — used in tests.
+    public var blockedReason: (() -> String?)?
+
     /// Called when the CURRENT default is removed, so the backend config can clear the now-dangling path
     /// (otherwise the readiness gates stay true against a deleted runtime and every launch fails).
     public var onDefaultRemoved: (() -> Void)?
@@ -134,6 +141,8 @@ public final class RuntimeViewModel {
     /// also used by the Library onboarding.
     public func installLatest() async {
         guard !isInstalling else { return }
+        // Reinstalling replaces the tree in place, so it is as destructive as a removal while a game runs.
+        if let reason = blockedReason?() { statusMessage = reason; return }
         isInstalling = true
         defer { isInstalling = false }
         do {
@@ -196,6 +205,7 @@ public final class RuntimeViewModel {
     }
 
     public func remove(_ install: RuntimeInstall) async {
+        if let reason = blockedReason?() { statusMessage = reason; return }
         do {
             try await manager.remove(name: install.name)
             let wasDefault = defaultName == install.name

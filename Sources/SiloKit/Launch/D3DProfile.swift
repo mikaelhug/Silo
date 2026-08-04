@@ -19,12 +19,17 @@ public struct D3DProfile: Sendable, Equatable {
     public var usesD3D1x = false
     /// The game references D3D12 — **GPTK only**; neither DXMT nor DXVK implements it.
     public var usesD3D12 = false
+    /// The game references `opengl32` — Wine's OpenGL, which goes straight to macOS's GL. **No Silo backend
+    /// touches this**: GPTK, DXMT and DXVK all translate Direct3D. Worth knowing so we never tell the user to
+    /// "switch backend" for a game no backend can affect.
+    public var usesOpenGL = false
     /// The game calls **Vulkan directly** (`vulkan-1.dll`). No D3D translation is needed, but it still needs a
     /// working Vulkan driver — and only the DXVK runtime ships one that works (see `isVulkanNative`).
     public var usesVulkan = false
 
     public init(usesD3D8: Bool = false, usesD3D9: Bool = false, usesD3D1x: Bool = false,
-                usesD3D12: Bool = false, usesVulkan: Bool = false) {
+                usesD3D12: Bool = false, usesVulkan: Bool = false, usesOpenGL: Bool = false) {
+        self.usesOpenGL = usesOpenGL
         self.usesD3D8 = usesD3D8
         self.usesD3D9 = usesD3D9
         self.usesD3D1x = usesD3D1x
@@ -36,7 +41,14 @@ public struct D3DProfile: Sendable, Equatable {
     /// dynamically via `LoadLibrary`, or hide it behind a packed/protected binary. Every consumer treats
     /// this as "don't rule anything out" (fail-open), except the DX9-first route which needs positive proof.
     public var isUnknown: Bool {
-        !usesD3D8 && !usesD3D9 && !usesD3D1x && !usesD3D12 && !usesVulkan
+        !usesD3D8 && !usesD3D9 && !usesD3D1x && !usesD3D12 && !usesVulkan && !usesOpenGL
+    }
+
+    /// An OpenGL game with no Direct3D at all. Runs on Wine's own GL → macOS OpenGL, which Apple caps at the
+    /// 2.1 compatibility profile (only 3.2+ *core* exists), so a title demanding GL 3.0 compat cannot be
+    /// satisfied — and **no graphics backend changes that**, since all three translate Direct3D.
+    public var isOpenGLOnly: Bool {
+        usesOpenGL && !usesD3D8 && !usesD3D9 && !usesD3D1x && !usesD3D12 && !usesVulkan
     }
 
     /// A pure DirectX 9 title — the one case **only DXVK** can drive (GPTK doesn't translate DX9 at all and
@@ -67,6 +79,7 @@ public struct D3DProfile: Sendable, Equatable {
     private static let d3d1xNames: Set<String> = ["d3d11.dll", "d3d10.dll", "d3d10core.dll", "d3d10_1.dll"]
     private static let d3d12Names: Set<String> = ["d3d12.dll", "d3d12core.dll"]
     private static let vulkanNames: Set<String> = ["vulkan-1.dll"]
+    private static let openGLNames: Set<String> = ["opengl32.dll"]
 
     /// Directory names that hold redistributables/prerequisites rather than the game — their DLLs would
     /// otherwise poison the profile (a bundled DirectX redist references d3d modules the game never uses).
@@ -101,6 +114,7 @@ public struct D3DProfile: Sendable, Equatable {
             if !imports.isDisjoint(with: d3d1xNames) { profile.usesD3D1x = true }
             if !imports.isDisjoint(with: d3d12Names) { profile.usesD3D12 = true }
             if !imports.isDisjoint(with: vulkanNames) { profile.usesVulkan = true }
+            if !imports.isDisjoint(with: openGLNames) { profile.usesOpenGL = true }
         }
         /// Nothing further can change the answer once every D3D tier is known (the exclusive `isD3D8Only` /
         /// `isVulkanNative` cases are already ruled out by then, so their flags can't change the routing).
