@@ -14,11 +14,26 @@ public struct WinePrefixProvisioner: Sendable {
         case winebootFailed(Int32)
     }
 
-    /// A prefix is booted once it has a `system.reg` + `drive_c`.
+    /// Written only after `wineboot --init` RETURNS SUCCESSFULLY — see `isProvisioned`.
+    static func bootMarker(_ prefix: URL) -> URL {
+        prefix.appendingPathComponent(".silo-installed/wineboot", isDirectory: false)
+    }
+
+    /// A prefix is booted once `wineboot` actually finished. **Not** merely `system.reg` + `drive_c`:
+    /// wineboot creates that skeleton early, long before it finishes populating system32, the fakedlls and
+    /// the registry — so quitting Silo (or losing power) inside that window used to make `provision` a
+    /// permanent no-op, and every later Set up silently continued on a half-booted prefix whose component
+    /// installs then misbehaved in confusing ways, with no way to repair it short of deleting the folder.
+    /// The skeleton check is kept as a fallback so prefixes booted by earlier versions aren't re-booted.
     public func isProvisioned(_ prefix: URL) -> Bool {
+        if fileManager.fileExists(atPath: Self.bootMarker(prefix).path) { return true }
         let layout = PrefixLayout(prefix: prefix)
+        // Legacy prefixes (booted before the marker existed) are recognised by a POPULATED system32 —
+        // present only once wineboot got past the skeleton stage.
         return fileManager.fileExists(atPath: layout.systemReg.path)
             && fileManager.fileExists(atPath: layout.driveC.path)
+            && ((try? fileManager.contentsOfDirectory(
+                    atPath: layout.driveC.appendingPathComponent("windows/system32").path))?.count ?? 0) > 50
     }
 
     /// Boot `prefix` (idempotent — a no-op once it carries `system.reg` + `drive_c`).
@@ -36,6 +51,10 @@ public struct WinePrefixProvisioner: Sendable {
             executable: wine, arguments: ["wineboot", "--init"],
             environment: environment, currentDirectory: nil)
         guard result.succeeded else { throw ProvisionError.winebootFailed(result.exitCode) }
+        // Record completion so an interrupted boot is retried rather than mistaken for a booted prefix.
+        try? fileManager.createDirectory(
+            at: Self.bootMarker(prefix).deletingLastPathComponent(), withIntermediateDirectories: true)
+        fileManager.createFile(atPath: Self.bootMarker(prefix).path, contents: Data())
 
         // Settle the boot wineserver before returning. `wineboot` leaves a transient server in its
         // shutdown window; a launch fired immediately after (e.g. the installer right after the Add sheet

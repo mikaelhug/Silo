@@ -123,6 +123,17 @@ public struct GPTKImporter: Sendable {
             let hardening = await deQuarantine(staging, using: runner)
             if let issue = hardening.issue(for: installDir) { onWarning?(issue) }
 
+            // Validate the COPIED tree before publishing. `redist/lib` existing on the volume only proves the
+            // image had that folder — it doesn't prove this is Apple's GPTK. Without this a wrong .dmg was
+            // copied, published, and reported as "Imported <name>." while `installed()` (which checks the
+            // real signature) found nothing, leaving the onboarding step stuck at not-Done with no reason
+            // given. Check the same signature here so the failure is named at the point it happens.
+            guard fileManager.fileExists(
+                    atPath: stagingLib.appendingPathComponent("wine/x86_64-windows").path),
+                  fileManager.fileExists(
+                    atPath: stagingLib.appendingPathComponent("external/D3DMetal.framework").path)
+            else { throw ImportError.redistNotFound }
+
             // Atomic publish: replace any prior install only now that the staging tree is complete.
             if fileManager.fileExists(atPath: installDir.path) { try fileManager.removeItem(at: installDir) }
             try fileManager.moveItem(at: staging, to: installDir)

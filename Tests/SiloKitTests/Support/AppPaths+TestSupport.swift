@@ -43,7 +43,8 @@ extension AppPaths {
         for arch in ["x86", "x64"] {
             fm.createFile(atPath: markers.appendingPathComponent("vcredist-\(arch)").path, contents: Data())  // vcRedist
         }
-        fm.createFile(atPath: markers.appendingPathComponent("wine-defaults").path, contents: Data())   // applyWineDefaults
+        fm.createFile(atPath: markers.appendingPathComponent("wine-defaults").path,
+                      contents: Data(SteamBottle.wineDefaultsStamp.utf8))   // stamped: a stale set re-applies   // applyWineDefaults
         // d3dcompiler_47 is size-gated (the real DLL is multi-MB) — write a large-enough dummy to satisfy it.
         for dir in ["windows/system32", "windows/syswow64"] {
             let d = driveC.appendingPathComponent(dir)

@@ -370,12 +370,22 @@ public actor RuntimeManager {
     /// Fetch the expected SHA-256 from a sibling `<url>.sha256` (shasum format: "<hex>  filename").
     /// Returns nil if none is published (best-effort verification).
     private func expectedSHA256(for downloadURL: URL) async -> String? {
+        // Retried once. This used to swallow EVERY failure into "no checksum published", so with
+        // `requireDigest` (always true for the built-in repo) a single DNS hiccup or timeout on the tiny
+        // sidecar threw away a completed ~250 MB download and told the user it couldn't be verified.
+        // A genuine 404 is conclusive and returns immediately; anything else gets one more chance.
         let shaURL = downloadURL.appendingPathExtension("sha256")
-        guard (try? DownloadGuard.requireHTTPS(shaURL)) != nil,
-              let (data, response) = try? await session.data(from: shaURL),
-              let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let text = String(data: data, encoding: .utf8) else { return nil }
-        return text.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map { $0.lowercased() }
+        guard (try? DownloadGuard.requireHTTPS(shaURL)) != nil else { return nil }
+        for attempt in 0..<2 {
+            guard let (data, response) = try? await session.data(from: shaURL),
+                  let http = response as? HTTPURLResponse else {
+                if attempt == 0 { continue } else { return nil }   // transient — one retry
+            }
+            guard http.statusCode == 200 else { return nil }        // 404 etc. → genuinely not published
+            guard let text = String(data: data, encoding: .utf8) else { return nil }
+            return text.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map { $0.lowercased() }
+        }
+        return nil
     }
 
 }

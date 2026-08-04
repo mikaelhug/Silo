@@ -293,11 +293,21 @@ public final class AppEnvironment {
         //    Matched to the configured wine, so it must run AFTER the wine default is applied (step 1).
         if !dxmtReady {
             await dxmtRuntime.installLatest()
+            // Apply the freshly-installed default HERE, awaited — `onDefaultChanged` is a fire-and-forget
+            // Task, so without this `dxmtReady` can still read false right after setup returns and the
+            // onboarding hint claims DXMT isn't installed on a run that just installed it (same reason
+            // step 1 applies the wine default explicitly).
+            if let lib = dxmtRuntime.installed.first(where: { $0.name == dxmtRuntime.defaultName })?.artifact {
+                await backendSettings.applyDXMTLibDir(lib, name: dxmtRuntime.defaultName)
+            }
         }
         // 2b. DXVK runtime (best-effort — readies the Automatic DirectX 9 path, which neither GPTK nor DXMT
         //     can serve; not a prerequisite for the bottle).
         if !dxvkReady {
             await dxvkRuntime.installLatest()
+            if let lib = dxvkRuntime.installed.first(where: { $0.name == dxvkRuntime.defaultName })?.artifact {
+                await backendSettings.applyDXVKLibDir(lib, name: dxvkRuntime.defaultName)
+            }
         }
         // 3. The Steam bottle: download → create → components → user-guided Steam → warm-up + wrap.
         await steamBottleVM.setUp()

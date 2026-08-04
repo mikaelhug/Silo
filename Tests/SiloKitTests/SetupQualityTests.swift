@@ -56,4 +56,57 @@ struct SetupQualityTests {
         #expect(Silo.installerCancelCodes.contains(2))      // NSIS cancelled wizard
         #expect(!Silo.installerCancelCodes.contains(0))     // success is never a cancel
     }
+
+    /// The marker used to be a bare "exists" flag, so an override ADDED in a later Silo release never
+    /// reached bottles that were already set up — they kept the old set forever.
+    @Test("the wine-defaults marker is content-stamped, stable across processes, and re-applies on change")
+    func wineDefaultsAreVersioned() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let bottle = SteamBottle(runner: FakeProcessRunner(), paths: paths)
+        let markers = paths.steamBottle.appendingPathComponent(".silo-installed")
+        try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
+        let marker = markers.appendingPathComponent("wine-defaults")
+
+        // A legacy (empty) marker must NOT count — that's the case that stranded old bottles.
+        FileManager.default.createFile(atPath: marker.path, contents: Data())
+        #expect(!bottle.hasWineDefaults)
+
+        try Data(SteamBottle.wineDefaultsStamp.utf8).write(to: marker)
+        #expect(bottle.hasWineDefaults)
+        // A different set (simulated by a different stamp) re-applies.
+        try Data("99:deadbeef".utf8).write(to: marker)
+        #expect(!bottle.hasWineDefaults)
+        // Stable within a process AND deterministic — String.hashValue would NOT be (randomly seeded).
+        #expect(SteamBottle.wineDefaultsStamp == SteamBottle.wineDefaultsStamp)
+        #expect(!SteamBottle.wineDefaultsStamp.contains("-"))   // a digest, never a negative hashValue
+    }
+
+    /// wineboot creates drive_c + system.reg EARLY, long before it finishes populating the prefix. Quitting
+    /// in that window used to mark the prefix "provisioned" forever, so every later Set up silently built on
+    /// a half-booted prefix with no way to repair it.
+    @Test("an interrupted wineboot is retried, not mistaken for a booted prefix")
+    func interruptedWinebootIsRetried() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let fm = FileManager.default
+        let prefix = tmp.url.appendingPathComponent("bottle")
+        let provisioner = WinePrefixProvisioner(runner: FakeProcessRunner())
+
+        // The skeleton wineboot creates within its first moments.
+        let sys32 = prefix.appendingPathComponent("drive_c/windows/system32")
+        try fm.createDirectory(at: sys32, withIntermediateDirectories: true)
+        fm.createFile(atPath: prefix.appendingPathComponent("system.reg").path, contents: Data())
+        #expect(!provisioner.isProvisioned(prefix))          // half-booted → must re-boot
+
+        // A completed boot records a marker.
+        let marker = WinePrefixProvisioner.bootMarker(prefix)
+        try fm.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+        fm.createFile(atPath: marker.path, contents: Data())
+        #expect(provisioner.isProvisioned(prefix))
+
+        // Legacy prefixes (booted before the marker existed) are still recognised by a populated system32.
+        try fm.removeItem(at: marker)
+        for i in 0..<60 { fm.createFile(atPath: sys32.appendingPathComponent("d\(i).dll").path, contents: Data()) }
+        #expect(provisioner.isProvisioned(prefix))
+    }
 }

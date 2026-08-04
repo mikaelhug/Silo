@@ -64,7 +64,9 @@ public extension RuntimeKind {
             noun: "DXVK",
             workflowName: "build-dxvk",
             downloadHint: "(~15 MB)",
-            unusableWarning: "no x86_64-windows module folder was found in",
+            // DXVK is identified by its bundled Vulkan driver, so THAT is what's missing when a tree is
+            // unusable — saying "no x86_64-windows module folder" would point at a folder that IS present.
+            unusableWarning: "no bundled Vulkan driver was found in",
             releaseLimit: 30,
             pickRelease: { RuntimeManager.matchedDXVKRelease($0, forWine: wineRuntimeName()) },
             installed: { await manager.installedDXVK().map(\.runtimeInstall) },
@@ -161,11 +163,15 @@ public final class RuntimeViewModel {
             }
             // Already have the latest? Don't re-download — just say so (and adopt it as the default if none
             // is set).
-            if let existing = installed.first(where: { $0.name == release.tagName }) {
+            if let existing = installed.first(where: { $0.name == release.tagName }), existing.isUsable {
                 if defaultName == nil { setDefault(existing) }
                 statusMessage = "Latest \(kind.noun) (\(release.version)) is already installed."
                 return
             }
+            // An install of the right NAME but missing its payload (e.g. a DXVK tree with no Vulkan driver)
+            // must NOT short-circuit: `onDefaultChanged` refuses to adopt it, so the readiness gate would
+            // stay false while this reported "already installed" on every retry — a permanent dead end.
+            // Fall through and re-download it instead.
             guard let asset = RuntimeManager.preferredAsset(release) else {
                 statusMessage = "Latest \(kind.noun) release has no installable archive."
                 return

@@ -19,9 +19,13 @@ public final class BackendSettingsViewModel {
         self.configStore = configStore
     }
 
-    /// Adopt the Wine tab's default as the backend's wine binary and persist.
+    /// Adopt the Wine tab's default as the backend's wine binary and persist. Refuses an install with no
+    /// located binary — symmetric with the DXMT/DXVK handlers, which already guard — so the config can't
+    /// record a runtime name against a nil path (which `wineReady`, a plain `!= nil` check, would then
+    /// report as ready).
     public func applyDefaultWine(_ install: RuntimeInstall) async {
-        config.wineBinaryPath = install.artifact
+        guard let binary = install.artifact else { return }
+        config.wineBinaryPath = binary
         config.wineRuntimeName = install.name
         await save()
     }

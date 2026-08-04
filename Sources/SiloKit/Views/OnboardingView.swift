@@ -55,6 +55,7 @@ struct OnboardingView: View {
                     // Idle: surface the final/error status (setup done, or a Wine/GPTK failure).
                     let message = steam.status.isEmpty
                         ? (runtime.statusMessage ?? env.dxmtRuntime.statusMessage
+                            ?? env.dxvkRuntime.statusMessage
                             ?? gptk.statusMessage ?? backend.statusMessage) : steam.status
                     VStack(spacing: 6) {
                         if let message {
@@ -66,6 +67,12 @@ struct OnboardingView: View {
                         // it's discovered only when a 32-bit / GPTK-incompatible game is later refused.
                         if env.setupComplete && !env.dxmtReady {
                             Text("DXMT isn't installed — optional, but needed for 32-bit and some older titles. Add it anytime in Settings → DXMT.")
+                                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }
+                        // Same for DXVK — without it DirectX 9 games have NO backend at all, and the only
+                        // other signal is a launch later refusing with "DXVK runtime isn't installed".
+                        if env.setupComplete && !env.dxvkReady {
+                            Text("DXVK isn't installed — optional, but it's the only backend for DirectX 9 games. Add it anytime in Settings → DXVK.")
                                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }
                     }
@@ -90,6 +97,7 @@ struct OnboardingView: View {
         if !env.steamBottleVM.status.isEmpty { return env.steamBottleVM.status }
         if env.runtime.isInstalling { return env.runtime.statusMessage }
         if env.dxmtRuntime.isInstalling { return env.dxmtRuntime.statusMessage }
+        if env.dxvkRuntime.isInstalling { return env.dxvkRuntime.statusMessage }
         return nil
     }
 }
