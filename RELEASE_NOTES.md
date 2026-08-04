@@ -1,18 +1,32 @@
-# Silo 0.4.4
+# Silo 0.4.5
 
-Fixes for problems found in 0.4.3. **If you used the DXVK tab in 0.4.3, this release repairs your settings automatically on first launch.**
+**DXVK now actually works.** 0.4.4 shipped the DXVK backend with a Vulkan driver that couldn't create a graphics device, so DirectX 9 games still failed. This release fixes that and hardens setup and launching throughout.
 
-## DXVK settings fixes
+## DXVK / DirectX 9
 
-- **The DXVK tab listed your Wine builds and could adopt one as the "DXVK runtime".** Wine ships its own `d3d9.dll` and `d3d11.dll` in exactly the layout Silo used to identify DXVK, so every Wine install matched. Silo now requires DXVK's own Vulkan driver to be present, which Wine trees never have. A wrong setting left over from 0.4.3 is cleared automatically.
-- **The DXVK runtime is now published and installable.** Settings → DXVK → Install latest DXVK works; it ships DXVK 1.10.3 with its own Vulkan driver.
+- **The DXVK runtime works.** Silo's Vulkan driver is now built from CodeWeavers' published CrossOver sources — the same sources Silo already builds Wine from — because the stock upstream driver is missing a feature DirectX 10/11 needs and could not create a device at all. Verified reaching DirectX feature level 11.0 on Apple Silicon. Reinstall DXVK in **Settings → DXVK**.
+- **DXVK no longer writes into your game folders.** Its logs and shader cache move to Silo's own storage, and the shader cache now survives a game reinstall.
+- **OpenGL games are recognised.** They can't use any graphics backend (all three translate DirectX), so Silo no longer suggests switching backend for them.
 
-## Setup and reliability
+## Launching
 
-- **Runtime downloads no longer break as the release list grows.** Silo looked at only the newest 15 releases, so as new versions were published the Wine runtime would eventually drop out of view and setup would fail with "No Wine build published yet." even though it was there. Silo now searches further back.
-- **Deleting a runtime outside Silo no longer leaves setup thinking it's installed.** Previously the setup step still showed "Done" while every launch failed against a path that no longer existed.
-- **Interrupted downloads no longer appear as installed runtimes.** A partially-extracted runtime left behind by a crash could be listed and selected as the default.
-- **Error messages are readable.** Failures during first-run setup — a rate-limited GitHub, a failed checksum, a full disk, an unrecognised GPTK disk image — showed an internal Cocoa string instead of an explanation.
+- **Silo no longer says "Launched" when the game didn't start.** Three cases: Steam being open but *not signed in* (the game would quietly fail and vanish), Steam never finishing startup, and a pinned executable that a game update had renamed or moved.
+- **DirectX 8 games are left alone.** No translation layer supports DirectX 8, so Wine's own renderer is correct — Silo no longer reports a false graphics failure for them.
+- **Games can't be affected by another game's backend.** A DirectX 9 game using DXVK leaves files in the shared Steam bottle; every other game and the Steam client are now explicitly insulated from them.
+
+## Setup
+
+- **Fonts install completely.** A single interrupted download could permanently leave the bottle missing most Microsoft core fonts, with later setup runs skipping the step entirely.
+- **Setup tells you if something didn't install** instead of reporting success over a bottle missing, say, the Visual C++ runtime — which would later look like every game being broken.
+- **An interrupted first-time setup is retried** rather than being remembered as complete.
+- **Cancelling the Steam installer** is recognised as a cancellation instead of showing a raw installer error code.
+- **Downloads no longer keep running after a failed setup**, and a brief network blip no longer discards a completed runtime download.
+- **A disk image that isn't Apple's GPTK** is now rejected with a clear message instead of reporting a successful import.
+
+## Settings
+
+- **Your settings can't be wiped by a downgrade.** A value written by a newer Silo could make the whole configuration file unreadable, silently resetting every runtime path, per-game setting and manual game.
+- **Error messages are readable** — rate limits, checksum failures, a full disk, and setup errors all explain themselves now.
 
 ---
 
