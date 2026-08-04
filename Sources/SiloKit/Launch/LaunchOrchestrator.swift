@@ -117,8 +117,10 @@ public struct LaunchOrchestrator: Sendable {
         return LaunchPlan(
             executable: wine,
             // Steam's own launch options first, then the user's — so a hand-added `-windowed` extends the
-            // `-game dab` the game cannot start without, rather than replacing it.
-            arguments: Self.invocation(for: gameExe) + steamArguments + config.customArgs,
+            // `-game dab` the game cannot start without, rather than replacing it. Anything the user already
+            // typed WINS and is not re-added (see `mergeArguments`).
+            arguments: Self.invocation(for: gameExe) + Self.mergeArguments(steam: steamArguments,
+                                                                          user: config.customArgs),
             environment: environment,
             // A game may resolve its data relative to a "start in" dir that isn't the exe's own folder
             // (e.g. an installer shortcut's WORKING_DIR). Honor it when set; otherwise default to the exe dir.
@@ -264,6 +266,29 @@ public struct LaunchOrchestrator: Sendable {
             executable: wine, arguments: [tool],
             environment: Silo.msyncWineEnvironment(prefix: prefix, wine: wine), currentDirectory: nil,
             logURL: prefix.appendingPathComponent("winetool.log"))
+    }
+
+    /// Combine Steam's launch options with the user's own, without duplicating a switch the user already
+    /// set by hand.
+    ///
+    /// **Backwards compatibility, and the reason this is not a plain concatenation.** Before Silo read
+    /// `appinfo.vdf`, the only way to start a Source game was to type its arguments into the game's settings —
+    /// so existing configs already contain `-game dab`, `-game te120`, and so on. Appending Steam's copy would
+    /// produce `-game dab -windowed -game dab`, and Source takes the LAST `-game`, which quietly changes which
+    /// mod loads. A switch present in `user` therefore suppresses Steam's copy of it, along with the values
+    /// that follow it. Values are matched by switch (a token starting with `-` or `+`), which is how both
+    /// Source and Steam's own options are written.
+    static func mergeArguments(steam: [String], user: [String]) -> [String] {
+        guard !user.isEmpty else { return steam }
+        func isSwitch(_ token: String) -> Bool { token.hasPrefix("-") || token.hasPrefix("+") }
+        let userSwitches = Set(user.filter(isSwitch))
+        var out: [String] = []
+        var dropping = false
+        for token in steam {
+            if isSwitch(token) { dropping = userSwitches.contains(token) }
+            if !dropping { out.append(token) }
+        }
+        return out + user
     }
 
     // MARK: - Helpers
