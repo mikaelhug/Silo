@@ -142,8 +142,19 @@ jobs:
           # shaders) — the macos-26 runner has it.
           # shellcheck disable=SC1091
           set -a; . ./versions.env; set +a
-          git clone --depth 1 --branch "$MOLTENVK_VERSION" "https://github.com/${MOLTENVK_REPO}.git" "$RUNNER_TEMP/MoltenVK"
-          cd "$RUNNER_TEMP/MoltenVK"
+          # CodeWeavers' PATCHED MoltenVK from the crossover-sources tarball (same source build-wine uses).
+          # Stock Khronos MoltenVK cannot create a D3D device for DXVK at ANY feature level - measured on an
+          # M4 Pro for both 1.4.1 and a CI-built 1.2.11 - because it lacks VK_EXT_transform_feedback, which
+          # DXVK requires for D3D10/11 stream-out. sources/moltenvk is first in the tarball, so this streams
+          # only its opening megabytes.
+          mkdir -p "$RUNNER_TEMP/MoltenVK"
+          CX_SRC_VER="${WINE_TAG#wine-cx-}"   # pair MoltenVK with the SAME CrossOver the wine came from
+          curl -fL "https://media.codeweavers.com/pub/crossover/source/crossover-sources-${CX_SRC_VER}.tar.gz" \
+            | tar -xzf - -C "$RUNNER_TEMP/MoltenVK" sources/moltenvk || true
+          test -d "$RUNNER_TEMP/MoltenVK/sources/moltenvk" || { echo "::error::no sources/moltenvk in crossover-sources"; exit 1; }
+          grep -q "EXT_transform_feedback" "$RUNNER_TEMP/MoltenVK/sources/moltenvk/MoltenVK/MoltenVK/Layers/MVKExtensions.def" \
+            || { echo "::error::MoltenVK lacks VK_EXT_transform_feedback - DXVK would not work"; exit 1; }
+          cd "$RUNNER_TEMP/MoltenVK/sources/moltenvk"
           ./fetchDependencies --macos
           make macos
           # Published to Package/{Latest,Release}/MoltenVK/dynamic/dylib/macOS/ (Latest symlinks Release);

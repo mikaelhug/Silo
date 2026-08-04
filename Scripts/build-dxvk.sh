@@ -108,24 +108,30 @@ file "out/lib/wine/x86_64-windows/d3d11.dll" | grep -qi "PE32" \
   || { echo "ERROR: d3d11.dll is not a PE image — the cross-build didn't target Windows."; exit 1; }
 echo "    all present: {x86_64,i386}-windows d3d9/d3d10core/d3d11/dxgi.dll"
 
-echo "==> Build MoltenVK $MOLTENVK_VERSION (the Vulkan driver DXVK runs on — LOAD-BEARING, see header)"
+echo "==> Build MoltenVK from CodeWeavers' crossover-sources (patched — LOAD-BEARING, see header)"
 # A STOCK MoltenVK cannot create a D3D device for DXVK at any feature level (on-device 2026-08-04); the
 # runtime must therefore carry its own. MoltenVK compiles Metal shaders, so it needs FULL Xcode.
 mkdir -p out/lib
 if xcrun -sdk macosx metal -e /dev/null -o /dev/null >/dev/null 2>&1 || \
    (xcodebuild -version >/dev/null 2>&1 && [ "$(xcode-select -p)" != "/Library/Developer/CommandLineTools" ]); then
-  rm -rf "$WORK/MoltenVK"
-  git clone --depth 1 --branch "$MOLTENVK_VERSION" "https://github.com/${MOLTENVK_REPO}.git" "$WORK/MoltenVK"
-  ( cd "$WORK/MoltenVK" && ./fetchDependencies --macos && make macos )
-  # `make macos` publishes to Package/{Latest,Release}/MoltenVK/dynamic/dylib/macOS/ (Latest is a symlink to
-  # Release). Search the whole Package tree rather than pinning that path, so a layout change fails loudly
-  # here instead of silently shipping an artifact with no driver. -type f skips the Latest symlink duplicate.
-  MVK_DYLIB="$(find "$WORK/MoltenVK/Package" -name 'libMoltenVK.dylib' -type f 2>/dev/null | head -1)"
+  rm -rf "$WORK/MoltenVK"; mkdir -p "$WORK/MoltenVK"
+  # CodeWeavers' PATCHED MoltenVK, from the same crossover-sources tarball build-wine.sh uses. Stock Khronos
+  # MoltenVK cannot create a D3D device for DXVK at any feature level (measured, both 1.2.11 and 1.4.1) —
+  # it lacks VK_EXT_transform_feedback, which DXVK needs for D3D10/11 stream-out. `sources/moltenvk` is the
+  # FIRST member of the tarball, so this streams only its opening megabytes rather than the whole archive.
+  curl -fL "https://media.codeweavers.com/pub/crossover/source/crossover-sources-${CROSSOVER_VERSION}.tar.gz" \
+    | tar -xzf - -C "$WORK/MoltenVK" sources/moltenvk || true
+  MVK_SRC="$WORK/MoltenVK/sources/moltenvk"
+  [ -d "$MVK_SRC" ] || { echo "ERROR: crossover-sources has no sources/moltenvk"; exit 1; }
+  grep -q "EXT_transform_feedback" "$MVK_SRC/MoltenVK/MoltenVK/Layers/MVKExtensions.def" \
+    || { echo "ERROR: this MoltenVK lacks VK_EXT_transform_feedback — DXVK would not work"; exit 1; }
+  ( cd "$MVK_SRC" && ./fetchDependencies --macos && make macos )
+  MVK_DYLIB="$(find "$MVK_SRC/Package" -name 'libMoltenVK.dylib' -type f 2>/dev/null | head -1)"
   if [ -n "$MVK_DYLIB" ]; then
     cp "$MVK_DYLIB" out/lib/libMoltenVK.dylib
     echo "    MoltenVK: $(file -b out/lib/libMoltenVK.dylib)"
   else
-    echo "::warning:: MoltenVK build produced no libMoltenVK.dylib — the DXVK dlls alone are NOT usable."
+    echo "ERROR: MoltenVK build produced no libMoltenVK.dylib"; exit 1
   fi
 else
   echo "::warning:: full Xcode not selected — SKIPPING the MoltenVK build."
