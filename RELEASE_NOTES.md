@@ -1,10 +1,7 @@
-# Silo 0.4.6
+# Silo 0.4.7
 
-**Fixes a broken 0.4.5: games refused to launch with "sign in to Steam" even when Steam was running and signed in.**
-
-0.4.5 added a pre-launch check that tried to detect whether the bottle's Steam had signed in, by looking for a Steam Guard token file. Real Steam installs don't reliably have that file, so the check refused to launch anything. It has been removed — Silo launches your game, as it did in 0.4.4 and earlier.
-
-Everything else from 0.4.5 (the working DXVK runtime, the setup and launch hardening) is unchanged.
+- **"Steamworks Common Redistributables" no longer appears as a game.** It's a support package Steam installs alongside your games, not something you can play. The old filter looked for an unowned app, but Steam records your own account as the owner, so the check never matched.
+- **Only installed games are listed.** A title that's still downloading (or being removed) no longer shows as playable.
 
 ---
 

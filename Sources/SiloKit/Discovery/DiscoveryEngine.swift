@@ -38,9 +38,11 @@ public actor DiscoveryEngine {
         var seen = Set<Int>()
         for (index, root) in libraryRoots.enumerated() {
             // Skip shared system packages (Steamworks Common Redistributables, runtimes, tools): Steam
-            // installs them with `LastOwner == 0`, so they aren't games — see `SteamApp.isSharedSystemApp`.
+            // aren't games (see `SteamApp.isSharedSystemApp`), and show only apps Steam reports as actually
+            // INSTALLED — a title mid-download or mid-uninstall has no complete files, so listing it as
+            // playable just produces a launch that fails on a missing executable.
             for app in try scanLibrary(root: root, required: index == 0)
-            where !app.isSharedSystemApp && seen.insert(app.appID).inserted {
+            where !app.isSharedSystemApp && app.isFullyInstalled && seen.insert(app.appID).inserted {
                 apps.append(app)
             }
         }

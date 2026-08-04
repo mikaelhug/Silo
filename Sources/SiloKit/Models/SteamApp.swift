@@ -49,11 +49,23 @@ public struct SteamApp: Codable, Sendable, Hashable, Identifiable {
 
     public var isFullyInstalled: Bool { stateFlags.isFullyInstalled }
 
-    /// A shared system package Steam auto-installs (redistributables, runtimes, tools) — `LastOwner` is
-    /// `0`/absent because no user owns it. These aren't games, so the library hides them. A user-owned
-    /// game always carries the owner's SteamID64 here. (Distinct from the install dir having an exe —
-    /// real games can keep their exe nested, so exe-presence is not a reliable signal.)
-    public var isSharedSystemApp: Bool { (lastOwner ?? 0) == 0 }
+    /// Shared packages Steam auto-installs alongside games (redistributables/runtimes). Not games, so the
+    /// library hides them. **An explicit appID set, deliberately** — every heuristic tried against real
+    /// manifests was wrong in at least one direction:
+    /// - `LastOwner == 0` (what this used to be) simply never fires: 228980's manifest carries the real
+    ///   owner's SteamID64, so the redistributable always surfaced as a game.
+    /// - Executable presence fails BOTH ways: "Steamworks Shared" ships 5 `.exe` redist installers, while
+    ///   Split Fiction has none above depth 2 — the check would keep the package and hide the game.
+    /// - An empty `UserConfig` (no `language`) does separate them today, but it's a side effect of never
+    ///   having been launched, so it risks hiding a freshly-installed game — and hiding a real game is far
+    ///   worse than showing one package.
+    /// An appID is stable, unique and unlocalised, so this is exact. 228980 is the only shared package Steam
+    /// installs into a Windows bottle (the Linux runtimes never appear here).
+    public static let sharedSystemAppIDs: Set<Int> = [
+        228980,   // Steamworks Common Redistributables
+    ]
+
+    public var isSharedSystemApp: Bool { Self.sharedSystemAppIDs.contains(appID) }
 
     /// Library cover art (Steam CDN `header.jpg`).
     public var headerArtURL: URL? {
