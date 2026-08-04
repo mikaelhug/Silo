@@ -67,31 +67,28 @@ struct GraphicsFallbackTests {
         #expect(GraphicsFallback.classify(log, backend: .dxvk) == .engaged)
     }
 
-    @Test("a DirectX 9 launch under DXVK is detected — engaged AND failed (no d3d11 feature-level line)")
+    /// A DirectX 9 launch under DXVK can be shown to have FAILED, but not to have succeeded. d3d9 never
+    /// logs a feature level, and DXVK's adapter report (`Device properties:` and friends) is printed while
+    /// enumerating — before any device is created — so it proves nothing. This test previously asserted the
+    /// opposite and made a real, dead DX9 launch classify as `.engaged`; see the real captured log in
+    /// `GraphicsFallbackRealLogTests`.
+    @Test("a DirectX 9 launch under DXVK: failure is detectable, success is not")
     func dxvkD3D9PathDetected() {
-        // A d3d9 game never emits the d3d11 `Using feature level …` line, so the shared
-        // `DxvkAdapter::createDevice` logging is the only proof either way. Success:
-        let engaged = """
+        // DXVK's adapter report alone → NOT proof of anything. Honest answer is `.unknown`.
+        let enumerated = """
         info:  DXVK: v1.10.3
         info:  Apple M4 Pro:
         info:  Device properties:
         info:    Device name:     : Apple M4 Pro
         """
-        #expect(!engaged.contains("Using feature level"))          // the d3d11-only signal is absent…
-        #expect(GraphicsFallback.classify(engaged, backend: .dxvk) == .engaged)   // …yet still confirmed
+        #expect(!enumerated.contains("Using feature level"))                        // no d3d11 signal…
+        #expect(GraphicsFallback.classify(enumerated, backend: .dxvk) == .unknown)  // …so: undecided
 
-        // Failure: D3D9Interface::CreateDevice catches the DxvkError and logs its message verbatim.
-        let failed = """
-        info:  DXVK: v1.10.3
-        err:   DxvkAdapter: Failed to create device
-        """
+        // The same report followed by the real failure IS decisive.
+        let failed = enumerated + "\nerr:   DxvkAdapter: Failed to create device"
         #expect(GraphicsFallback.classify(failed, backend: .dxvk) == .fallback)
     }
 
-    /// Both wordings are grepped from the PINNED DXVK v1.10.3 source (`d3d11_main.cpp`, `dxvk_adapter.cpp`).
-    /// This test previously also asserted two "DXVK 2.x wordings" that appear nowhere in the version Silo
-    /// ships — markers that could never fire, presented as coverage. If `DXVK_VERSION` is bumped, re-derive
-    /// these from that release's source rather than adding speculative variants.
     @Test("a DXVK launch that could not create a device is flagged, in both real v1.10.3 wordings")
     func dxvkDeviceCreationFailureDetected() {
         // d3d11 entry point: probes every level, then gives up (what a STOCK MoltenVK produces).

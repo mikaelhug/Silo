@@ -1,0 +1,7 @@
+info:  Game: hl2.exe
+info:  DXVK: v1.10.3
+info:  Device properties:
+info:  Enabled device extensions:
+info:  Queue families:
+err:   DxvkAdapter: Failed to create device
+[mvk-error] VK_ERROR_FEATURE_NOT_PRESENT: vkCreateDevice(): Requested physical device feature specified by the 5th flag in VkPhysicalDeviceFeatures is not available on this device.

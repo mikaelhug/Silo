@@ -36,17 +36,22 @@ public enum GraphicsFallback: Sendable {
         // level so any level counts.
         case .dxmt: ["Using feature level D3D_FEATURE_LEVEL",
                      "Maximum supported feature level: D3D_FEATURE_LEVEL"]
-        // DXVK, captured on-device 2026-08-04 (v1.10.3):
-        // - `Device properties:` is logged by `DxvkAdapter::createDevice` AFTER `vkCreateDevice` succeeds
-        //   (the throw sits 12 lines above the log), on the path SHARED by d3d9/d3d10core/d3d11 — so it is
-        //   the API-agnostic "DXVK got a real GPU device" proof. **This is what makes a DirectX 9 launch
-        //   detectable at all**: the feature-level line below is emitted only by the d3d11 entry point, so
-        //   without this a DX9 game — DXVK's whole reason for existing here — was silent either way.
-        //   Verified in both directions: present on the successful run, ABSENT on the failing one.
-        // - The d3d11 feature-level line is kept as the more specific signal; the substring stops before the
-        //   level so any level counts, and before the `D3D11CoreCreateDevice`/`D3D11InternalCreateDevice`
-        //   prefix, which differs across DXVK versions.
-        case .dxvk: ["Device properties:", "Using feature level D3D_FEATURE_LEVEL"]
+        // DXVK: ONLY the d3d11 feature-level line, which `D3D11CoreCreateDevice` logs after the device is
+        // actually created. The substring stops before the level so any level counts, and before the
+        // `D3D11CoreCreateDevice`/`D3D11InternalCreateDevice` prefix, which differs across versions.
+        //
+        // `Device properties:` was ALSO listed here, on the reasoning that DXVK logs it only after
+        // `vkCreateDevice` succeeds. **That was wrong, and a real failing log disproves it**: DXVK prints its
+        // whole adapter report — `Device properties:`, `Enabled device extensions:`, `Device features:`,
+        // `Queue families:` — while ENUMERATING, before it ever tries to create the device. Because
+        // `classify` gives engagement precedence, that marker made a hard failure ("DxvkAdapter: Failed to
+        // create device", MoltenVK refusing geometryShader) report as `.engaged`. Removed.
+        //
+        // The cost is that a successful DirectX 9 launch has no positive marker at all and reads `.unknown`
+        // — d3d9 never logs a feature level. That is the honest state: FAILURE is still detected by the
+        // loader signatures below, which is what the reactive ladder actually needs. Do not add a d3d9
+        // success marker until one is observed in a REAL successful d3d9 log.
+        case .dxvk: ["Using feature level D3D_FEATURE_LEVEL"]
         }
     }
 
@@ -89,7 +94,7 @@ public enum GraphicsFallback: Sendable {
             // d3d11-only lines below, this ALSO catches a DirectX 9 failure. DXVK logs a near-identical
             // string on an NVIDIA-only CUDA-interop *retry*, which is unreachable on Apple Silicon (no nvx
             // extensions); were it ever hit, `classify`'s engagement-wins precedence covers the retry-then-
-            // succeeds case, since the success also logs `Device properties:`.
+            // succeeds case for d3d11, whose success logs its feature level.
             "DxvkAdapter: Failed to create device",      // dxvk_adapter.cpp — thrown when vkCreateDevice fails
             "Requested feature level not supported",     // d3d11_main.cpp — probed every level, none worked
         ]

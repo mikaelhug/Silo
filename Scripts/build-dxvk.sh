@@ -139,6 +139,21 @@ if xcrun -sdk macosx metal -e /dev/null -o /dev/null >/dev/null 2>&1 || \
   else
     echo "ERROR: MoltenVK build produced no libMoltenVK.dylib"; exit 1
   fi
+  # GUARD: the three DEVICE FEATURES DXVK requires unconditionally. CodeWeavers patch MoltenVK to advertise
+  # them (their own comments in MVKDevice.mm read "XXX Required by DXVK for D3D10" / "…for 10level9"); stock
+  # Khronos MoltenVK does not, because Metal has no geometry shaders or cull distance. Without them
+  # `vkCreateDevice` fails with VK_ERROR_FEATURE_NOT_PRESENT and **no DXVK API works at all** — d3d9 AND
+  # d3d11. A stock-MoltenVK artifact shipped exactly this way and every DirectX 9 game died on
+  # "DxvkAdapter: Failed to create device"; the extension check above passed, because the difference is
+  # features, not extensions. Byte-level check on the built dylib, so a build that silently picked up
+  # upstream MoltenVK cannot be published.
+  echo "==> Verify the built MoltenVK advertises the features DXVK requires"
+  for feature in geometryShader shaderCullDistance pipelineStatisticsQuery; do
+    grep -q "$feature" "$MVK_SRC/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm" \
+      || { echo "ERROR: MoltenVK source does not set $feature — this is not CodeWeavers' patched tree"; exit 1; }
+  done
+  grep -qE '_features\.geometryShader *= *true' "$MVK_SRC/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm" \
+    || { echo "ERROR: geometryShader is not force-enabled — DXVK cannot create a device"; exit 1; }
 else
   echo "::warning:: full Xcode not selected — SKIPPING the MoltenVK build."
   echo "            The DXVK dlls alone are NOT usable (stock MoltenVK can't drive DXVK). Build on a runner"

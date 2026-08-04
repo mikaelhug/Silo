@@ -46,4 +46,18 @@ struct GraphicsFallbackRealLogTests {
         #expect(GraphicsFallback.classify(gptk, backend: .dxmt) != .engaged)
         #expect(GraphicsFallback.classify(dxmt, backend: .gptk) != .engaged)
     }
+
+    /// REGRESSION, from a real DirectX 9 launch that FAILED (Double Action: Boogaloo / Alien Swarm, 2026-08-04).
+    /// `"Device properties:"` was listed as DXVK engagement proof on the reasoning that DXVK logs it only
+    /// after `vkCreateDevice` succeeds. It does not — DXVK prints its whole adapter report while ENUMERATING.
+    /// Since `classify` gives engagement precedence, a hard device-creation failure reported `.engaged`, and
+    /// the on-device report cheerfully showed two dead games as working.
+    @Test("a real DXVK device-creation failure is a fallback, never engaged")
+    func realDXVKDeviceFailureIsFallback() throws {
+        let log = try FixtureLoader.text("log_dxvk_device_failure_real.txt")
+        #expect(log.contains("Device properties:"))          // the misleading line IS present…
+        #expect(log.contains("Failed to create device"))     // …alongside the actual failure
+        #expect(GraphicsFallback.classify(log, backend: .dxvk) == .fallback)
+        #expect(GraphicsFallback.classify(log, backend: .dxvk) != .engaged)
+    }
 }
