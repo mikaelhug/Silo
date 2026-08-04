@@ -9,7 +9,7 @@ import Testing
 ///
 /// Skipped unless `SILO_BOTTLE_REPORT=1`, so hermetic runs and CI are unaffected:
 ///     SILO_BOTTLE_REPORT=1 Scripts/test.sh --filter BackendReport
-@Suite("Backend report (on-device)")
+@Suite("Backend report (on-device)", .serialized)
 struct BackendReportTests {
 
     /// A trait, not an assertion — an opt-in diagnostic must be SKIPPED on a machine without a bottle,
@@ -122,5 +122,31 @@ struct BackendReportTests {
         """)
         let unsatisfied = bottle.unsatisfiedComponents()
         print("  Silo would report unsatisfied: \(unsatisfied.isEmpty ? "none" : unsatisfied.map(\.rawValue).joined(separator: ", "))")
+    }
+
+    /// `WineServerProbe` is what stops Silo moving or updating a bottle out from under a running wineserver —
+    /// corrupting the prefix. It works by predicting a path (`<tmp>/.wine-<uid>/server-<dev>-<ino>/socket`),
+    /// which is precisely the kind of assumption that has been wrong three times in this codebase. Prints the
+    /// prediction beside the filesystem so a mismatch is visible rather than silently reported as "not live".
+    @Test("report: does the wineserver probe find the real bottle's socket",
+          .enabled(if: BackendReportTests.enabled))
+    func wineServerProbeReport() throws {
+        let paths = AppPaths.standard()
+        let expected = WineServerProbe.serverDirName(for: paths.steamBottle)
+        print("\n=== Wine server probe (real bottle) ===")
+        print("  predicted dir  \(expected ?? "nil")")
+        for root in ["/tmp", ProcessInfo.processInfo.environment["TMPDIR"] ?? ""] where !root.isEmpty {
+            let dir = URL(fileURLWithPath: root).appendingPathComponent(".wine-\(getuid())")
+            let entries = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+            print("  \(dir.path)")
+            for e in entries.prefix(4) {
+                let hasSocket = FileManager.default.fileExists(
+                    atPath: dir.appendingPathComponent(e).appendingPathComponent("socket").path)
+                print("      \(e)\(hasSocket ? "   ← has socket" : "")")
+            }
+        }
+        let live = WineServerProbe.isLive(prefix: paths.steamBottle)
+        print("  isLive(SteamBottle) = \(live)")
+        print("  (true whenever Steam or a game is running; false otherwise — both are valid)")
     }
 }

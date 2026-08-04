@@ -3,6 +3,27 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔎 Round 2 of the verification sweep: the remaining assumed signals, checked against reality
+  (2026-08-04, `main`; 489 tests green, zero warnings).** Two areas were still "verified by assumption".
+  Both are now checked against this machine, and the report re-checks them so they cannot rot.
+  - **`WineServerProbe` — CORRECT, and now proven.** It predicts
+    `<tmp>/.wine-<uid>/server-<dev>-<ino>/socket`; against a live wineserver serving the real Steam bottle it
+    predicted `server-100000e-38b92fa` and that is exactly the directory holding the socket. The load-bearing
+    detail: this CrossOver-sourced build uses **`/tmp`, NOT `$TMPDIR`** (`$TMPDIR/.wine-501` exists but holds
+    only an unrelated `bottle-<dev>-<ino>.lock`), so the candidate-root list must keep `/tmp` — do not
+    "simplify" it away. `/tmp/.wine-501` also holds several STALE `server-*` dirs with no socket; requiring
+    the socket file is what stops those reading as live. `isLive(SteamBottle) = true` with Steam running.
+  - **`GraphicsFallback` loader-failure signatures — one confirmed, two deleted.** GPTK's
+    `"Failed to dlopen D3DMetal"` is verbatim in the installed D3DMetal binary (`GFXTHandle && "Failed to
+    dlopen D3DMetal"`) and in the runtime's unix-side d3d modules ✅. DXVK's `"DxvkAdapter: Failed to create
+    device"` and `"Requested feature level not supported"` are both in the pinned v1.10.3 source ✅. The other
+    two — `"Minimum required feature level"`, `"Maximum supported feature level: 0"` — were speculative
+    "DXVK 2.x wordings" that appear **nowhere** in the version Silo ships, and the test asserting them
+    supplied the strings itself. Markers that cannot fire are not a safety net but a false inventory, so both
+    were removed; the test now uses the two real wordings. Re-derive from source if `DXVK_VERSION` is bumped.
+  - The on-device report gained a **wineserver-probe section** and is `.serialized` so its three sections
+    print in order rather than interleaved.
+
 - **🔬 Systematic backend verification — an on-device report, and the three real bugs it caught
   (2026-08-04, `main`; 481 tests green, zero warnings).** "Do all three backends work, and does Automatic
   behave?" had no answer that wasn't an assumption. There is now an **opt-in on-device report** —

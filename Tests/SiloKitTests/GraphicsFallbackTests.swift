@@ -88,20 +88,22 @@ struct GraphicsFallbackTests {
         #expect(GraphicsFallback.classify(failed, backend: .dxvk) == .fallback)
     }
 
-    @Test("a DXVK launch that could not create a device is flagged (both 1.x and 2.x wordings)")
+    /// Both wordings are grepped from the PINNED DXVK v1.10.3 source (`d3d11_main.cpp`, `dxvk_adapter.cpp`).
+    /// This test previously also asserted two "DXVK 2.x wordings" that appear nowhere in the version Silo
+    /// ships — markers that could never fire, presented as coverage. If `DXVK_VERSION` is bumped, re-derive
+    /// these from that release's source rather than adding speculative variants.
+    @Test("a DXVK launch that could not create a device is flagged, in both real v1.10.3 wordings")
     func dxvkDeviceCreationFailureDetected() {
-        // DXVK 1.x: probes every level, then gives up (what a STOCK MoltenVK produces).
-        let v1 = """
+        // d3d11 entry point: probes every level, then gives up (what a STOCK MoltenVK produces).
+        let d3d11 = """
         info:  D3D11CoreCreateDevice: Probing D3D_FEATURE_LEVEL_9_1
         err:   D3D11CoreCreateDevice: Requested feature level not supported
         """
-        #expect(GraphicsFallback.classify(v1, backend: .dxvk) == .fallback)
-        // DXVK 2.x wording.
-        let v2 = """
-        info:  D3D11InternalCreateDevice: Maximum supported feature level: 0
-        err:   D3D11InternalCreateDevice: Minimum required feature level D3D_FEATURE_LEVEL_9_1 not supported
-        """
-        #expect(GraphicsFallback.classify(v2, backend: .dxvk) == .fallback)
+        #expect(GraphicsFallback.classify(d3d11, backend: .dxvk) == .fallback)
+        // The API-agnostic one — the DxvkError thrown when vkCreateDevice fails, which is the ONLY way a
+        // DirectX 9 failure surfaces (d3d9 never logs a feature level).
+        let anyAPI = "err:   DxvkAdapter: Failed to create device"
+        #expect(GraphicsFallback.classify(anyAPI, backend: .dxvk) == .fallback)
     }
 
     /// DXMT is a DXVK fork and inherits its logger, so this line is genuine engagement proof for BOTH — as

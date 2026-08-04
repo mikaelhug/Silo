@@ -33,8 +33,7 @@ public enum GraphicsFallback: Sendable {
         // "DXMT: created Metal device" string this used to look for, which occurs zero times in a real,
         // working DXMT log (feature level 11_1, device created). That invented signature meant DXMT
         // engagement was never once detected. Both real lines are matched; the substrings stop before the
-        // level so any level counts, and `…: D3D_FEATURE_LEVEL` can't collide with DXVK's
-        // "Maximum supported feature level: 0" failure marker below.
+        // level so any level counts.
         case .dxmt: ["Using feature level D3D_FEATURE_LEVEL",
                      "Maximum supported feature level: D3D_FEATURE_LEVEL"]
         // DXVK, captured on-device 2026-08-04 (v1.10.3):
@@ -67,16 +66,23 @@ public enum GraphicsFallback: Sendable {
     ]
 
     /// Backend-specific signatures that pinpoint *that* layer's loader failing — earlier + more specific
-    /// than the generic wined3d signals. GPTK logs a D3DMetal dlopen assertion; DXMT has no
-    /// reliably-distinct early signature yet (a bare "winemetal" appears on healthy launches too, so it
-    /// can't be one), so it relies on the wined3d signals above. Verify a DXMT-specific string on-device.
+    /// than the generic wined3d signals. DXMT has no reliably-distinct early signature (a bare "winemetal"
+    /// appears on healthy launches too), so it relies on the wined3d signals above.
+    ///
+    /// Every string below was confirmed present in the shipped artifact it is attributed to — GPTK's in the
+    /// installed D3DMetal binary, DXVK's in the pinned v1.10.3 source. Strings that could not be found were
+    /// REMOVED rather than kept "just in case": an unverified signature is how three separate detection bugs
+    /// went unnoticed, and a marker that cannot fire is not a safety net, it is a false inventory.
     static func loaderFailureSignatures(_ backend: GraphicsBackend) -> [String] {
         switch backend {
-        case .gptk: ["Failed to dlopen D3DMetal"]   // GPTK's Metal backend never loaded
+        // Verbatim in D3DMetal itself (`GFXTHandle && "Failed to dlopen D3DMetal"` — the assertion fires when
+        // the framework can't be loaded at all), and in the wine runtime's own unix-side d3d modules.
+        case .gptk: ["Failed to dlopen D3DMetal"]
         case .dxmt: []
         // DXVK that loads but can't create a device on the Vulkan driver says so explicitly — captured
-        // on-device 2026-08-04 (this is what a STOCK MoltenVK produces at every feature level). Both the
-        // 1.x and 2.x wordings are matched. Earlier + far more specific than the generic wined3d signals.
+        // on-device 2026-08-04 (this is what a STOCK MoltenVK produces at every feature level). Both strings
+        // are grepped from the PINNED DXVK source, so bumping `DXVK_VERSION` means re-deriving them: two
+        // further entries here were speculative "DXVK 2.x wordings" that appear nowhere in v1.10.3.
         case .dxvk: [
             // API-agnostic: the DxvkError thrown when `vkCreateDevice` fails, surfaced by every entry point
             // (d3d9's `D3D9Interface::CreateDevice` catch logs `e.message()` verbatim) — so unlike the
@@ -84,10 +90,8 @@ public enum GraphicsFallback: Sendable {
             // string on an NVIDIA-only CUDA-interop *retry*, which is unreachable on Apple Silicon (no nvx
             // extensions); were it ever hit, `classify`'s engagement-wins precedence covers the retry-then-
             // succeeds case, since the success also logs `Device properties:`.
-            "DxvkAdapter: Failed to create device",
-            "Requested feature level not supported",     // DXVK 1.x d3d11: probed every level, none worked
-            "Minimum required feature level",            // DXVK 2.x: "…D3D_FEATURE_LEVEL_9_1 not supported"
-            "Maximum supported feature level: 0",        // DXVK 2.x: the driver exposed nothing usable
+            "DxvkAdapter: Failed to create device",      // dxvk_adapter.cpp — thrown when vkCreateDevice fails
+            "Requested feature level not supported",     // d3d11_main.cpp — probed every level, none worked
         ]
         }
     }

@@ -13,8 +13,14 @@ import Foundation
 ///
 /// Fail-open: any failure to resolve the path reports NOT live, so a probe glitch can never wedge the user
 /// out of moving bottles or updating. The temp root Wine uses is build-dependent (upstream `/tmp`, some
-/// builds honor `$TMPDIR`/`$XDG_RUNTIME_DIR`), so every plausible root is probed — verify on-device which one
-/// this runtime actually uses (see STATUS).
+/// builds honor `$TMPDIR`/`$XDG_RUNTIME_DIR`), so every plausible root is probed.
+///
+/// **Verified on-device 2026-08-04** against a live wineserver serving the real Steam bottle: the socket sat
+/// at `/tmp/.wine-501/server-100000e-38b92fa/socket` — i.e. this CrossOver-sourced build uses **`/tmp`**, NOT
+/// `$TMPDIR`, and its directory name matched `serverDirName` exactly, dev-hex and inode-hex. (`$TMPDIR` does
+/// hold a `.wine-<uid>` directory, but it carries only a `bottle-<dev>-<ino>.lock` — a different, unrelated
+/// file. Probing `/tmp` is what makes this work; do not "simplify" the candidate roots down to `$TMPDIR`.)
+/// `BackendReportTests` re-checks this against the live bottle so it cannot silently rot.
 public enum WineServerProbe {
     /// Whether a `wineserver` is live for `prefix` right now.
     public static func isLive(prefix: URL, fileManager: FileManager = .default) -> Bool {
