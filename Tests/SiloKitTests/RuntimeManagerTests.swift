@@ -77,7 +77,7 @@ struct RuntimeManagerTests {
             {"name":"game-porting-toolkit-3.0-2.tar.xz","browser_download_url":"https://e.com/2.tar.xz","size":260757848}]}
         ]
         """
-        FakeURLProtocol.stub("https://api.github.com/repos/acme/wine/releases?per_page=3", data: Data(json.utf8))
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/wine/releases?per_page=3&page=1", data: Data(json.utf8))
         let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
         let releases = try await manager.availableReleases(repo: "acme/wine", limit: 3)
         #expect(releases.map(\.tagName) == ["Game-Porting-Toolkit-3.0-3", "Game-Porting-Toolkit-3.0-2"])
@@ -439,7 +439,7 @@ struct RuntimeManagerTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         // A realistic GitHub 403 rate-limit JSON body — must NOT be decoded as [GitHubRelease].
         // Unique repo (the registry is shared across the parallel suite; `acme/wine` is taken by releases()).
-        FakeURLProtocol.stub("https://api.github.com/repos/acme/wine-ratelimited/releases?per_page=3",
+        FakeURLProtocol.stub("https://api.github.com/repos/acme/wine-ratelimited/releases?per_page=3&page=1",
                              statusCode: 403, data: Data("{\"message\":\"API rate limit exceeded\"}".utf8))
         let manager = makeManager(tmp, FakeProcessRunner(), session: FakeURLProtocol.makeSession())
         await #expect(throws: RuntimeManager.RuntimeError.badResponse(403)) {

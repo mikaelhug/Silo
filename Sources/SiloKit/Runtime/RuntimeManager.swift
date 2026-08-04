@@ -44,8 +44,14 @@ public actor RuntimeManager {
     }
 
     /// The latest `limit` releases of `repo` (newest first) — for the Heroic-style Wine list.
-    public func availableReleases(repo: String, limit: Int = 3) async throws -> [GitHubRelease] {
-        let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=\(limit)")!
+    /// - Parameter page: 1-based page of the release list. **Load-bearing:** this repo interleaves app `v*`
+    ///   releases with the runtime tags (`wine-cx-*`, `dxmt-*`, `dxvk-*`), so the newest runtime of a given
+    ///   kind steadily sinks as app releases are published. Fetching only page 1 meant that once enough
+    ///   releases stacked above it, `pickRelease` found nothing and onboarding died with "No Wine build
+    ///   published yet." — in binaries already shipped. Callers page until they find their kind
+    ///   (`RuntimeViewModel.installLatest`).
+    public func availableReleases(repo: String, limit: Int = 3, page: Int = 1) async throws -> [GitHubRelease] {
+        let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=\(limit)&page=\(page)")!
         try DownloadGuard.requireHTTPS(url)   // defense-in-depth: every remote fetch goes through the guard
         let (data, response) = try await session.data(for: .github(url))
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -71,7 +77,8 @@ public actor RuntimeManager {
         guard let dirs = try? fileManager.contentsOfDirectory(
             at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
         return dirs.compactMap { dir -> WineInstall? in
-            guard !RuntimeVariants.isVariantClone(dir.lastPathComponent),
+            guard !dir.lastPathComponent.hasPrefix("."),        // crash-leftover staging tree, not an install
+                  !RuntimeVariants.isVariantClone(dir.lastPathComponent),
                   let binary = Self.locateWineBinary(in: dir) else { return nil }
             return WineInstall(name: dir.lastPathComponent, installDir: dir, wineBinary: binary)
         }.sorted { $0.name > $1.name }   // newest tag first
@@ -150,7 +157,8 @@ public actor RuntimeManager {
         guard let dirs = try? fileManager.contentsOfDirectory(
             at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
         return dirs.compactMap { dir -> DXMTInstall? in
-            guard !RuntimeVariants.isVariantClone(dir.lastPathComponent),
+            guard !dir.lastPathComponent.hasPrefix("."),        // crash-leftover staging tree, not an install
+                  !RuntimeVariants.isVariantClone(dir.lastPathComponent),
                   let lib = Self.locateDXMTLibDir(in: dir) else { return nil }
             return DXMTInstall(name: dir.lastPathComponent, installDir: dir, libDir: lib)
         }.sorted { $0.name > $1.name }   // newest tag first
@@ -230,7 +238,8 @@ public actor RuntimeManager {
         guard let dirs = try? fileManager.contentsOfDirectory(
             at: paths.runtimesDir, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
         return dirs.compactMap { dir -> DXVKInstall? in
-            guard !RuntimeVariants.isVariantClone(dir.lastPathComponent),
+            guard !dir.lastPathComponent.hasPrefix("."),        // crash-leftover staging tree, not an install
+                  !RuntimeVariants.isVariantClone(dir.lastPathComponent),
                   let lib = Self.locateDXVKLibDir(in: dir) else { return nil }
             return DXVKInstall(name: dir.lastPathComponent, installDir: dir, libDir: lib)
         }.sorted { $0.name > $1.name }   // newest tag first

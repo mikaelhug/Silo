@@ -111,10 +111,20 @@ public final class RuntimeViewModel {
         self.init(kind: .wine(manager: manager), manager: manager, repo: repo, defaultName: defaultName)
     }
 
+    /// How many pages of releases to walk looking for this kind's newest build (see `installLatest`).
+    /// `releaseLimit` per page, so 5 pages covers 75–150 releases — far beyond any realistic backlog.
+    private static let maxReleasePages = 5
+
     public func refresh() async {
         installed = await kind.installed()
         if let name = defaultName, !installed.contains(where: { $0.name == name }) {
+            // The default's runtime is GONE (deleted outside the app, a restore that copied only config.json,
+            // or a crash mid-install). Clearing `defaultName` alone left the PERSISTED path dangling, so the
+            // readiness gates — plain `!= nil` checks — stayed green: onboarding showed "Done", runFullSetup
+            // skipped the install, and every launch failed against a path that isn't there while this tab said
+            // "None installed". Tell the owner so the config is cleared and setup re-surfaces the step.
             defaultName = nil
+            onDefaultRemoved?()
         }
     }
 
@@ -125,10 +135,27 @@ public final class RuntimeViewModel {
         isInstalling = true
         defer { isInstalling = false }
         do {
-            // The repo also hosts the app's own `v*` releases (and the other runtime kind), so the kind
-            // picks its own newest release.
-            let releases = try await manager.availableReleases(repo: repo, limit: kind.releaseLimit)
-            guard let release = kind.pickRelease(releases) else {
+            // The repo also hosts the app's own `v*` releases (and the other runtime kinds), so the kind picks
+            // its own newest release — and we PAGE until we find it. A single page silently broke as soon as
+            // enough app releases stacked above the newest runtime tag (it sinks with every app release), so
+            // onboarding would have started failing with "No <kind> build published yet." on a repo that had
+            // the runtime published all along.
+            var release: GitHubRelease?
+            for page in 1...Self.maxReleasePages {
+                // Page 1 failing is a real "can't reach GitHub" and propagates. A LATER page failing is not
+                // worth discarding the search over — stop and use what we have, rather than turning a blip on
+                // page 3 into an install failure.
+                let batch: [GitHubRelease]
+                if page == 1 {
+                    batch = try await manager.availableReleases(repo: repo, limit: kind.releaseLimit, page: 1)
+                } else if let more = try? await manager.availableReleases(
+                    repo: repo, limit: kind.releaseLimit, page: page) {
+                    batch = more
+                } else { break }
+                if batch.isEmpty { break }                    // ran off the end of the release list
+                if let found = kind.pickRelease(batch) { release = found; break }
+            }
+            guard let release else {
                 statusMessage = "No \(kind.noun) build published yet."
                 return
             }
