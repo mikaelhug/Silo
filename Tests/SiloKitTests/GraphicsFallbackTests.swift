@@ -104,12 +104,15 @@ struct GraphicsFallbackTests {
         #expect(GraphicsFallback.classify(v2, backend: .dxvk) == .fallback)
     }
 
-    @Test("a DXVK engagement line is not misread for the OTHER backends (signatures stay backend-scoped)")
-    func dxvkEngagementIsBackendScoped() {
+    /// DXMT is a DXVK fork and inherits its logger, so this line is genuine engagement proof for BOTH — as
+    /// confirmed against a real DXMT log. That is harmless because `classify` is always given the backend the
+    /// launch actually requested; the scoping that has to hold is against GPTK, whose D3DMetal never emits it.
+    @Test("a Vulkan-layer engagement line proves the Vulkan-derived backends, never GPTK")
+    func engagementLineIsScopedAgainstGPTK() {
         let log = "info:  D3D11CoreCreateDevice: Using feature level D3D_FEATURE_LEVEL_11_0"
         #expect(GraphicsFallback.classify(log, backend: .dxvk) == .engaged)
-        #expect(GraphicsFallback.classify(log, backend: .gptk) == .unknown)   // GPTK success is silent
-        #expect(GraphicsFallback.classify(log, backend: .dxmt) == .unknown)
+        #expect(GraphicsFallback.classify(log, backend: .dxmt) == .engaged)   // same logger, same wording
+        #expect(GraphicsFallback.classify(log, backend: .gptk) == .unknown)   // D3DMetal never prints this
     }
 
     @Test("a DXMT launch that fell back to wined3d is flagged via the backend-agnostic signals")
@@ -123,7 +126,8 @@ struct GraphicsFallbackTests {
         let log = """
         msync: up and running.
         trace:module:load_builtin_dll Loaded L"C:\\\\windows\\\\system32\\\\winemetal.dll"
-        DXMT: created Metal device "Apple M4 Pro"
+        info:  Maximum supported feature level: D3D_FEATURE_LEVEL_11_1
+        info:  Using feature level D3D_FEATURE_LEVEL_11_1
         == application started
         """
         #expect(GraphicsFallback.classify(log, backend: .dxmt) == .engaged)
@@ -132,16 +136,24 @@ struct GraphicsFallbackTests {
     @Test("positive engagement WINS over a later stray wined3d line (no false fallback)")
     func engagedBeatsStrayFallbackLine() {
         let log = """
-        DXMT: created Metal device "Apple M4 Pro"
+        info:  Maximum supported feature level: D3D_FEATURE_LEVEL_11_1
+        info:  Using feature level D3D_FEATURE_LEVEL_11_1
         05c4:err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications.
         """
         #expect(GraphicsFallback.classify(log, backend: .dxmt) == .engaged)
     }
 
-    @Test("GPTK/D3DMetal success is SILENT — no engagement signature, so a healthy GPTK launch is .unknown")
-    func gptkHasNoEngagementSignal() {
-        // The same DXMT device line means nothing under GPTK (GPTK has no positive signature) → not .engaged.
-        #expect(GraphicsFallback.classify(#"DXMT: created Metal device "Apple M4 Pro""#, backend: .gptk) == .unknown)
+    /// GPTK is proven by D3DMetal's spoofed "AMD Compatibility Mode" adapter and by nothing else — in
+    /// particular not by the Vulkan-derived backends' logger, and not by a launch whose game never logs its
+    /// adapter, which stays `.unknown` rather than being read as a failure.
+    @Test("GPTK is proven only by D3DMetal's own adapter line, never by another backend's logger")
+    func gptkEngagementIsItsOwnSignal() {
+        // A DXMT/DXVK device line means nothing under GPTK — D3DMetal does not use that logger.
+        #expect(GraphicsFallback.classify("info:  Using feature level D3D_FEATURE_LEVEL_11_1",
+                                          backend: .gptk) == .unknown)
+        #expect(GraphicsFallback.classify("== application started", backend: .gptk) == .unknown)
+        #expect(GraphicsFallback.classify("    Renderer: AMD Compatibility Mode (ID=0x66af)",
+                                          backend: .gptk) == .engaged)
     }
 
     @MainActor
@@ -164,7 +176,7 @@ struct GraphicsFallbackTests {
     @Test("a confirmed-engaged DXMT launch tears the watch down without firing a false fallback")
     func monitorStopsOnEngagedWithoutFiring() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
-        let log = try tmp.write("game.log", #"DXMT: created Metal device "Apple M4 Pro"\#n"#)
+        let log = try tmp.write("game.log", "info:  Using feature level D3D_FEATURE_LEVEL_11_1\n")
         let monitor = GraphicsFallbackMonitor()
         var fired = false
         monitor.start(url: log, backend: .dxmt) { fired = true }

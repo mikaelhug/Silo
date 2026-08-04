@@ -81,6 +81,16 @@ public struct D3DProfile: Sendable, Equatable {
     private static let vulkanNames: Set<String> = ["vulkan-1.dll"]
     private static let openGLNames: Set<String> = ["opengl32.dll"]
 
+    /// Redistributable DLLs games routinely ship BESIDE their executable. They are not the game's renderer,
+    /// but some reference Direct3D and would poison the profile: Microsoft's C++ AMP runtime
+    /// (`vcamp140.dll`) imports d3d11 for GPU compute, so a DirectX 9 game that ships the MSVC redist looked
+    /// like a D3D11 title and was routed away from DXVK — the only backend that can run it. Found by running
+    /// the on-device backend report against a real library. Matched by prefix, lowercased.
+    private static let excludedModulePrefixes = [
+        "vcamp", "vcomp", "msvcp", "msvcr", "vcruntime", "concrt", "mfc", "ucrtbase", "api-ms-win-",
+        "vccorlib", "d3dcompiler_", "x3daudio", "xaudio", "xinput",
+    ]
+
     /// Directory names that hold redistributables/prerequisites rather than the game — their DLLs would
     /// otherwise poison the profile (a bundled DirectX redist references d3d modules the game never uses).
     private static let excludedDirs: Set<String> = [
@@ -95,6 +105,12 @@ public struct D3DProfile: Sendable, Equatable {
     /// Hard cap on PE files parsed, so a pathological install can't stall a launch. Each parse is a
     /// memory-mapped header read (`WindowsExecutable.importedDLLs`), so this is cheap in practice.
     private static let maxFilesScanned = 256
+
+    /// Whether a DLL is a known redistributable shipped alongside the game rather than part of it.
+    static func isRedistributableModule(_ name: String) -> Bool {
+        let n = name.lowercased()
+        return excludedModulePrefixes.contains { n.hasPrefix($0) }
+    }
 
     /// Build the profile for a game, from its executable plus the DLLs shipped alongside it.
     ///
@@ -137,7 +153,8 @@ public struct D3DProfile: Sendable, Equatable {
                     if isDir {
                         guard !excludedDirs.contains(entry.lastPathComponent.lowercased()) else { continue }
                         next.append(entry)
-                    } else if entry.pathExtension.lowercased() == "dll" {
+                    } else if entry.pathExtension.lowercased() == "dll",
+                              !isRedistributableModule(entry.lastPathComponent) {
                         absorb(entry)
                         if isComplete { return profile }
                     }

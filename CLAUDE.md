@@ -260,6 +260,12 @@ hard-code a version anywhere else.
 - Assemble app: `Scripts/build-app.sh`   → `dist/Silo.app`
 - Run app:      `Scripts/run.sh`
 - Fast UI dev:  `Scripts/dev.sh`          (`swift run silo`)
+- Backend report (on-device, opt-in — skipped everywhere else):
+  `SILO_BOTTLE_REPORT=1 Scripts/test.sh --filter BackendReport`
+  Prints, for the REAL bottle on this machine: what Automatic chooses for every installed game and why
+  (through the production `D3DProfile`/`BackendChooser`, so it cannot drift), and what each backend
+  ACTUALLY did per the launch logs (`GraphicsFallback.classify` → engaged / fallback / unknown). Run it
+  after touching detection or the backend ladder — it is the only check that sees real games.
 
 ## Autonomous loop (per-iteration checklist)
 1. Read `STATUS.md`; pick top `TODO` whose deps are `DONE` → mark `DOING`.

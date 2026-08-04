@@ -1,0 +1,9 @@
+    WINEDLLOVERRIDES=d3d9,d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b
+GfxDevice: creating device client; kGfxThreadingModeThreaded
+Direct3D:
+    Version:  Direct3D 11.0 [level 11.1]
+    Renderer: AMD Compatibility Mode (ID=0x66af)
+    Vendor:   ATI
+    VRAM:     18186 MB
+    Driver:   65535.65535.65535.65535
+[Physics::Module] Selected backend.

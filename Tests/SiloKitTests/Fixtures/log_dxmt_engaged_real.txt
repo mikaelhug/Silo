@@ -1,0 +1,4 @@
+    WINEDLLOVERRIDES=d3d10core,d3d11,dxgi,winemetal=b
+info:  Maximum supported feature level: D3D_FEATURE_LEVEL_11_1
+info:  Using feature level D3D_FEATURE_LEVEL_11_1
+warn:  D3D11Device: Unknown interface query 10ec4d5b-975a-4689-b9e4-d0aac30fe333

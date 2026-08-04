@@ -1,0 +1,2 @@
+    WINEDLLOVERRIDES=d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b
+01b4:err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications.

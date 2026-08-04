@@ -17,14 +17,26 @@ public enum GraphicsFallback: Sendable {
         case unknown    // no decisive signal (a working launch, a d3d9/OpenGL game, or not yet logged)
     }
 
-    /// Signatures that POSITIVELY confirm the backend created its Metal device. GPTK/D3DMetal prints nothing
-    /// on success (its only proof is the *absence* of the fallback signatures), so it has none. DXMT logs its
-    /// device creation, which lets a DXMT launch be confirmed rather than merely "not-yet-failed" — so a
-    /// later benign wined3d line can't produce a false fallback. (Exact DXMT string to reconfirm on-device.)
+    /// Signatures that POSITIVELY confirm the backend created its device, so a later benign wined3d line can't
+    /// produce a false fallback. Every string here is **observed in a real launch log on this machine**
+    /// (2026-08-04) — the two Metal entries previously were not, and both were wrong.
     static func engagementSignatures(_ backend: GraphicsBackend) -> [String] {
         switch backend {
-        case .gptk: []
-        case .dxmt: ["DXMT: created Metal device"]
+        // GPTK/D3DMetal emits no log line of its own, but it does not run silently: it presents a SPOOFED
+        // adapter — D3D apps expect a known desktop vendor — whose DXGI description is "AMD Compatibility
+        // Mode". Any engine that logs its adapter therefore prints it, and only D3DMetal produces it: wined3d
+        // on this stack reports the real Metal GPU ("Apple M4 Pro"). Captured verbatim from Bloons TD 6:
+        //     Renderer: AMD Compatibility Mode (ID=0x66af)   [Vendor: ATI]
+        // Positive-only, so a game that never logs its adapter just stays `.unknown` — never a false failure.
+        case .gptk: ["AMD Compatibility Mode"]
+        // DXMT is a DXVK FORK and inherits its logger, so it prints DXVK's wording — NOT the
+        // "DXMT: created Metal device" string this used to look for, which occurs zero times in a real,
+        // working DXMT log (feature level 11_1, device created). That invented signature meant DXMT
+        // engagement was never once detected. Both real lines are matched; the substrings stop before the
+        // level so any level counts, and `…: D3D_FEATURE_LEVEL` can't collide with DXVK's
+        // "Maximum supported feature level: 0" failure marker below.
+        case .dxmt: ["Using feature level D3D_FEATURE_LEVEL",
+                     "Maximum supported feature level: D3D_FEATURE_LEVEL"]
         // DXVK, captured on-device 2026-08-04 (v1.10.3):
         // - `Device properties:` is logged by `DxvkAdapter::createDevice` AFTER `vkCreateDevice` succeeds
         //   (the throw sits 12 lines above the log), on the path SHARED by d3d9/d3d10core/d3d11 — so it is
