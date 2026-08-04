@@ -23,24 +23,46 @@ struct LaunchGuardTests {
         #expect(cfg.envFlags.metalBackend == .auto)
     }
 
-    /// Steam running is NOT Steam signed in: a client on the login screen registers its pid and holds a live
-    /// wineserver, so the game would launch, fail SteamAPI_Init and vanish while the UI said "Launched".
-    @Test("play refuses when the bottle's Steam has never signed in")
-    func refusesWhenSteamNotSignedIn() throws {
+    /// REGRESSION — 0.4.5 shipped broken. `play` gated EVERY launch on a guessed "is signed in" marker (an
+    /// `ssfn*` file in the Steam client root). Real logged-in Steam installs need not have one — the
+    /// reporter's had none — so the gate refused every launch with "sign in to Steam", and the unit test that
+    /// "covered" it merely asserted my invented fixture back to me.
+    ///
+    /// The durable lesson, and what this test pins: **a pre-launch gate built on an inferred signal must
+    /// fail OPEN.** A warmed bottle carrying no login marker of any kind still has to launch.
+    @Test("a bottle with no login marker still launches — launch gates never fail closed on a guess")
+    func launchIsNotBlockedByAnAbsentLoginMarker() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
-        let bottle = SteamBottle(runner: FakeProcessRunner(), paths: paths)
+        let fake = FakeProcessRunner()
+        let bottle = SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths)
+        let orchestrator = LaunchOrchestrator(runner: fake, linker: GraphicsLinker())
+        var backend = BackendConfig(); backend.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
+        let session = SteamClientSession(bottle: bottle, orchestrator: orchestrator)
+        session.updateWine(backend.wineBinaryPath); session.readinessTimeout = 0
+        let vm = GameLibraryViewModel(
+            bottle: bottle, discovery: DiscoveryEngine(), orchestrator: orchestrator,
+            configStore: ConfigStore(paths: paths), paths: paths, backend: backend, session: session,
+            provisioner: WinePrefixProvisioner(runner: fake))
+
+        // A warmed client — and deliberately NO ssfn / login marker of any kind.
+        let fm = FileManager.default
         let client = paths.steamBottleClientDir
-        try FileManager.default.createDirectory(at: client, withIntermediateDirectories: true)
-        #expect(!bottle.isSignedIn)                                     // warmed but never signed in
+        try fm.createDirectory(at: client, withIntermediateDirectories: true)
+        fm.createFile(atPath: paths.steamBottleExe.path, contents: Data())
+        fm.createFile(atPath: client.appendingPathComponent("steamui.dll").path, contents: Data())
+        let cef = paths.steamBottleCEFDir.appendingPathComponent("cef.win7x64")
+        try fm.createDirectory(at: cef, withIntermediateDirectories: true)
+        fm.createFile(atPath: cef.appendingPathComponent("steamwebhelper.exe").path, contents: Data())
+        let common = client.appendingPathComponent("steamapps/common/HL2")
+        try fm.createDirectory(at: common, withIntermediateDirectories: true)
+        fm.createFile(atPath: common.appendingPathComponent("HL2.exe").path, contents: Data("MZ".utf8))
+        let game = SteamApp(appID: 220, name: "HL2", installDir: "HL2",
+                            stateFlags: .fullyInstalled, sizeOnDisk: 100, libraryPath: client)
 
-        FileManager.default.createFile(
-            atPath: client.appendingPathComponent("ssfn9876").path, contents: Data())
-        #expect(bottle.isSignedIn)                                      // machine token ⇒ signed in
+        await vm.play(game)
 
-        // Fails OPEN so a filesystem hiccup can never block a launch.
-        let missing = SteamBottle(runner: FakeProcessRunner(),
-                                  paths: AppPaths(supportDir: tmp.url.appendingPathComponent("nope")))
-        #expect(missing.isSignedIn)
+        #expect(vm.statusMessage?.localizedCaseInsensitiveContains("sign in") != true)
+        #expect(fake.invocations.contains { $0.detached && ($0.arguments.first?.hasSuffix("HL2.exe") ?? false) })
     }
 }
