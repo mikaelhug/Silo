@@ -196,14 +196,29 @@ public actor RuntimeManager {
     /// signature files (`d3d9.dll` + `d3d11.dll`). The `d3d9.dll` distinguishes it from a DXMT tree (which
     /// ships `winemetal.dll` + `d3d11.dll` but NO d3d9). The DXVK counterpart of `locateDXMTLibDir`.
     public static func locateDXVKLibDir(in dir: URL, fileManager: FileManager = .default) -> URL? {
+        /// A DXVK module dir is `<root>/lib/wine/<arch>-windows` with `<root>/lib/libMoltenVK.dylib` beside
+        /// it. **The MoltenVK sibling is a REQUIRED part of the signature**, for two reasons:
+        /// 1. Wine itself ships `d3d9.dll` + `d3d11.dll` in the IDENTICAL `lib/wine/x86_64-windows` layout, so
+        ///    keying on those alone matched every installed Wine runtime — they were listed in the DXVK
+        ///    settings pane, and adopting one pointed `dxvkLibDirPath` at wine's own builtin d3d dlls.
+        ///    (DXMT has no such clash: it keys on `winemetal.dll`, which wine doesn't ship.)
+        /// 2. It is load-bearing for correctness: DXVK on a stock MoltenVK can't create a device at ANY
+        ///    feature level, so a DXVK tree without its own driver is unusable and must not count as installed.
+        /// This is also exactly the dir `URL.dxvkMoltenVKDir` resolves to at launch, so locate and launch
+        /// agree by construction.
+        func isDXVKModuleDir(_ win: URL) -> Bool {
+            let lib = win.deletingLastPathComponent().deletingLastPathComponent()   // …/lib
+            return fileManager.fileExists(atPath: win.appendingPathComponent("d3d9.dll").path)
+                && fileManager.fileExists(atPath: win.appendingPathComponent("d3d11.dll").path)
+                && fileManager.fileExists(atPath: lib.appendingPathComponent("libMoltenVK.dylib").path)
+        }
         let standard = dir.appendingPathComponent("lib/wine/x86_64-windows")
-        if fileManager.fileExists(atPath: standard.appendingPathComponent("d3d9.dll").path),
-           fileManager.fileExists(atPath: standard.appendingPathComponent("d3d11.dll").path) { return standard }
+        if isDXVKModuleDir(standard) { return standard }
 
         guard let enumerator = fileManager.enumerator(at: dir, includingPropertiesForKeys: nil) else { return nil }
         for case let url as URL in enumerator where url.lastPathComponent == "d3d9.dll" {
             let parent = url.deletingLastPathComponent()
-            if fileManager.fileExists(atPath: parent.appendingPathComponent("d3d11.dll").path) { return parent }
+            if isDXVKModuleDir(parent) { return parent }
         }
         return nil
     }

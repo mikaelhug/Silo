@@ -6,7 +6,7 @@ import Testing
 @Suite("AppEnvironment guided setup")
 struct AppEnvironmentSetupTests {
 
-    @Test("runFullSetup skips the runtime downloads when Wine + DXMT are already configured, and delegates")
+    @Test("runFullSetup skips the runtime downloads when Wine + DXMT + DXVK are configured, and delegates")
     func runFullSetupSkipsRuntimesWhenReady() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
@@ -26,8 +26,9 @@ struct AppEnvironmentSetupTests {
         // default). save() fires applyBackend → steamBottleVM.updateWine, so the bottle VM has its wine.
         env.backendSettings.config.wineBinaryPath = URL(fileURLWithPath: "/w/wine64")
         env.backendSettings.config.dxmtLibDirPath = tmp.url.appendingPathComponent("dxmt/lib")
+        env.backendSettings.config.dxvkLibDirPath = tmp.url.appendingPathComponent("dxvk/lib/wine/x86_64-windows")
         await env.backendSettings.save()
-        #expect(env.wineReady && env.dxmtReady)
+        #expect(env.wineReady && env.dxmtReady && env.dxvkReady)
 
         await env.runFullSetup()
 
@@ -39,6 +40,7 @@ struct AppEnvironmentSetupTests {
         // left a status message. This proves runFullSetup took the skip branches and delegated to setUp.
         #expect(env.runtime.statusMessage == nil)
         #expect(env.dxmtRuntime.statusMessage == nil)
+        #expect(env.dxvkRuntime.statusMessage == nil)   // DXVK is part of setup and was likewise skipped
         // The bottle was booted (wineboot) but never re-installed Steam (steam.exe already present → skipped).
         #expect(runner.invocations.contains { $0.arguments == ["wineboot", "--init"] })
         #expect(!runner.invocations.contains { $0.arguments.first?.hasSuffix("SteamSetup.exe") == true })
@@ -64,6 +66,7 @@ struct AppEnvironmentSetupTests {
         // The Steam bottle was never provisioned (no wineboot) and DXMT was never attempted.
         #expect(!runner.invocations.contains { $0.arguments == ["wineboot", "--init"] })
         #expect(env.dxmtRuntime.statusMessage == nil)
+        #expect(env.dxvkRuntime.statusMessage == nil)   // DXVK is part of setup and was likewise skipped
         #expect(!env.setupBusy)
     }
 }

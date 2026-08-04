@@ -177,16 +177,33 @@ struct RuntimeManagerTests {
         #expect(RuntimeManager.matchedDXMTRelease(noDXMT, forWine: "wine-cx-26.3.0") == nil)
     }
 
-    @Test("locateDXVKLibDir finds the x86_64-windows module dir by its d3d9+d3d11 signature (excludes DXMT)")
+    @Test("locateDXVKLibDir requires the bundled MoltenVK — so a WINE runtime is never seen as DXVK")
     func locateDXVK() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
+        // A real DXVK artifact: lib/wine/<arch>-windows + lib/libMoltenVK.dylib.
         try tmp.makeDir("rt/lib/wine/x86_64-windows")
         try tmp.write("rt/lib/wine/x86_64-windows/d3d9.dll", "x")
         try tmp.write("rt/lib/wine/x86_64-windows/d3d11.dll", "x")
+        try tmp.write("rt/lib/libMoltenVK.dylib", "MVK")
         let found = RuntimeManager.locateDXVKLibDir(in: tmp.url.appendingPathComponent("rt"))
         #expect(found?.lastPathComponent == "x86_64-windows")
         #expect(found?.path.hasSuffix("/rt/lib/wine/x86_64-windows") == true)
-        // A DXMT tree (d3d11 + winemetal, but NO d3d9) must NOT be mistaken for DXVK.
+        // `URL.dxvkMoltenVKDir` must resolve to the dir actually holding the driver, or the launch would put
+        // the wrong path first on DYLD_FALLBACK_LIBRARY_PATH and silently use the stock MoltenVK.
+        #expect(FileManager.default.fileExists(
+            atPath: found!.dxvkMoltenVKDir.appendingPathComponent("libMoltenVK.dylib").path))
+
+        // REGRESSION: a WINE runtime ships d3d9.dll + d3d11.dll in the IDENTICAL lib/wine/x86_64-windows
+        // layout (its own builtins) and keeps its MoltenVK under lib/silo-bundled/ — it must NOT be listed
+        // as an installed DXVK, or the DXVK pane fills with Wine builds and adopting one points the backend
+        // at wine's own d3d dlls.
+        try tmp.makeDir("wine/lib/wine/x86_64-windows")
+        for dll in ["d3d9.dll", "d3d11.dll", "dxgi.dll"] { try tmp.write("wine/lib/wine/x86_64-windows/\(dll)", "x") }
+        try tmp.makeDir("wine/lib/silo-bundled")
+        try tmp.write("wine/lib/silo-bundled/libMoltenVK.dylib", "stock")
+        #expect(RuntimeManager.locateDXVKLibDir(in: tmp.url.appendingPathComponent("wine")) == nil)
+
+        // A DXMT tree (d3d11 + winemetal, no d3d9) is likewise not DXVK.
         try tmp.makeDir("dxmt/lib/wine/x86_64-windows")
         try tmp.write("dxmt/lib/wine/x86_64-windows/d3d11.dll", "x")
         try tmp.write("dxmt/lib/wine/x86_64-windows/winemetal.dll", "x")
@@ -208,6 +225,9 @@ struct RuntimeManagerTests {
                 for f in ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"] {   // DXVK ships no .so
                     FileManager.default.createFile(atPath: win.appendingPathComponent(f).path, contents: Data("x".utf8))
                 }
+                // …and its own Vulkan driver, which locateDXVKLibDir requires.
+                FileManager.default.createFile(
+                    atPath: dest.appendingPathComponent("lib/libMoltenVK.dylib").path, contents: Data("MVK".utf8))
             }
         }
         let manager = makeManager(tmp, fake, session: FakeURLProtocol.makeSession())

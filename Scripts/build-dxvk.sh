@@ -8,13 +8,13 @@
 # (GraphicsLinker.installDXVKPrefixLoaders), running on the base wine runtime with nothing overlaid into
 # lib/wine. DXVK is NOT Wine, so constraint #8 (Wine = CrossOver-FOSS only) is unaffected. Never a prebuilt.
 #
-# Unlike the DXMT / Wine builds, DXVK targets Windows PE and needs NO macOS Metal toolchain or Wine install —
-# so this runs on a COMMAND-LINE-TOOLS-ONLY box (no full Xcode required).
+# The DXVK dlls are Windows PE and need no Metal toolchain or Wine install, but the bundled MoltenVK DOES
+# need full Xcode — a CLT-only box builds the dlls and SKIPS MoltenVK (warning), which is not shippable.
 #
-# Output: dist/dxvk.tar.xz holding {x86_64-windows, i386-windows} + **lib/libMoltenVK.dylib** — DXVK's
+# Output: dist/dxvk.tar.xz holding **lib/wine/{x86_64,i386}-windows** + **lib/libMoltenVK.dylib** — DXVK's
 # D3D9/10/11 + its own dxgi for 64-bit and 32-bit games (wine auto-selects per game by PE machine type; the
 # i386 tree runs 32-bit DirectX 9 titles, which neither GPTK nor DXMT can), plus the Vulkan driver DXVK runs
-# on. In Silo → Settings → DXVK → Import, point at the extracted x86_64-windows folder
+# on. In Silo → Settings → DXVK → Import, point at the extracted lib/wine/x86_64-windows folder
 # (installDXVKPrefixLoaders picks up the i386-windows sibling; the launch puts `<dxvk>/lib` first on
 # DYLD_FALLBACK_LIBRARY_PATH so THIS MoltenVK is the driver). Do NOT commit the tarball — attach to a Release.
 #
@@ -84,23 +84,27 @@ build_abi() {  # $1 = DXVK cross-file, $2 = build dir, $3 = install prefix
 build_abi build-win64.txt build.w64 install64
 build_abi build-win32.txt build.w32 install32
 
-echo "==> Assemble the Silo layout (x86_64-windows + i386-windows)"
-rm -rf out; mkdir -p out/x86_64-windows out/i386-windows
+# Mirror the Wine/DXMT runtime convention: lib/wine/<arch>-windows for the PE modules, with the bundled
+# MoltenVK at lib/libMoltenVK.dylib. Load-bearing on BOTH sides: `RuntimeManager.locateDXVKLibDir` requires
+# that MoltenVK sibling (wine ships d3d9+d3d11 in the same layout, so without it every Wine install is
+# detected as DXVK), and `URL.dxvkMoltenVKDir` walks up exactly two levels from the module dir to find it.
+echo "==> Assemble the Silo layout (lib/wine/{x86_64,i386}-windows + lib/libMoltenVK.dylib)"
+rm -rf out; mkdir -p out/lib/wine/x86_64-windows out/lib/wine/i386-windows
 locate_dll() { find "$1" -name "$2" -type f 2>/dev/null | head -1; }   # robust to bin/ vs other install layout
 for dll in "${WANT_DLLS[@]}"; do
   s64="$(locate_dll install64 "$dll")"; s32="$(locate_dll install32 "$dll")"
-  [ -n "$s64" ] && cp "$s64" "out/x86_64-windows/$dll"
-  [ -n "$s32" ] && cp "$s32" "out/i386-windows/$dll"
+  [ -n "$s64" ] && cp "$s64" "out/lib/wine/x86_64-windows/$dll"
+  [ -n "$s32" ] && cp "$s32" "out/lib/wine/i386-windows/$dll"
 done
 
 echo "==> Verify the artifacts Silo seeds (GraphicsLinker.installDXVKPrefixLoaders)"
 missing=""
-for dir in out/x86_64-windows out/i386-windows; do
+for dir in out/lib/wine/x86_64-windows out/lib/wine/i386-windows; do
   for f in "${WANT_DLLS[@]}"; do [ -e "$dir/$f" ] || missing="$missing $dir/$f"; done
 done
 [ -n "$missing" ] && { echo "ERROR: build did not produce:$missing"; exit 1; }
 # The dlls MUST be PE (Windows) images, not host Mach-O.
-file "out/x86_64-windows/d3d11.dll" | grep -qi "PE32" \
+file "out/lib/wine/x86_64-windows/d3d11.dll" | grep -qi "PE32" \
   || { echo "ERROR: d3d11.dll is not a PE image — the cross-build didn't target Windows."; exit 1; }
 echo "    all present: {x86_64,i386}-windows d3d9/d3d10core/d3d11/dxgi.dll"
 
@@ -132,10 +136,10 @@ fi
 
 echo "==> Package"
 mkdir -p "$ROOT/dist"
-( cd out && tar -cJf "$ROOT/dist/dxvk.tar.xz" x86_64-windows i386-windows lib )
+( cd out && tar -cJf "$ROOT/dist/dxvk.tar.xz" lib )
 ( cd "$ROOT/dist" && shasum -a 256 dxvk.tar.xz > dxvk.tar.xz.sha256 )
 echo "Built: $ROOT/dist/dxvk.tar.xz (+ .sha256)"
-echo "Import in Silo (Settings → DXVK → Import…): <extracted>/x86_64-windows"
+echo "Import in Silo (Settings → DXVK → Import…): <extracted>/lib/wine/x86_64-windows"
 echo
 echo "Publish BOTH as Release assets (NOT committed to git):"
 echo "  gh release create $TAG \"$ROOT/dist/dxvk.tar.xz\" \"$ROOT/dist/dxvk.tar.xz.sha256\" -t \"$TAG\" -n \"DXVK $VER (validated with CrossOver Wine $CROSSOVER_VERSION)\""

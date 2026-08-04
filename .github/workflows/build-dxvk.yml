@@ -6,10 +6,11 @@ name: Build DXVK (DirectX 9 + broad-compat backend)
 #
 # DXVK is shipped NATIVE (no CrossOver builtin patches): Silo seeds its d3d9/d3d10core/d3d11 + dxgi dlls into
 # the game prefix and overrides them `=n`, running on the base wine runtime whose bundled MoltenVK is DXVK's
-# Vulkan driver (D3D → Vulkan → MoltenVK → Metal). DXVK is NOT Wine, so constraint #8 is unaffected. Unlike
-# the DXMT / Wine builds this needs NO Metal toolchain, Rosetta, x86_64 Homebrew, or Wine install — DXVK is a
-# pure Windows-PE cross-compile (meson + llvm-mingw + glslang). See also Scripts/build-dxvk.sh (identical
-# local recipe — it can run on a Command-Line-Tools-only box).
+# Vulkan driver (D3D → Vulkan → MoltenVK → Metal). DXVK is NOT Wine, so constraint #8 is unaffected. The
+# dlls are a pure Windows-PE cross-compile (meson + llvm-mingw + glslang) needing no Rosetta, x86_64 Homebrew
+# or Wine install — but the bundled MoltenVK IS built from source and needs full Xcode, which is why the
+# shippable artifact comes from here. See also Scripts/build-dxvk.sh (same recipe; a CLT-only box skips
+# MoltenVK and produces a NON-shippable artifact).
 #
 # CAVEAT: the DXVK_VERSION↔MoltenVK pairing must be validated on-device (Phase 0) — a newer DXVK needs more
 # Vulkan features MoltenVK may lack. Intentionally manual (workflow_dispatch) + chained from wine-autoupdate.
@@ -65,7 +66,7 @@ concurrency:
 
 jobs:
   build:
-    # macos-26 matches the app build; DXVK cross-compiles to Windows PE so no Xcode/Metal is used.
+    # macos-26 matches the app build and ships the Xcode the MoltenVK step needs (Metal shaders).
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -157,24 +158,27 @@ jobs:
         run: |
           set -eo pipefail
           cd "$DXVK_SRC"
-          mkdir -p out/x86_64-windows out/i386-windows
+          # lib/wine/<arch>-windows beside the lib/libMoltenVK.dylib the previous step wrote — the layout
+          # locateDXVKLibDir requires (wine ships d3d9+d3d11 the same way, so the MoltenVK sibling is what
+          # distinguishes a DXVK tree) and that URL.dxvkMoltenVKDir resolves by walking up two levels.
+          mkdir -p out/lib/wine/x86_64-windows out/lib/wine/i386-windows
           locate_dll() { find "$1" -name "$2" -type f 2>/dev/null | head -1; }
           for dll in d3d9.dll d3d10core.dll d3d11.dll dxgi.dll; do
-            cp "$(locate_dll install64 "$dll")" "out/x86_64-windows/$dll"
-            cp "$(locate_dll install32 "$dll")" "out/i386-windows/$dll"
+            cp "$(locate_dll install64 "$dll")" "out/lib/wine/x86_64-windows/$dll"
+            cp "$(locate_dll install32 "$dll")" "out/lib/wine/i386-windows/$dll"
           done
           missing=""
-          for dir in out/x86_64-windows out/i386-windows; do
+          for dir in out/lib/wine/x86_64-windows out/lib/wine/i386-windows; do
             for f in d3d9.dll d3d10core.dll d3d11.dll dxgi.dll; do test -e "$dir/$f" || missing="$missing $dir/$f"; done
           done
           test -e out/lib/libMoltenVK.dylib || missing="$missing out/lib/libMoltenVK.dylib"
           if [ -n "$missing" ]; then echo "::error::missing artifacts:$missing"; exit 1; fi
-          file out/x86_64-windows/d3d11.dll | grep -qi PE32 || { echo "::error::d3d11.dll is not a PE image"; exit 1; }
+          file out/lib/wine/x86_64-windows/d3d11.dll | grep -qi PE32 || { echo "::error::d3d11.dll is not a PE image"; exit 1; }
 
       - name: Package dxvk.tar.xz
         run: |
           set -eo pipefail
-          ( cd "$DXVK_SRC/out" && tar -cJf "$GITHUB_WORKSPACE/dxvk.tar.xz" x86_64-windows i386-windows lib )
+          ( cd "$DXVK_SRC/out" && tar -cJf "$GITHUB_WORKSPACE/dxvk.tar.xz" lib )
           ( cd "$GITHUB_WORKSPACE" && shasum -a 256 dxvk.tar.xz > dxvk.tar.xz.sha256 )
           ls -la "$GITHUB_WORKSPACE/dxvk.tar.xz" "$GITHUB_WORKSPACE/dxvk.tar.xz.sha256"
 
