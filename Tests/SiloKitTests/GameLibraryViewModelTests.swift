@@ -429,6 +429,28 @@ struct GameLibraryViewModelTests {
         #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
     }
 
+    @Test("A learned hint whose runtime was UNINSTALLED is dropped — Automatic degrades instead of dead-ending")
+    func learnedHintDroppedWhenRuntimeGone() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // Wine configured but NO DXVK installed — while the game's hint points at DXVK (e.g. the user removed
+        // the DXVK runtime in Settings after it was learned).
+        let (vm, fake, paths) = make(tmp)
+        try installSteam(paths)
+        _ = try await ConfigStore(paths: paths).saveGame(
+            GameConfig(appID: 220, graphics: .auto, learnedBackend: .dxvk))
+        let game = try installedGamePE(paths, appID: 220, name: "HL2", dir: "HL2", machine: 0x8664)
+
+        await vm.play(game)
+
+        // It must NOT dead-end on "DXVK isn't installed" — the hint is dropped and Automatic falls back to
+        // the normal forward choice (GPTK), so the game still launches.
+        #expect(vm.statusMessage?.contains("isn't installed") != true)
+        let spawn = fake.invocations.last {
+            $0.detached && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
+        }
+        #expect(spawn != nil)   // launched rather than refused
+    }
+
     @Test("A learned-DXMT game that ALSO fails on DXMT gets an honest message — no thrash back to GPTK")
     func learnedDXMTThenDXMTFailsHonestNoThrash() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
