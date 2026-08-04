@@ -71,3 +71,15 @@ jobs:
     uses: ./.github/workflows/build-dxmt.yml
     with:
       wine_release_tag: wine-cx-${{ needs.detect.outputs.version }}
+
+  # Keep DXVK's tag paired with wine too. DXVK itself is wine-INDEPENDENT (native dlls, no ABI link), but
+  # Silo matches a dxvk-<ver>-cx<wine> release to the installed wine, so without this the tag drifts and
+  # `matchedDXVKRelease` silently falls back to "newest dxvk-*". Same idempotency as dxmt above.
+  dxvk:
+    needs: [detect, build]
+    if: needs.detect.outputs.should_build == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-dxvk.yml
+    with:
+      wine_release_tag: wine-cx-${{ needs.detect.outputs.version }}
