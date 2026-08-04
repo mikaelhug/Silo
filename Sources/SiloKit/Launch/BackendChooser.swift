@@ -36,6 +36,16 @@ enum BackendChooser {
         // runtime bundles the stock MoltenVK that can't drive Vulkan clients properly. Routing it to the DXVK
         // backend is what puts the DXVK runtime's own MoltenVK first on the launch DYLD path.
         if profile.isVulkanNative { return .dxvk }
+        // A 32-bit game that touches d3d9 AT ALL can only be served by DXVK. GPTK is 64-bit-only, so the
+        // choice here is DXMT vs DXVK — and DXVK strictly dominates: it translates d3d9 *and* d3d10/11, while
+        // DXMT has no d3d9 whatsoever and would silently leave that half on wined3d. Unlike the 64-bit case
+        // there is no cost to preferring it, since GPTK isn't a candidate either way.
+        //
+        // This is NOT covered by `isD3D9Only`, which requires the profile to be free of d3d10/11 — a bar real
+        // DirectX 9 games fail. Alien Swarm ships `bin/shaderapidx10.dll` (Source's experimental, unused DX10
+        // shader API) which imports both d3d9 and d3d10core, so the DX9 gate refused and Automatic sent a
+        // DirectX 9 game to a backend that cannot render it. Found by running the report against real games.
+        if is32Bit && profile.usesD3D9 { return .dxvk }
         if is32Bit {
             // GPTK is 64-bit-only (Apple ships no i386 D3DMetal), so a 32-bit game can only run on DXMT or
             // DXVK — and BOTH ship i386 modules. A learned hint between those two MUST be honored: a 32-bit

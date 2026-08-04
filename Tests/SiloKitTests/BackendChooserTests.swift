@@ -97,10 +97,20 @@ struct BackendChooserTests {
         #expect(BackendChooser.choose(.auto, is32Bit: false, profile: dx9, learned: .dxmt) == .dxvk)
         // An explicit pin still wins over DX9-first (the user asked for it).
         #expect(BackendChooser.choose(.gptk, is32Bit: false, profile: dx9) == .gptk)
-        // A game that ALSO uses D3D10/11 is NOT DX9-only → normal GPTK-first path (no needless Vulkan hop).
+        // A 64-bit game that ALSO uses D3D10/11 is NOT DX9-only → GPTK-first (no needless Vulkan hop, and
+        // GPTK is the preferred backend whenever it is a candidate at all).
         let mixed = D3DProfile(usesD3D9: true, usesD3D1x: true)
         #expect(BackendChooser.choose(.auto, is32Bit: false, profile: mixed) == .gptk)
-        #expect(BackendChooser.choose(.auto, is32Bit: true, profile: mixed) == .dxmt)
+        // …but the SAME profile at 32-bit goes to DXVK, not DXMT. GPTK is 64-bit-only, so the choice is
+        // DXMT vs DXVK, and DXMT has no d3d9 at all — it would silently leave that half on wined3d, while
+        // DXVK covers both. There is no cost, since GPTK isn't a candidate either way.
+        // REAL CASE (found by the on-device report): Alien Swarm is a 32-bit DirectX 9 title that ships
+        // Source's unused `bin/shaderapidx10.dll`, which imports d3d9 AND d3d10core — so `isD3D9Only` refuses
+        // and Automatic used to hand a DirectX 9 game to a backend that cannot render it.
+        #expect(BackendChooser.choose(.auto, is32Bit: true, profile: mixed) == .dxvk)
+        // A 32-bit game with NO d3d9 still goes to DXMT — this rule is about d3d9 coverage, not a blanket
+        // preference for DXVK on 32-bit.
+        #expect(BackendChooser.choose(.auto, is32Bit: true, profile: D3DProfile(usesD3D1x: true)) == .dxmt)
         // Unknown profile (dynamic loader) → the normal path, never a speculative DXVK route.
         #expect(BackendChooser.choose(.auto, is32Bit: false, profile: D3DProfile()) == .gptk)
         #expect(BackendChooser.choose(.auto, is32Bit: true, profile: D3DProfile()) == .dxmt)

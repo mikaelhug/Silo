@@ -47,6 +47,7 @@ struct BackendReportTests {
             if gameConfig.graphics != .auto { why = "pinned to \(gameConfig.graphics.badge)" }
             else if profile.isD3D9Only { why = "DirectX 9 only → the sole DX9 translator" }
             else if profile.isVulkanNative { why = "Vulkan-native → needs the working MoltenVK" }
+            else if is32, profile.usesD3D9 { why = "32-bit + d3d9 → DXMT has no d3d9, DXVK covers both" }
             else if is32 { why = "32-bit → GPTK is 64-bit-only" }
             else if learned != nil { why = "learned after a previous failure" }
             else { why = "default" }
