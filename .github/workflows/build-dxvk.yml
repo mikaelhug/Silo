@@ -155,7 +155,13 @@ jobs:
           grep -q "EXT_transform_feedback" "$RUNNER_TEMP/MoltenVK/sources/moltenvk/MoltenVK/MoltenVK/Layers/MVKExtensions.def" \
             || { echo "::error::MoltenVK lacks VK_EXT_transform_feedback - DXVK would not work"; exit 1; }
           cd "$RUNNER_TEMP/MoltenVK/sources/moltenvk"
-          ./fetchDependencies --macos
+          # CodeWeavers vendor their PATCHED SPIRV-Cross in External/ but leave the other deps empty, and the
+          # tree is a tarball (not a git checkout), so fetchDependencies' git calls die on it (exit 128).
+          # Use its own supported escape hatch: move their copy aside and pass --spirv-cross-root, which
+          # symlinks it in rather than cloning. Their SPIRV-Cross emits the MSL behind transform feedback,
+          # so replacing it with upstream's would undo the very patch we came for.
+          mv External/SPIRV-Cross "$RUNNER_TEMP/cx-spirv-cross"
+          ./fetchDependencies --macos --spirv-cross-root "$RUNNER_TEMP/cx-spirv-cross"
           make macos
           # Published to Package/{Latest,Release}/MoltenVK/dynamic/dylib/macOS/ (Latest symlinks Release);
           # search the whole Package tree so a layout change fails loudly instead of shipping no driver.

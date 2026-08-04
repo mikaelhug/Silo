@@ -125,7 +125,13 @@ if xcrun -sdk macosx metal -e /dev/null -o /dev/null >/dev/null 2>&1 || \
   [ -d "$MVK_SRC" ] || { echo "ERROR: crossover-sources has no sources/moltenvk"; exit 1; }
   grep -q "EXT_transform_feedback" "$MVK_SRC/MoltenVK/MoltenVK/Layers/MVKExtensions.def" \
     || { echo "ERROR: this MoltenVK lacks VK_EXT_transform_feedback — DXVK would not work"; exit 1; }
-  ( cd "$MVK_SRC" && ./fetchDependencies --macos && make macos )
+  # CodeWeavers vendor their PATCHED SPIRV-Cross in External/ but leave the other deps empty, and their
+  # tree is a tarball (not a git checkout) — so fetchDependencies' git calls die on it ("not a git
+  # repository", exit 128). Use its OWN supported escape hatch: move their copy aside and hand it back via
+  # --spirv-cross-root, which symlinks it in instead of cloning. Their SPIRV-Cross is load-bearing (it emits
+  # the MSL behind transform feedback), so it must NOT be replaced with upstream's.
+  mv "$MVK_SRC/External/SPIRV-Cross" "$WORK/cx-spirv-cross"
+  ( cd "$MVK_SRC" && ./fetchDependencies --macos --spirv-cross-root "$WORK/cx-spirv-cross" && make macos )
   MVK_DYLIB="$(find "$MVK_SRC/Package" -name 'libMoltenVK.dylib' -type f 2>/dev/null | head -1)"
   if [ -n "$MVK_DYLIB" ]; then
     cp "$MVK_DYLIB" out/lib/libMoltenVK.dylib
