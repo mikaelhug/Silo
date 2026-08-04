@@ -59,6 +59,19 @@ git clone --depth 1 --branch "$VER" --recurse-submodules --shallow-submodules \
   "https://github.com/${DXVK_REPO}.git" "$SRC"
 cd "$SRC"
 
+# ---------------------------------------------------------------------------------------------------
+# PATCH: DXVK's D3D9 declares a depth-compare ("shadow") twin of every sampler on the SAME descriptor
+# binding as the colour sampler. MoltenVK cannot map two resources onto one Metal slot, so SPIRV-Cross
+# either omits the declaration ("use of undeclared identifier s0_2d_shadowSmplr") or collides
+# ("cannot reserve 'buffer' resource location at index 0") — every affected pipeline then fails to compile
+# and the game renders a black screen with working audio. Measured on-device 2026-08-04 against Alien Swarm
+# and Double Action: Boogaloo (both Source, both 32-bit): 3 and 6 failed pipelines before, **0 after**.
+# CrossOver has the same defect; this is not upstream-fixable without a newer MoltenVK (DXVK 2.x needs
+# Vulkan 1.3, MoltenVK 1.2.10 offers 1.2), so Silo carries the patch. It costs hardware shadow compare.
+echo "==> Apply Silo's D3D9/MoltenVK shadow-sampler patch"
+git apply --verbose "$ROOT/Scripts/patches/dxvk-d3d9-moltenvk-shadow-sampler.patch" \
+  || { echo "ERROR: patch failed — re-derive it against DXVK $VER"; exit 1; }
+
 echo "==> Fetch the cross toolchain (mstorsjo/llvm-mingw $LLVM_MINGW_VERSION) — provides x86_64/i686-w64-mingw32"
 mkdir -p toolchains
 curl -fL "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/${MINGW_DIR}.tar.xz" \

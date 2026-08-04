@@ -113,6 +113,14 @@ jobs:
           set -eo pipefail
           git clone --depth 1 --branch "$DXVK_VER" --recurse-submodules --shallow-submodules \
             "https://github.com/${DXVK_REPO}.git" "$RUNNER_TEMP/dxvk"
+          # DXVK's D3D9 declares a depth-compare ("shadow") twin of every sampler on the SAME descriptor
+          # binding as the colour sampler. MoltenVK cannot map two resources onto one Metal slot, so
+          # SPIRV-Cross omits the declaration or collides on the index, every affected pipeline fails to
+          # compile, and the game renders black with working audio. Measured 2026-08-04 on Alien Swarm and
+          # Double Action: 3 and 6 failed pipelines before, 0 after. Costs hardware shadow compare.
+          git -C "$RUNNER_TEMP/dxvk" apply --verbose \
+            "$GITHUB_WORKSPACE/Scripts/patches/dxvk-d3d9-moltenvk-shadow-sampler.patch" \
+            || { echo "::error::D3D9 shadow-sampler patch failed - re-derive it against DXVK $DXVK_VER"; exit 1; }
           mkdir -p "$RUNNER_TEMP/dxvk/toolchains"
           curl -fL "https://github.com/mstorsjo/llvm-mingw/releases/download/${MINGW_VER}/${MINGW_DIR}.tar.xz" -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
           tar -xf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C "$RUNNER_TEMP/dxvk/toolchains"

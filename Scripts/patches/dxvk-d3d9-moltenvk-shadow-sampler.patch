@@ -1,0 +1,68 @@
+diff --git a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
+index b68608a0..1d5d36f4 100644
+--- a/src/dxso/dxso_compiler.cpp
++++ b/src/dxso/dxso_compiler.cpp
+@@ -826,10 +826,10 @@ namespace dxvk {
+ 
+       DclSampler(idx, binding, samplerType, false, implicit);
+ 
+-      if (samplerType != SamplerTypeTexture3D) {
+-        // We could also be depth compared!
+-        DclSampler(idx, binding, samplerType, true, implicit);
+-      }
++      // SILO PATCH: do NOT declare the depth-compare twin. DXVK puts both variants on the SAME
++      // descriptor binding, and MoltenVK cannot map two resources onto one Metal slot — SPIRV-Cross
++      // either omits the declaration ("use of undeclared identifier s0_2d_shadowSmplr") or collides
++      // ("cannot reserve 'buffer' resource location at index 0"). Costs hardware shadow compare.
+     }
+     else {
+       // Could be any of these!
+@@ -839,8 +839,7 @@ namespace dxvk {
+ 
+         DclSampler(idx, binding, samplerType, false, implicit);
+ 
+-        if (samplerType != SamplerTypeTexture3D)
+-          DclSampler(idx, binding, samplerType, true, implicit);
++        // SILO PATCH: see above — no depth-compare twin on the same binding.
+       }
+     }
+ 
+@@ -3058,33 +3057,11 @@ void DxsoCompiler::emitControlFlowGenericLoop(
+     auto SampleType = [&](DxsoSamplerType samplerType) {
+       // Only do the check for depth comp. samplers
+       // if we aren't a 3D texture
+-      if (samplerType != SamplerTypeTexture3D) {
+-        uint32_t colorLabel  = m_module.allocateId();
+-        uint32_t depthLabel  = m_module.allocateId();
+-        uint32_t endLabel    = m_module.allocateId();
+-
+-        uint32_t typeId = m_module.defIntType(32, 0);
+-        uint32_t offset  = m_module.consti32(m_programInfo.type() == DxsoProgramTypes::VertexShader ? samplerIdx + 17 : samplerIdx);
+-        uint32_t bitCnt  = m_module.consti32(1);
+-        uint32_t isDepth = m_module.opBitFieldUExtract(typeId, m_depthSpecConstant, offset, bitCnt);
+-        isDepth = m_module.opIEqual(m_module.defBoolType(), isDepth, m_module.constu32(1));
+-
+-        m_module.opSelectionMerge(endLabel, spv::SelectionControlMaskNone);
+-        m_module.opBranchConditional(isDepth, depthLabel, colorLabel);
+-
+-        m_module.opLabel(colorLabel);
+-        SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, sampler.boundConst);
+-        m_module.opBranch(endLabel);
+-
+-        m_module.opLabel(depthLabel);
+-        // No spec constant as if we are unbound we always fall down the color path.
+-        SampleImage(texcoordVar, sampler.depth[samplerType], true, samplerType, 0);
+-        m_module.opBranch(endLabel);
+-
+-        m_module.opLabel(endLabel);
+-      }
+-      else
+-        SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, sampler.boundConst);
++      // SILO PATCH: always take the COLOR path. The depth branch samples a depth-compare twin declared on
++      // the SAME descriptor binding as the color sampler, which MoltenVK cannot map to Metal (two resources,
++      // one slot) — SPIRV-Cross then omits the declaration and the Metal compile fails, so nothing renders.
++      // Costs hardware shadow compare, not the rest of the frame.
++      SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, sampler.boundConst);
+     };
+ 
+     if (m_programInfo.majorVersion() >= 2 && !m_moduleInfo.options.forceSamplerTypeSpecConstants) {
