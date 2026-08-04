@@ -113,7 +113,10 @@ if xcrun -sdk macosx metal -e /dev/null -o /dev/null >/dev/null 2>&1 || \
   rm -rf "$WORK/MoltenVK"
   git clone --depth 1 --branch "$MOLTENVK_VERSION" "https://github.com/${MOLTENVK_REPO}.git" "$WORK/MoltenVK"
   ( cd "$WORK/MoltenVK" && ./fetchDependencies --macos && make macos )
-  MVK_DYLIB="$(find "$WORK/MoltenVK/Package/Release/MoltenVK" -name 'libMoltenVK.dylib' -type f 2>/dev/null | head -1)"
+  # `make macos` publishes to Package/{Latest,Release}/MoltenVK/dynamic/dylib/macOS/ (Latest is a symlink to
+  # Release). Search the whole Package tree rather than pinning that path, so a layout change fails loudly
+  # here instead of silently shipping an artifact with no driver. -type f skips the Latest symlink duplicate.
+  MVK_DYLIB="$(find "$WORK/MoltenVK/Package" -name 'libMoltenVK.dylib' -type f 2>/dev/null | head -1)"
   if [ -n "$MVK_DYLIB" ]; then
     cp "$MVK_DYLIB" out/lib/libMoltenVK.dylib
     echo "    MoltenVK: $(file -b out/lib/libMoltenVK.dylib)"
