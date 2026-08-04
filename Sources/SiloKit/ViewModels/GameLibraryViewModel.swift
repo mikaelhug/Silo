@@ -245,8 +245,10 @@ public final class GameLibraryViewModel {
         let (exe, is32, profile): (URL?, Bool, D3DProfile) = await Task.detached { [orchestrator] in
             let exe = orchestrator.resolvedExecutable(app: game, config: config)
             let is32 = exe.map { WindowsExecutable.is32Bit($0) } ?? false
-            let profile = choice == .auto ? (exe.map { D3DProfile.scan(executable: $0) } ?? D3DProfile())
-                                          : D3DProfile()
+            // Scanned for EVERY launch, not just Automatic: an explicit pin ignores it for routing, but the
+            // fallback message still needs it to avoid steering a pinned game to a backend that can't help
+            // (e.g. suggesting DXMT for a D3D12 title). Bounded + off-main, so it's noise next to a launch.
+            let profile = exe.map { D3DProfile.scan(executable: $0) } ?? D3DProfile()
             return (exe, is32, profile)
         }.value
         // A learned hint only counts if it was learned under the CURRENT GPTK runtime — a GPTK upgrade may
@@ -432,8 +434,9 @@ public final class GameLibraryViewModel {
         // so Automatic here is the pure forward choice: 32-bit → DXMT, else GPTK.
         let choice = game.graphics
         let (is32, profile) = await Task.detached {
+            // Scanned for every launch — a pin ignores it for routing, but the fallback message needs it.
             (WindowsExecutable.is32Bit(game.executablePath),
-             choice == .auto ? D3DProfile.scan(executable: game.executablePath) : D3DProfile())
+             D3DProfile.scan(executable: game.executablePath))
         }.value
         let dxmtConfigured = cfg.libDir(for: .dxmt) != nil
         let dxvkConfigured = cfg.libDir(for: .dxvk) != nil
