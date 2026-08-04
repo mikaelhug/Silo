@@ -88,7 +88,10 @@ public final class AppEnvironment {
 
         // The single Steam bottle + its live client session + settings VM. The client runs on the base wine
         // (CEF needs no d3d; a co-resident game picks the variant runtime — shared wineserver).
-        let steamBottle = SteamBottle(runner: runner, paths: paths)
+        // `runtimeSession` is threaded in so the bottle's own artifact downloads (core fonts, the SDK
+        // cabinets, Steam) are stubbable — without it they went to `URLSession.shared`, i.e. the real
+        // network, from inside the setup tests.
+        let steamBottle = SteamBottle(runner: runner, session: runtimeSession, paths: paths)
         let steamClientSession = SteamClientSession(bottle: steamBottle, orchestrator: orchestrator)
         let steamBottleVM = SteamBottleViewModel(
             bottle: steamBottle, session: steamClientSession)

@@ -29,14 +29,22 @@ extension AppPaths {
         let driveC = steamBottle.appendingPathComponent("drive_c")
         let fonts = driveC.appendingPathComponent("windows/Fonts")
         try? fm.createDirectory(at: fonts, withIntermediateDirectories: true)
-        fm.createFile(atPath: fonts.appendingPathComponent("Arial.TTF").path, contents: Data())
+        // coreFonts is satisfied only when EVERY package's font is actually present — the ARTIFACT, not a
+        // marker recording that an installer once ran. (A bottle with all 58 fonts on disk but no markers
+        // was reported unprovisioned; a marker set with no fonts would be the same lie in reverse.)
+        for name in Silo.coreFontWitness.values {
+            fm.createFile(atPath: fonts.appendingPathComponent(name).path, contents: Data("TTF".utf8))
+        }
+        // d3dcompiler_47 is likewise satisfied by the real DLL in BOTH ABIs, big enough to be Microsoft's
+        // rather than wine's builtin.
+        for abi in ["system32", "syswow64"] {
+            let dir = driveC.appendingPathComponent("windows/\(abi)")
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            fm.createFile(atPath: dir.appendingPathComponent("d3dcompiler_47.dll").path,
+                          contents: Data(count: 600_000))
+        }
         let markers = steamBottle.appendingPathComponent(".silo-installed")
         try? fm.createDirectory(at: markers, withIntermediateDirectories: true)
-        // coreFonts is satisfied only when EVERY font has its own marker (a single font file used to be
-        // enough, which let a partial install read as complete).
-        for font in Silo.coreFonts {
-            fm.createFile(atPath: markers.appendingPathComponent("corefont-\(font)").path, contents: Data())
-        }
         for pack in Silo.sourceHanSansPacks {
             fm.createFile(atPath: markers.appendingPathComponent(pack).path, contents: Data())      // sourceHanSans
         }

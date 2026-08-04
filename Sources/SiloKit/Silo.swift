@@ -36,6 +36,18 @@ public enum Silo {
     public static let coreFontsBaseURL = URL(string: "https://downloads.sourceforge.net/corefonts/")!
     public static let coreFonts = ["andale32", "arial32", "arialb32", "comic32", "courie32", "georgi32",
                                    "impact32", "times32", "trebuc32", "verdan32", "webdin32"]
+
+    /// The TrueType file each core-font package installs, used to check the FONT rather than a marker file.
+    /// A marker records that Silo once ran an installer; it says nothing about whether the font is present,
+    /// so a bottle with all 58 fonts on disk still reported "Core Fonts missing" and re-ran the whole set
+    /// (observed on the real bottle, 2026-08-04). Names are compared case-insensitively — the packages mix
+    /// cases (`Arial.TTF` vs `cour.ttf`) and only some filesystems care.
+    public static let coreFontWitness: [String: String] = [
+        "andale32": "AndaleMo.TTF", "arial32": "Arial.TTF", "arialb32": "AriBlk.TTF",
+        "comic32": "Comic.TTF", "courie32": "cour.ttf", "georgi32": "Georgia.TTF",
+        "impact32": "Impact.TTF", "times32": "Times.TTF", "trebuc32": "trebuc.ttf",
+        "verdan32": "Verdana.TTF", "webdin32": "Webdings.TTF",
+    ]
     /// Winetricks' current corefonts mirror (its OWN primary download URL for these files) — byte-identical
     /// to SourceForge. SourceForge's `downloads.sourceforge.net` redirector is flaky, so each font falls back
     /// to this GitHub raw mirror when the primary download fails. Both mirrors are tamper-checked against the

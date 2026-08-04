@@ -259,11 +259,12 @@ struct SteamBottleTests {
                 .replacingOccurrences(of: ".exe", with: "")
             if inv.arguments.contains("/C") {
                 try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
-                let ttf = font == "arial32" ? "Arial.TTF" : "\(font).TTF"
+                let ttf = Silo.coreFontWitness[font] ?? "\(font).TTF"
                 FileManager.default.createFile(atPath: extractDir.appendingPathComponent(ttf).path, contents: Data("TTF".utf8))
             } else if font == firstFont {
                 try? FileManager.default.createDirectory(at: fontsDir, withIntermediateDirectories: true)
-                FileManager.default.createFile(atPath: fontsDir.appendingPathComponent("\(font).TTF").path, contents: Data("TTF".utf8))
+                let ttf = Silo.coreFontWitness[font] ?? "\(font).TTF"
+                FileManager.default.createFile(atPath: fontsDir.appendingPathComponent(ttf).path, contents: Data("TTF".utf8))
             }
         }
 
@@ -440,44 +441,51 @@ struct SteamBottleTests {
         }
     }
 
-    @Test("installD3DCompiler47 extracts both ABIs via `wine expand` and sets a native override")
+    /// REGRESSION. The previous version of this test had the fake runner DROP a file where the code expected
+    /// `wine expand` to leave one, then asserted Silo passed `-F:<member>`. Wine's `expand` has no such flag
+    /// (its usage is `expand infile outfile`): it ignored the arguments, exited 0 and wrote nothing, so the
+    /// component never installed Microsoft's DLL on any machine — while this test stayed green, because it
+    /// simulated the very behaviour that did not exist. It now drives a REAL cabinet through the REAL
+    /// extraction path, with no process involved at all.
+    @Test("installD3DCompiler47 extracts both ABIs from the real cabinets, natively — no wine process")
     func installD3DCompiler47() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
         let (bottle, fake, paths, _) = make(tmp, session: session)
-        FakeURLProtocol.stub(Silo.d3dCompiler47X64CabURL.absoluteString, data: Data("CAB64".utf8), session: session)
-        FakeURLProtocol.stub(Silo.d3dCompiler47X86CabURL.absoluteString, data: Data("CAB32".utf8), session: session)
+        // Two genuine cabinets, each carrying a member big enough to clear the "this is not wine's builtin"
+        // size gate. `headerReserve` exercises the RESERVE_PRESENT layout the real SDK cabinets use.
+        func cab(_ member: String) -> Data {
+            CabinetBuilder.build([
+                .init(name: "cat-ignored", bytes: Data(repeating: 0x11, count: 7_626)),
+                .init(name: member, bytes: Data(repeating: 0x5A, count: 600_000)),
+            ], headerReserve: 20)
+        }
+        FakeURLProtocol.stub(Silo.d3dCompiler47X64CabURL.absoluteString,
+                             data: cab(Silo.d3dCompiler47X64Member), session: session)
+        FakeURLProtocol.stub(Silo.d3dCompiler47X86CabURL.absoluteString,
+                             data: cab(Silo.d3dCompiler47X86Member), session: session)
         let sys32 = paths.steamBottle.appendingPathComponent("drive_c/windows/system32")
         let syswow = paths.steamBottle.appendingPathComponent("drive_c/windows/syswow64")
-        // Simulate `wine expand <cab> -F:<member> C:\windows\<dir>`: drop the member-named file into the dir.
-        fake.onRun = { inv in
-            guard inv.arguments.first == "expand",
-                  let memberArg = inv.arguments.first(where: { $0.hasPrefix("-F:") }) else { return }
-            let member = String(memberArg.dropFirst(3))
-            let dir = inv.arguments.contains("C:\\windows\\system32") ? sys32 : syswow
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            // The REAL d3dcompiler_47.dll is multi-MB; write a large-enough dummy to pass the size gate.
-            FileManager.default.createFile(atPath: dir.appendingPathComponent(member).path, contents: Data(count: 600_000))
+
+        try await bottle.installD3DCompiler47(downloads: bottle.startSetupDownloads())
+
+        // Both ABIs landed, and carry the MEMBER's bytes — not the whole cabinet, and not the other member.
+        for dir in [sys32, syswow] {
+            let dll = try Data(contentsOf: dir.appendingPathComponent("d3dcompiler_47.dll"))
+            #expect(dll.count == 600_000)
+            #expect(dll.allSatisfy { $0 == 0x5A })
         }
-
-        try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
-
-        // Both DLLs landed (renamed from the member id → canonical name).
-        #expect(FileManager.default.fileExists(atPath: sys32.appendingPathComponent("d3dcompiler_47.dll").path))
-        #expect(FileManager.default.fileExists(atPath: syswow.appendingPathComponent("d3dcompiler_47.dll").path))
         #expect(bottle.hasD3DCompiler47)
-        // The expand runs carried the correct member ids + windows dest dirs.
-        let expands = fake.invocations.filter { $0.arguments.first == "expand" }
-        #expect(expands.contains { $0.arguments.contains("-F:\(Silo.d3dCompiler47X64Member)") && $0.arguments.contains("C:\\windows\\system32") })
-        #expect(expands.contains { $0.arguments.contains("-F:\(Silo.d3dCompiler47X86Member)") && $0.arguments.contains("C:\\windows\\syswow64") })
-        // NO DLL override is written — the native file is present, so Wine's load order picks it up.
+        // No process is run at all now — extraction is native, so there is no exit code to misread.
+        #expect(fake.invocations.isEmpty)
+        // NO DLL override is written — the native file is present, so Wine's load order picks it up
+        // (this is exactly what CrossOver's own Steam bottle does).
         #expect(!fake.invocations.contains {
             ($0.arguments.first == "reg" || $0.arguments.first == "regedit") && $0.arguments.contains("d3dcompiler_47")
         })
         // Idempotent.
-        let runsBefore = fake.invocations.count
-        try await bottle.installD3DCompiler47(wine: URL(fileURLWithPath: "/w/wine64"), downloads: bottle.startSetupDownloads())
-        #expect(fake.invocations.count == runsBefore)
+        try await bottle.installD3DCompiler47(downloads: bottle.startSetupDownloads())
+        #expect(bottle.hasD3DCompiler47)
     }
 
     @Test("installVCRedist runs the redist USER-GUIDED (no /quiet) and marks it done on success")
@@ -676,13 +684,13 @@ struct SteamBottleTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
         let (bottle, _, paths, _) = make(tmp, session: session)
-        // Pre-satisfy coreFonts + steamClient (steam.exe); leave the rest unsatisfied. coreFonts needs a
-        // marker per font — one font file used to be enough, which let a partial install read as complete.
-        let markers = paths.steamBottle.appendingPathComponent(".silo-installed")
-        try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
-        for font in Silo.coreFonts {
-            FileManager.default.createFile(
-                atPath: markers.appendingPathComponent("corefont-\(font)").path, contents: Data())
+        // Pre-satisfy coreFonts + steamClient (steam.exe); leave the rest unsatisfied. coreFonts is
+        // satisfied by the FONTS being present — every package's file, since a partial set must not read as
+        // complete — not by a marker recording that an installer once ran.
+        let fonts = paths.steamBottle.appendingPathComponent("drive_c/windows/Fonts")
+        try FileManager.default.createDirectory(at: fonts, withIntermediateDirectories: true)
+        for name in Silo.coreFontWitness.values {
+            FileManager.default.createFile(atPath: fonts.appendingPathComponent(name).path, contents: Data("TTF".utf8))
         }
         try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())

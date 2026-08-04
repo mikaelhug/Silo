@@ -87,4 +87,40 @@ struct BackendReportTests {
             print("  \(log.lastPathComponent)  backend=\(backend?.badge ?? "?")  → \(verdict.map(String.init(describing:)) ?? "n/a")")
         }
     }
+
+    /// The third question, and the one a user actually feels: **is the bottle correctly provisioned?**
+    /// Prints each setup component's own `isSatisfied` predicate against the REAL bottle, beside the
+    /// evidence on disk. A component that reports unsatisfied on a working bottle means setup re-runs it
+    /// forever; one that reports satisfied while the artifact is absent means a game fails later for a
+    /// reason Silo already knew about.
+    @Test("report: is the real bottle correctly provisioned, component by component",
+          .enabled(if: BackendReportTests.enabled))
+    func provisioningReport() throws {
+        let paths = AppPaths.standard()
+        let bottle = SteamBottle(runner: SystemProcessRunner(), paths: paths)
+        let fm = FileManager.default
+        let driveC = paths.steamBottle.appendingPathComponent("drive_c")
+
+        func size(_ rel: String) -> String {
+            let u = driveC.appendingPathComponent(rel)
+            guard let n = try? fm.attributesOfItem(atPath: u.path)[.size] as? Int else { return "absent" }
+            return "\(n) bytes"
+        }
+
+        print("\n=== Bottle provisioning (real bottle) ===")
+        for component in BottleComponent.allCases {
+            print("  \(bottle.isSatisfied(component) ? "✓" : "✗")  \(component.rawValue)")
+        }
+        let fonts = (try? fm.contentsOfDirectory(atPath: driveC.appendingPathComponent("windows/Fonts").path))
+        print("""
+          evidence
+            fonts installed      \(fonts?.count ?? 0)
+            d3dcompiler system32 \(size("windows/system32/d3dcompiler_47.dll"))
+            d3dcompiler syswow64 \(size("windows/syswow64/d3dcompiler_47.dll"))
+            msvcp140  system32   \(size("windows/system32/msvcp140.dll"))
+            vcruntime system32   \(size("windows/system32/vcruntime140.dll"))
+        """)
+        let unsatisfied = bottle.unsatisfiedComponents()
+        print("  Silo would report unsatisfied: \(unsatisfied.isEmpty ? "none" : unsatisfied.map(\.rawValue).joined(separator: ", "))")
+    }
 }

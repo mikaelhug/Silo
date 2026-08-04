@@ -13,22 +13,62 @@ struct SetupQualityTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let bottle = SteamBottle(runner: FakeProcessRunner(), paths: paths)
-        let markers = paths.steamBottle.appendingPathComponent(".silo-installed")
-        try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
+        let fonts = paths.steamBottle.appendingPathComponent("drive_c/windows/Fonts")
+        try FileManager.default.createDirectory(at: fonts, withIntermediateDirectories: true)
 
-        // The old signal: the first two fonts landed (Arial among them).
+        // Only the first two packages' fonts landed (Arial among them).
         for font in Silo.coreFonts.prefix(2) {
             FileManager.default.createFile(
-                atPath: markers.appendingPathComponent("corefont-\(font)").path, contents: Data())
+                atPath: fonts.appendingPathComponent(Silo.coreFontWitness[font]!).path, contents: Data("TTF".utf8))
         }
         #expect(!bottle.hasCoreFonts)                                   // partial → NOT satisfied
         #expect(bottle.unsatisfiedComponents().contains(.coreFonts))    // …and surfaced to the user
 
         for font in Silo.coreFonts {
             FileManager.default.createFile(
-                atPath: markers.appendingPathComponent("corefont-\(font)").path, contents: Data())
+                atPath: fonts.appendingPathComponent(Silo.coreFontWitness[font]!).path, contents: Data("TTF".utf8))
         }
         #expect(bottle.hasCoreFonts)                                    // complete → satisfied
+    }
+
+    /// REGRESSION, from the real bottle (2026-08-04): all 58 fonts were installed and Silo still reported
+    /// "Core Fonts" unsatisfied, because the predicate looked for per-font MARKER files that a since-changed
+    /// installer had never written. Setup then re-downloaded and re-ran all 11 packages, and the honest
+    /// "these components failed" list cried wolf — which is how a genuine failure beside it stayed invisible.
+    /// The component is about fonts; ask about fonts.
+    @Test("fonts present with NO marker files satisfy the component")
+    func fontsWithoutMarkersAreSatisfied() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let bottle = SteamBottle(runner: FakeProcessRunner(), paths: paths)
+        let fonts = paths.steamBottle.appendingPathComponent("drive_c/windows/Fonts")
+        try FileManager.default.createDirectory(at: fonts, withIntermediateDirectories: true)
+        for name in Silo.coreFontWitness.values {
+            FileManager.default.createFile(atPath: fonts.appendingPathComponent(name).path, contents: Data("TTF".utf8))
+        }
+        #expect(FileManager.default.fileExists(
+            atPath: paths.steamBottle.appendingPathComponent(".silo-installed").path) == false)
+        #expect(bottle.hasCoreFonts)
+        #expect(!bottle.unsatisfiedComponents().contains(.coreFonts))
+    }
+
+    /// The d3dcompiler_47 component exists to place MICROSOFT's DLL. Wine's own builtin is copied into
+    /// system32 by `wineboot` regardless, so the predicate must not accept it — on the real bottle the
+    /// files were byte-identical to wine's builtins (371,433 / 325,292 bytes) after an install that had
+    /// silently done nothing.
+    @Test("wine's builtin d3dcompiler_47 does not satisfy the component")
+    func wineBuiltinDoesNotSatisfyD3DCompiler() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let bottle = SteamBottle(runner: FakeProcessRunner(), paths: paths)
+        for (abi, size) in [("system32", 371_433), ("syswow64", 325_292)] {   // wine's real builtin sizes
+            let dir = paths.steamBottle.appendingPathComponent("drive_c/windows/\(abi)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: dir.appendingPathComponent("d3dcompiler_47.dll").path,
+                                          contents: Data(count: size))
+        }
+        #expect(!bottle.hasD3DCompiler47)
+        #expect(bottle.unsatisfiedComponents().contains(.d3dcompiler47))
     }
 
     /// Setup used to report plain success over a bottle missing (say) the MSVC runtime, so the real problem
