@@ -180,7 +180,10 @@ public struct LaunchOrchestrator: Sendable {
         // Self-healing: the PREVIOUS run's log is the memory. If the game quit because it asked for a
         // display mode this Mac cannot switch to, run it inside wine's virtual desktop this time — no
         // setting to find, no guess before the fact, and it costs a single read of a file already on hand.
-        let priorLog = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+        // Only the LAST launch — Silo's logs append, so scanning the whole file would pin a game to the
+        // virtual desktop forever after a single failure, even once its saved resolution is fixed.
+        let priorLog = LaunchPlan.lastLaunchSection(
+            of: (try? String(contentsOf: logURL, encoding: .utf8)) ?? "")
         let plan = try Self.makePlan(
             config: config, backend: backend, graphics: graphics, wine: launchWine,
             gameExe: gameExe, prefix: prefix, logURL: logURL,

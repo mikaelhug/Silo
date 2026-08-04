@@ -41,3 +41,31 @@ struct VirtualDesktopFallbackTests {
         #expect(wrapped.last == exe.path)      // the game stays the final argument
     }
 }
+
+/// Silo's launch logs APPEND across runs. Reading the whole file would re-detect a one-off failure forever,
+/// so the check must look only at the most recent launch.
+@Suite("Launch log sectioning")
+struct LaunchLogSectionTests {
+
+    @Test("only the last launch is considered, so a fixed game stops being pinned")
+    func lastSectionOnly() {
+        let log = """
+        ===== Silo launch @ 2026-08-04 17:09:04 =====
+        err:   D3D9: EnterFullscreenMode: Failed to change display mode
+        ===== Silo launch @ 2026-08-04 18:00:00 =====
+        info:  Setting display mode: 1512x982@120
+        """
+        let last = LaunchPlan.lastLaunchSection(of: log)
+        #expect(!last.contains("Failed to change display mode"))
+        #expect(!GraphicsFallback.requestedUnavailableDisplayMode(last))
+        // …and a log whose LAST run failed is still caught.
+        let stillFailing = log + "\n===== Silo launch @ 2026-08-04 19:00:00 =====\nerr:   D3D9: EnterFullscreenMode: Failed to change display mode"
+        #expect(GraphicsFallback.requestedUnavailableDisplayMode(LaunchPlan.lastLaunchSection(of: stillFailing)))
+    }
+
+    @Test("a log with no header is returned whole")
+    func noHeader() {
+        #expect(LaunchPlan.lastLaunchSection(of: "some old log") == "some old log")
+        #expect(LaunchPlan.lastLaunchSection(of: "").isEmpty)
+    }
+}

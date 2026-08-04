@@ -28,7 +28,7 @@ public struct LaunchPlan: Sendable, Equatable {
     /// black-window / "failed to initialize graphics" report self-explanatory — you see exactly what was
     /// launched and with which GPTK/wine env, without re-deriving it. Pure (timestamp injected).
     public func logHeader(at date: Date) -> String {
-        var lines = ["===== Silo launch @ \(Self.timestampFormatter.string(from: date)) ====="]
+        var lines = ["\(Self.launchHeaderMarker) @ \(Self.timestampFormatter.string(from: date)) ====="]
         lines.append("exe   : \(executable.path)")
         lines.append("args  : \(arguments.joined(separator: " "))")
         lines.append("cwd   : \(currentDirectory.path)")
@@ -41,6 +41,17 @@ public struct LaunchPlan: Sendable, Equatable {
     }
 
     /// Stable, locale-independent timestamp for the log header.
+    /// Written at the top of every launch. Silo's logs APPEND across runs, so anything that reads a log back
+    /// must slice from the LAST occurrence of this — otherwise a one-off failure is re-detected forever.
+    public static let launchHeaderMarker = "===== Silo launch"
+
+    /// Everything logged by the MOST RECENT launch, i.e. from the last header on. Returns the whole text when
+    /// no header is present (a log written before this existed, or one a game wrote itself).
+    public static func lastLaunchSection(of log: String) -> String {
+        guard let start = log.range(of: launchHeaderMarker, options: .backwards) else { return log }
+        return String(log[start.lowerBound...])
+    }
+
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
