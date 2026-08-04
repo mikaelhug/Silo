@@ -148,12 +148,11 @@ if xcrun -sdk macosx metal -e /dev/null -o /dev/null >/dev/null 2>&1 || \
   # features, not extensions. Byte-level check on the built dylib, so a build that silently picked up
   # upstream MoltenVK cannot be published.
   echo "==> Verify the built MoltenVK advertises the features DXVK requires"
+  MVKDEV="$MVK_SRC/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm"
   for feature in geometryShader shaderCullDistance pipelineStatisticsQuery; do
-    grep -q "$feature" "$MVK_SRC/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm" \
-      || { echo "ERROR: MoltenVK source does not set $feature — this is not CodeWeavers' patched tree"; exit 1; }
+    grep -qE "_features\\.$feature *= *true" "$MVKDEV" \
+      || { echo "ERROR: MoltenVK does not force-enable $feature — DXVK cannot create a device"; exit 1; }
   done
-  grep -qE '_features\.geometryShader *= *true' "$MVK_SRC/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm" \
-    || { echo "ERROR: geometryShader is not force-enabled — DXVK cannot create a device"; exit 1; }
 else
   echo "::warning:: full Xcode not selected — SKIPPING the MoltenVK build."
   echo "            The DXVK dlls alone are NOT usable (stock MoltenVK can't drive DXVK). Build on a runner"

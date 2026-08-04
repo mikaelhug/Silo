@@ -154,6 +154,17 @@ jobs:
           test -d "$RUNNER_TEMP/MoltenVK/sources/moltenvk" || { echo "::error::no sources/moltenvk in crossover-sources"; exit 1; }
           grep -q "EXT_transform_feedback" "$RUNNER_TEMP/MoltenVK/sources/moltenvk/MoltenVK/MoltenVK/Layers/MVKExtensions.def" \
             || { echo "::error::MoltenVK lacks VK_EXT_transform_feedback - DXVK would not work"; exit 1; }
+          # And the three DEVICE FEATURES DXVK requires unconditionally. The extension check above is NOT
+          # enough: an artifact built from STOCK Khronos MoltenVK shipped and every DXVK API was dead -
+          # d3d9 AND d3d11 - because vkCreateDevice returned VK_ERROR_FEATURE_NOT_PRESENT for geometryShader
+          # (5th flag) and shaderCullDistance (39th). Metal has neither, so CodeWeavers force-enable them,
+          # annotated in their own source as "XXX Required by DXVK for D3D10" / "for 10level9". Measured
+          # 2026-08-04: their 1.2.10 advertises all three, a stock 1.2.11 advertises none.
+          MVKDEV="$RUNNER_TEMP/MoltenVK/sources/moltenvk/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm"
+          for feature in geometryShader shaderCullDistance pipelineStatisticsQuery; do
+            grep -qE "_features\\.$feature *= *true" "$MVKDEV" \
+              || { echo "::error::MoltenVK does not force-enable $feature - DXVK cannot create a device"; exit 1; }
+          done
           cd "$RUNNER_TEMP/MoltenVK/sources/moltenvk"
           # CodeWeavers vendor their PATCHED SPIRV-Cross in External/ but leave the other deps empty, and the
           # tree is a tarball (not a git checkout), so fetchDependencies' git calls die on it (exit 128).
