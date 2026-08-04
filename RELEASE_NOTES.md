@@ -1,19 +1,18 @@
-# Silo 0.4.3
+# Silo 0.4.4
 
-## New: DXVK / Vulkan graphics backend — DirectX 9 support
+Fixes for problems found in 0.4.3. **If you used the DXVK tab in 0.4.3, this release repairs your settings automatically on first launch.**
 
-- **DirectX 9 games can run now.** GPTK doesn't translate DX9 at all and DXMT is DirectX 10/11-only, so DX9 titles previously fell back to Wine's own renderer and usually black-screened. The new **DXVK** backend (DirectX 9/10/11 → Vulkan → Metal) fills that gap, and also acts as a compatibility fallback for DirectX 10/11 games the two Metal backends can't drive.
-- **Install it in Settings → DXVK.** Like Wine and DXMT, the runtime is built from source in Silo's own CI and downloaded on demand. Automatic won't route anything to DXVK until it's installed.
-- **⚠️ Brand new, not yet proven on real games.** Direct3D device creation is verified working on Apple Silicon, but no full game has been played through it end to end. Treat DXVK as experimental in this release — GPTK and DXMT are unchanged and remain the default paths.
+## DXVK settings fixes
 
-## Smarter automatic backend selection
+- **The DXVK tab listed your Wine builds and could adopt one as the "DXVK runtime".** Wine ships its own `d3d9.dll` and `d3d11.dll` in exactly the layout Silo used to identify DXVK, so every Wine install matched. Silo now requires DXVK's own Vulkan driver to be present, which Wine trees never have. A wrong setting left over from 0.4.3 is cleared automatically.
+- **The DXVK runtime is now published and installable.** Settings → DXVK → Install latest DXVK works; it ships DXVK 1.10.3 with its own Vulkan driver.
 
-- **Silo now inspects a game's DLLs, not just its `.exe`.** Most games keep the renderer in a library (Source in `shaderapidx9.dll`, Unity in `UnityPlayer.dll`, Unreal in its `Binaries` folder) while the `.exe` is a thin launcher — so the graphics API was often mis-detected. DirectX 9 titles are now recognised on the **first** launch instead of after two failed ones.
-- **Bundled installers are no longer mistaken for the game.** A `VC_redist.x64.exe` or `UEPrereqSetup_x64.exe` sitting in a game folder could be picked as the executable to launch, which also produced the wrong graphics backend. Redistributables and prerequisites are now skipped.
-- **DirectX 8 games are left alone.** No translation layer supports DirectX 8, so Wine's own renderer is the correct choice — Silo no longer reports a false graphics failure or suggests a backend switch for them.
-- **32-bit games now honour a learned backend.** A 32-bit game that couldn't run on DXMT kept being sent back to DXMT on every launch, even after Silo had decided DXVK should be used instead.
-- **A remembered backend is dropped if you uninstall its runtime**, instead of leaving the game unable to launch at all.
-- **DXVK no longer writes into your game folders.** Its logs and shader cache are kept in Silo's own directories; the shader cache now survives a game reinstall.
+## Setup and reliability
+
+- **Runtime downloads no longer break as the release list grows.** Silo looked at only the newest 15 releases, so as new versions were published the Wine runtime would eventually drop out of view and setup would fail with "No Wine build published yet." even though it was there. Silo now searches further back.
+- **Deleting a runtime outside Silo no longer leaves setup thinking it's installed.** Previously the setup step still showed "Done" while every launch failed against a path that no longer existed.
+- **Interrupted downloads no longer appear as installed runtimes.** A partially-extracted runtime left behind by a crash could be listed and selected as the default.
+- **Error messages are readable.** Failures during first-run setup — a rate-limited GitHub, a failed checksum, a full disk, an unrecognised GPTK disk image — showed an internal Cocoa string instead of an explanation.
 
 ---
 
