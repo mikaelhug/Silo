@@ -599,6 +599,11 @@ public final class GameLibraryViewModel {
     /// or no installed alternative) gets an honest message.
     private func handleGraphicsFallback(
         name: String, backend graphics: GraphicsBackend, profile: D3DProfile, autoLearnAppID: Int?) async {
+        // A DirectX 8 title runs on wine's own wined3d BY DESIGN (no backend translates d3d8, and wine's
+        // builtin d3d8 sits directly on wined3d). wined3d announces its renderer for d3d8 too, which trips
+        // the generic fallback signature — so for these games the "signal" is expected, correct behaviour.
+        // Say nothing rather than claim graphics failed and drag the game through a reroute that can't help.
+        guard !profile.isD3D8Only else { return }
         let alt = Self.fallbackAlternative(
             after: graphics,
             dxmtMightHelp: BackendChooser.dxmtMightHelp(profile: profile),

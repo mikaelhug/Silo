@@ -896,6 +896,47 @@ struct GameLibraryViewModelTests {
         #expect(vm.statusMessage?.contains("Set up DXMT") == true)
     }
 
+    /// Launch `game` with the wined3d-fallback signature appended to its log during the spawn (the proven
+    /// deterministic pattern — the monitor reads the tail on start), and return the resulting status.
+    private func statusAfterWined3dSignature(
+        _ vm: GameLibraryViewModel, _ fake: FakeProcessRunner, log: URL, game: SteamApp) async -> String? {
+        fake.onRun = { inv in
+            guard inv.detached, inv.logURL == log, let handle = try? FileHandle(forWritingTo: log) else { return }
+            handle.seekToEndOfFile()
+            handle.write(Data("err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications.".utf8))
+            try? handle.close()
+        }
+        await vm.play(game)
+        try? await Task.sleep(for: .milliseconds(200))   // the handler messages a beat after play() returns
+        return vm.statusMessage
+    }
+
+    @Test("A DirectX 8 game is never told its graphics failed — wined3d IS the correct backend for it")
+    func directX8NoFalseFailure() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        // DXMT must be installed: a 32-bit game routes to DXMT, and an unconfigured DXMT would make the
+        // resolver refuse before the game ever launches — leaving the monitor unarmed and this test vacuous.
+        let (vm, fake, paths) = try makeDXMTReady(tmp)
+        try installSteam(paths)
+
+        // CONTROL — a D3D11 game hitting the same signature MUST produce a graphics complaint. Without this
+        // the DX8 assertion below could pass vacuously (monitor never fired) and prove nothing.
+        let dx11 = try installedGamePEImports(
+            paths, appID: 811, name: "DX11", dir: "DX11", machine: 0x8664, imports: ["d3d11.dll"])
+        let controlStatus = await statusAfterWined3dSignature(
+            vm, fake, log: paths.log(forAppID: 811), game: dx11)
+        #expect(controlStatus?.contains("couldn't") == true)
+
+        // A DX8 title: wine's builtin d3d8 sits directly on wined3d, which announces its renderer for d3d8
+        // too — so the SAME line is expected, correct behaviour here, not a failure to report.
+        let dx8 = try installedGamePEImports(
+            paths, appID: 800, name: "DX8", dir: "DX8", machine: 0x014c, imports: ["d3d8.dll"])
+        let dx8Status = await statusAfterWined3dSignature(
+            vm, fake, log: paths.log(forAppID: 800), game: dx8)
+        #expect(dx8Status?.contains("couldn't") != true)
+        #expect(dx8Status?.contains("Switch this game's graphics") != true)
+    }
+
     @Test("fallbackAlternative walks GPTK → DXMT → DXVK, DXMT → DXVK, DXVK → nil (per might-help)")
     func fallbackAlternativeChain() {
         typealias VM = GameLibraryViewModel

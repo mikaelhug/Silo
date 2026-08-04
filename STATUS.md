@@ -21,8 +21,23 @@
     recursively, so a Steam install's `VC_redist.x64.exe` (~25 MB) or `UEPrereqSetup_x64.exe` could win —
     poisoning the bitness read (wrong backend) *and* rooting the profile scan in the wrong directory. Redist
     dirs + installer name prefixes are excluded, failing open if that leaves nothing.
-  - Tests: new `D3DProfileTests` (sibling-DLL, subdirectory, redist exclusion, mixed-API, unknown, garbage) +
-    resolver redist cases; `BackendChooserTests` ladder gates rewritten as pure profile tables.
+  - **DirectX 9 under DXVK is no longer invisible.** Every DXVK signature was d3d11-only, so a DX9 game — the
+    whole point of the backend — was silent whether it worked or died (`.unknown`, status "Launched", no
+    learning). Read out of the DXVK 1.10.3 source and verified on-device in BOTH directions: engaged =
+    `Device properties:` (logged by `DxvkAdapter::createDevice` AFTER `vkCreateDevice` succeeds, on the path
+    SHARED by d3d9/d3d10core/d3d11); failed = `DxvkAdapter: Failed to create device` (the `DxvkError` message
+    d3d9's `CreateDevice` catch logs verbatim).
+  - **DirectX 8 no longer gets a false failure.** Nothing translates d3d8 (DXVK ships none; wine's builtin
+    d3d8 sits directly on wined3d, bypassing d3d9), so wined3d IS correct — but its renderer line tripped the
+    generic signature, producing "couldn't drive your graphics" + a pointless reroute. `isD3D8Only` now makes
+    both ladder gates refuse and `handleGraphicsFallback` stay silent. (A `d3d8to9` wrapper imports d3d9, so a
+    wrapped DX8 game correctly becomes a DX9 title → DXVK.)
+  - **Vulkan-native games route to DXVK** (`isVulkanNative`) — not for D3D translation (they need none) but
+    because only the DXVK runtime ships a working MoltenVK; the GPTK path would hand them the stock one.
+  - Tests: new `D3DProfileTests` (sibling-DLL, subdirectory, redist exclusion, mixed-API, DX8, d3d8to9,
+    Vulkan-native, unknown, garbage) + resolver redist cases; `BackendChooserTests` ladder gates rewritten as
+    pure profile tables; a DX8 no-false-failure VM test built as a **contrast** (a D3D11 control must complain
+    on the same log line) so it cannot pass vacuously — verified to fail when the guard is removed.
 - **🌋 DXVK / Vulkan — third graphics backend, Phase 2 model threading (2026-07-26, `main`; 430 tests green).**
   Adding DXVK (D3D9/10/11 → Vulkan → MoltenVK → Metal) as a third backend so **DirectX 9** games (which
   neither GPTK nor DXMT can translate — today they black-screen on wined3d) and the D3D10/11 titles the Metal

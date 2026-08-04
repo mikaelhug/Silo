@@ -9,36 +9,64 @@ import Foundation
 /// the renderer usually lives in a DLL: Source games import `d3d9` from `bin/shaderapidx9.dll`, Unity from
 /// `UnityPlayer.dll`, and UE from its `Binaries/Win64` DLLs, while the `.exe` is a thin stub.
 public struct D3DProfile: Sendable, Equatable {
+    /// The game references `d3d8` — **no Silo backend translates it** (DXVK ships no d3d8, and wine's builtin
+    /// `d3d8` sits directly on wined3d rather than forwarding through `d3d9`). wined3d IS the right answer
+    /// here, so a DX8 title must not be dragged through the reroute ladder.
+    public var usesD3D8 = false
     /// The game references `d3d9` (the only API DXVK alone can translate — GPTK/DXMT have no d3d9).
     public var usesD3D9 = false
     /// The game references D3D10/10.1/11 — translatable by all three backends.
     public var usesD3D1x = false
     /// The game references D3D12 — **GPTK only**; neither DXMT nor DXVK implements it.
     public var usesD3D12 = false
+    /// The game calls **Vulkan directly** (`vulkan-1.dll`). No D3D translation is needed, but it still needs a
+    /// working Vulkan driver — and only the DXVK runtime ships one that works (see `isVulkanNative`).
+    public var usesVulkan = false
 
-    public init(usesD3D9: Bool = false, usesD3D1x: Bool = false, usesD3D12: Bool = false) {
+    public init(usesD3D8: Bool = false, usesD3D9: Bool = false, usesD3D1x: Bool = false,
+                usesD3D12: Bool = false, usesVulkan: Bool = false) {
+        self.usesD3D8 = usesD3D8
         self.usesD3D9 = usesD3D9
         self.usesD3D1x = usesD3D1x
         self.usesD3D12 = usesD3D12
+        self.usesVulkan = usesVulkan
     }
 
     /// No Direct3D reference found anywhere. Means **unknown**, NOT "no Direct3D": a game can load D3D
     /// dynamically via `LoadLibrary`, or hide it behind a packed/protected binary. Every consumer treats
     /// this as "don't rule anything out" (fail-open), except the DX9-first route which needs positive proof.
-    public var isUnknown: Bool { !usesD3D9 && !usesD3D1x && !usesD3D12 }
+    public var isUnknown: Bool {
+        !usesD3D8 && !usesD3D9 && !usesD3D1x && !usesD3D12 && !usesVulkan
+    }
 
     /// A pure DirectX 9 title — the one case **only DXVK** can drive (GPTK doesn't translate DX9 at all and
     /// DXMT is D3D10/11-only, so this game would otherwise fall to wined3d and usually black-screen).
     /// Deliberately conservative: a game that ALSO uses D3D10/11/12 keeps the GPTK-first path, where DXVK's
-    /// extra Vulkan→Metal hop isn't worth paying.
+    /// extra Vulkan→Metal hop isn't worth paying. (A `d3d8to9` wrapper imports `d3d9`, so a wrapped DX8 game
+    /// lands here too — correctly, since that IS the arrangement that reaches DXVK.)
     public var isD3D9Only: Bool { usesD3D9 && !usesD3D1x && !usesD3D12 }
+
+    /// A pure DirectX 8 title. **No backend can help** — wined3d is the correct and only path — so the
+    /// reactive ladder must not fire for it, and wine's "Using the Vulkan renderer" line (which wined3d emits
+    /// for d3d8 too) is EXPECTED here, not a failure.
+    public var isD3D8Only: Bool { usesD3D8 && !usesD3D9 && !usesD3D1x && !usesD3D12 }
+
+    /// A game that drives **Vulkan itself**, with no Direct3D at all. It needs no translation layer, but it
+    /// does need a working Vulkan driver — and the wine runtime's own bundled MoltenVK is the STOCK one that
+    /// can't serve DXVK. Routing it to the DXVK backend is what puts the DXVK runtime's working MoltenVK
+    /// first on the launch's `DYLD_FALLBACK_LIBRARY_PATH`; its seeded d3d dlls simply go unused.
+    public var isVulkanNative: Bool {
+        usesVulkan && !usesD3D9 && !usesD3D1x && !usesD3D12 && !usesD3D8
+    }
 
     // MARK: - Scanning
 
-    /// Direct3D module names, grouped by the tier that can translate them.
+    /// Graphics module names, grouped by the tier that can translate them.
+    private static let d3d8Names: Set<String> = ["d3d8.dll"]
     private static let d3d9Names: Set<String> = ["d3d9.dll"]
     private static let d3d1xNames: Set<String> = ["d3d11.dll", "d3d10.dll", "d3d10core.dll", "d3d10_1.dll"]
     private static let d3d12Names: Set<String> = ["d3d12.dll", "d3d12core.dll"]
+    private static let vulkanNames: Set<String> = ["vulkan-1.dll"]
 
     /// Directory names that hold redistributables/prerequisites rather than the game — their DLLs would
     /// otherwise poison the profile (a bundled DirectX redist references d3d modules the game never uses).
@@ -68,11 +96,14 @@ public struct D3DProfile: Sendable, Equatable {
             guard scanned < maxFilesScanned else { return }
             scanned += 1
             let imports = WindowsExecutable.importedDLLs(of: url)
+            if !imports.isDisjoint(with: d3d8Names) { profile.usesD3D8 = true }
             if !imports.isDisjoint(with: d3d9Names) { profile.usesD3D9 = true }
             if !imports.isDisjoint(with: d3d1xNames) { profile.usesD3D1x = true }
             if !imports.isDisjoint(with: d3d12Names) { profile.usesD3D12 = true }
+            if !imports.isDisjoint(with: vulkanNames) { profile.usesVulkan = true }
         }
-        /// Nothing further can change the answer once every tier is known.
+        /// Nothing further can change the answer once every D3D tier is known (the exclusive `isD3D8Only` /
+        /// `isVulkanNative` cases are already ruled out by then, so their flags can't change the routing).
         var isComplete: Bool { profile.usesD3D9 && profile.usesD3D1x && profile.usesD3D12 }
 
         absorb(exe)                                   // the executable itself, first

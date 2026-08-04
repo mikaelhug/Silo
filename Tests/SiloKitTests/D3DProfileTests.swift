@@ -82,6 +82,47 @@ struct D3DProfileTests {
         #expect(!p.usesD3D1x && !p.usesD3D12)
     }
 
+    @Test("A DirectX 8 game is recognised — wined3d is correct, so no backend claims it can help")
+    func directX8() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let exe = try pe(tmp, "old/old.exe", ["d3d8.dll"], machine: 0x014c)   // DX8 titles are 32-bit
+        let p = D3DProfile.scan(executable: exe)
+        #expect(p.isD3D8Only && !p.isUnknown && !p.isD3D9Only)
+        // Neither rung of the ladder may claim it can help — nothing translates d3d8, so the reroute would
+        // be pure churn and the "couldn't drive your graphics" message a lie (wined3d IS driving it).
+        #expect(!BackendChooser.dxmtMightHelp(profile: p))
+        #expect(!BackendChooser.dxvkMightHelp(profile: p))
+        // Routing is unaffected — d3d8 isn't in any backend's override set, so wine's d3d8→wined3d stands.
+        #expect(BackendChooser.choose(.auto, is32Bit: true, profile: p) == .dxmt)
+    }
+
+    @Test("A d3d8to9-wrapped game reaches DXVK (the wrapper imports d3d9 — the arrangement that works)")
+    func d3d8WrappedToD3D9() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let exe = try pe(tmp, "w/w.exe", ["d3d8.dll"], machine: 0x014c)
+        try pe(tmp, "w/d3d8.dll", ["d3d9.dll"], machine: 0x014c)   // the user-installed d3d8to9 wrapper
+        let p = D3DProfile.scan(executable: exe)
+        #expect(p.usesD3D8 && p.usesD3D9)
+        #expect(!p.isD3D8Only && p.isD3D9Only)                     // now a DX9 title as far as routing goes
+        #expect(BackendChooser.choose(.auto, is32Bit: true, profile: p) == .dxvk)
+    }
+
+    @Test("A Vulkan-native game routes to DXVK — for its working MoltenVK, not for D3D translation")
+    func vulkanNative() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let exe = try pe(tmp, "vk/vk.exe", ["vulkan-1.dll", "kernel32.dll"])
+        let p = D3DProfile.scan(executable: exe)
+        #expect(p.isVulkanNative && !p.isUnknown)
+        // The wine runtime's own bundled MoltenVK is the stock one; only the DXVK runtime ships a working
+        // driver, and its dir is put first on the launch DYLD path.
+        #expect(BackendChooser.choose(.auto, is32Bit: false, profile: p) == .dxvk)
+        // A game using Vulkan AND Direct3D is NOT Vulkan-native — the D3D path decides.
+        let mixed = try pe(tmp, "vkd/vkd.exe", ["vulkan-1.dll", "d3d11.dll"])
+        let pm = D3DProfile.scan(executable: mixed)
+        #expect(!pm.isVulkanNative)
+        #expect(BackendChooser.choose(.auto, is32Bit: false, profile: pm) == .gptk)
+    }
+
     @Test("An import-less game yields an UNKNOWN profile — fail-open, never a speculative DX9 route")
     func unknownProfile() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }

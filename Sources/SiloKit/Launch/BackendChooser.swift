@@ -32,6 +32,10 @@ enum BackendChooser {
     ) -> GraphicsBackend {
         if let explicit = choice.explicitBackend { return explicit }   // a user pin always wins
         if profile.isD3D9Only { return .dxvk }                         // only DXVK translates DirectX 9
+        // A Vulkan-native game needs no translation — but it DOES need a working Vulkan driver, and the wine
+        // runtime bundles the stock MoltenVK that can't drive Vulkan clients properly. Routing it to the DXVK
+        // backend is what puts the DXVK runtime's own MoltenVK first on the launch DYLD path.
+        if profile.isVulkanNative { return .dxvk }
         if is32Bit {
             // GPTK is 64-bit-only (Apple ships no i386 D3DMetal), so a 32-bit game can only run on DXMT or
             // DXVK — and BOTH ship i386 modules. A learned hint between those two MUST be honored: a 32-bit
@@ -50,6 +54,7 @@ enum BackendChooser {
     /// needs D3D12 (DXMT has none), or is DX9-only (DXMT has no d3d9 — that game belongs on DXVK).
     static func dxmtMightHelp(profile: D3DProfile) -> Bool {
         if profile.isUnknown { return true }        // unknown → let DXMT try
+        if profile.isD3D8Only { return false }      // DX8 → nothing translates it; wined3d is correct
         if profile.usesD3D12 { return false }       // needs D3D12 → GPTK is the only Metal path
         if profile.isD3D9Only { return false }      // DX9-only → DXMT can't; DXVK is the answer
         return true
@@ -60,6 +65,7 @@ enum BackendChooser {
     /// Unlike `dxmtMightHelp` there is no D3D9 exclusion — DXVK is exactly the DirectX 9 path.
     static func dxvkMightHelp(profile: D3DProfile) -> Bool {
         if profile.isUnknown { return true }                                    // unknown → let DXVK try
+        if profile.isD3D8Only { return false }                                  // DX8 → wined3d is correct
         if profile.usesD3D12, !profile.usesD3D1x, !profile.usesD3D9 { return false }   // pure D3D12 → can't
         return true
     }

@@ -131,8 +131,14 @@ GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + override
   `.exe` is not enough: the renderer usually lives in a DLL (Source → `bin/shaderapidx9.dll`, Unity →
   `UnityPlayer.dll`, UE → its `Binaries/Win64` DLLs) while the exe is a thin stub. **Automatic**
   (`BackendChooser.choose`): **DX9-only → DXVK** (`profile.isD3D9Only` — the only DX9 translator,
-  bitness-independent); else 32-bit → DXMT/learned (GPTK is 64-bit-only, but DXMT *and* DXVK both ship i386, so
-  a 32-bit hint IS honored); else GPTK (or the learned hint). **Reactive learning walks GPTK → DXMT → DXVK**:
+  bitness-independent); **Vulkan-native → DXVK** (`isVulkanNative`: the game drives Vulkan itself and needs no
+  D3D translation, but only the DXVK runtime ships a MoltenVK that works — routing it there is what puts that
+  driver first on the launch DYLD path); else 32-bit → DXMT/learned (GPTK is 64-bit-only, but DXMT *and* DXVK
+  both ship i386, so a 32-bit hint IS honored); else GPTK (or the learned hint). **DirectX 8 is deliberately
+  left on wined3d** (`isD3D8Only`): nothing translates d3d8 — DXVK ships none, and wine's builtin `d3d8` sits
+  directly on wined3d rather than forwarding to `d3d9` — so wined3d IS correct, both ladder gates refuse, and
+  `handleGraphicsFallback` stays SILENT for it (wined3d's renderer line is expected there, not a failure).
+  A `d3d8to9` wrapper imports `d3d9`, so a wrapped DX8 game correctly becomes a DX9 title and reaches DXVK. **Reactive learning walks GPTK → DXMT → DXVK**:
   if a backend can't drive an `.auto` game (`GraphicsFallback`) and the next rung could plausibly help
   (`dxmtMightHelp`/`dxvkMightHelp` — now **pure** functions of the same profile, so the ladder can never
   contradict the forward choice) and is installed, `play` persists a `learnedBackend` hint (`.dxmt` or
