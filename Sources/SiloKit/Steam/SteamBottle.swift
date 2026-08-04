@@ -141,15 +141,28 @@ public struct SteamBottle: Sendable {
             executable: wine, arguments: args,
             environment: Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine),
             currentDirectory: prefixDir)
+        // NSIS returns a non-zero code when the user closes the wizard. Treat the documented user-abort
+        // codes as a CANCEL (same friendly "run Set up again" copy the redist installer gets) rather than a
+        // hard failure, which surfaced as a raw installer exit code the user could do nothing with.
+        if Silo.installerCancelCodes.contains(result.exitCode) {
+            throw BottleError.componentCancelled(.steamClient)
+        }
         guard result.succeeded else { throw BottleError.steamInstallFailed(result.exitCode) }
         try? fileManager.removeItem(at: installer)
     }
 
     /// Whether the bottle already has Microsoft core fonts (checks a marker font). Wine installs none, so a
     /// fresh bottle is missing them.
+    /// Per-font install marker. **Load-bearing:** this used to key on a single font file (`Arial.TTF`, which
+    /// comes from the SECOND entry in `Silo.coreFonts`), so once two fonts landed the whole component read
+    /// satisfied — a mirror hiccup or a quit partway through the 11 sequential installs left the bottle
+    /// PERMANENTLY missing the other nine, silently, with every later Set up skipping the step entirely.
+    func coreFontMarker(_ font: String) -> URL { markerDir.appendingPathComponent("corefont-\(font)") }
+
+    /// True only when EVERY core font actually installed. An incomplete set stays unsatisfied so the next
+    /// Set up retries the missing ones (and `setUp` reports them — see `unsatisfiedComponents`).
     var hasCoreFonts: Bool {
-        fileManager.fileExists(atPath:
-            prefixDir.appendingPathComponent("drive_c/windows/Fonts/Arial.TTF").path)
+        Silo.coreFonts.allSatisfy { fileManager.fileExists(atPath: coreFontMarker($0).path) }
     }
 
     /// Install Microsoft's core web fonts into the bottle (idempotent). Wine ships no TrueType MS fonts, so
@@ -182,6 +195,7 @@ public struct SteamBottle: Sendable {
         let eulaMarker = markerDir.appendingPathComponent("corefonts-eula")
         var licensePending = !fileManager.fileExists(atPath: eulaMarker.path)
         for font in Silo.coreFonts {
+            if fileManager.fileExists(atPath: coreFontMarker(font).path) { continue }   // already installed
             guard let cachedExe = cached[font] else { continue }
             // Stage the cached installer into drive_c so Wine can run it by its `C:\…` path (the cache copy
             // stays for resume; the drive_c copy is removed once the run is done).
@@ -213,10 +227,16 @@ public struct SteamBottle: Sendable {
                 try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
                 fileManager.createFile(atPath: eulaMarker.path, contents: Data())
             }
+            var installedAny = false
             for file in ttfs {
                 let dest = fontsDir.appendingPathComponent(file.lastPathComponent)
                 try? fileManager.removeItem(at: dest)
-                try? fileManager.copyItem(at: file, to: dest)
+                if (try? fileManager.copyItem(at: file, to: dest)) != nil { installedAny = true }
+            }
+            // Marker only on a font whose .ttf genuinely landed, so a failed one is retried next run.
+            if installedAny {
+                try? fileManager.createDirectory(at: markerDir, withIntermediateDirectories: true)
+                fileManager.createFile(atPath: coreFontMarker(font).path, contents: Data())
             }
         }
     }
@@ -397,7 +417,7 @@ public struct SteamBottle: Sendable {
         // that actually completed can still return a non-standard exit code (the same unreliability the
         // core-fonts path documents), so a weird code must NOT falsely halt setup before Steam. Leave it
         // unmarked (re-prompts next run) and continue.
-        if let code = result?.exitCode, [1602, 1223].contains(code) {
+        if let code = result?.exitCode, Silo.installerCancelCodes.contains(code) {
             throw BottleError.componentCancelled(x86 ? .vcRedistX86 : .vcRedistX64)
         }
     }
@@ -469,6 +489,14 @@ public struct SteamBottle: Sendable {
     /// artifact. Satisfied components are skipped (resumable). `onPhase` fires `.downloading` when a step's
     /// download is still in flight, then `.installing` (so the UI can narrate correctly). Best-effort per
     /// component — a failed font/redist is skipped — EXCEPT the terminal `.steamClient`, whose failure is fatal.
+    /// Components still unsatisfied after a provisioning pass — i.e. ones whose install was best-effort and
+    /// silently failed (a mirror 404, a declined licence, a bad exit code). `setUp` surfaces these instead of
+    /// reporting unqualified success over a bottle that is missing, say, the MSVC runtime — which would later
+    /// look like a Silo bug when every game dies with `vcruntime140.dll not found`.
+    func unsatisfiedComponents() -> [BottleComponent] {
+        BottleComponent.allCases.filter { !isSatisfied($0) }
+    }
+
     func provisionComponents(
         wine: URL, downloads: SetupDownloads,
         onPhase: @escaping @MainActor @Sendable (BottleComponent, ComponentPhase) -> Void

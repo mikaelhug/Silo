@@ -97,7 +97,16 @@ public final class SetupDownloads: Sendable {
     }
 
     /// Remove the temp download dir (nothing is kept between runs).
-    public func cleanup() { try? FileManager.default.removeItem(at: tempDir) }
+    /// Stop every in-flight download, THEN drop the temp dir. Cancelling first is load-bearing: `setUp`
+    /// calls this from a `defer`, so on an early failure (a Steam download that throws seconds in) the
+    /// prefetch of ~390 MB of fonts/redists was still running. Without cancellation those tasks kept
+    /// downloading against a directory that had just been deleted, failed their move, retried the next
+    /// mirror, and re-downloaded — saturating the network long after setup had visibly failed, and racing a
+    /// retry that recreates the same temp dir.
+    public func cleanup() {
+        for task in tasks.values { task.cancel() }
+        try? FileManager.default.removeItem(at: tempDir)
+    }
 
     private func filesFor(_ component: BottleComponent, _ ids: [String]) async -> [String: URL] {
         await awaitComponent(component)

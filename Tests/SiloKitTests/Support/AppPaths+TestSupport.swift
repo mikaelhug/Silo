@@ -29,9 +29,14 @@ extension AppPaths {
         let driveC = steamBottle.appendingPathComponent("drive_c")
         let fonts = driveC.appendingPathComponent("windows/Fonts")
         try? fm.createDirectory(at: fonts, withIntermediateDirectories: true)
-        fm.createFile(atPath: fonts.appendingPathComponent("Arial.TTF").path, contents: Data())   // coreFonts
+        fm.createFile(atPath: fonts.appendingPathComponent("Arial.TTF").path, contents: Data())
         let markers = steamBottle.appendingPathComponent(".silo-installed")
         try? fm.createDirectory(at: markers, withIntermediateDirectories: true)
+        // coreFonts is satisfied only when EVERY font has its own marker (a single font file used to be
+        // enough, which let a partial install read as complete).
+        for font in Silo.coreFonts {
+            fm.createFile(atPath: markers.appendingPathComponent("corefont-\(font)").path, contents: Data())
+        }
         for pack in Silo.sourceHanSansPacks {
             fm.createFile(atPath: markers.appendingPathComponent(pack).path, contents: Data())      // sourceHanSans
         }

@@ -124,6 +124,12 @@ public enum Silo {
         ]
     }
 
+    /// Exit codes that mean **the user closed/cancelled an installer**, as opposed to it failing.
+    /// `ERROR_INSTALL_USER_EXIT` (1602) and `ERROR_CANCELLED` (1223) are the MSI/Windows-documented ones;
+    /// NSIS (SteamSetup) returns 2 for a cancelled wizard. Shared so the redist and Steam installers can't
+    /// drift apart on what "cancelled" means.
+    public static let installerCancelCodes: Set<Int32> = [1602, 1223, 2]
+
     /// Directory (inside a game's Wine prefix) holding DXVK's pipeline-state caches — the ONE place the name
     /// lives, shared by `GraphicsLinker.installDXVKPrefixLoaders` (which creates it) and
     /// `LaunchOrchestrator.makePlan` (which points `DXVK_STATE_CACHE_PATH` at it). In the prefix rather than

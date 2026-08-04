@@ -674,10 +674,14 @@ struct SteamBottleTests {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let session = FakeURLProtocol.makeSession()
         let (bottle, _, paths, _) = make(tmp, session: session)
-        // Pre-satisfy coreFonts (Arial.TTF) + steamClient (steam.exe); leave the rest unsatisfied.
-        let fonts = paths.steamBottle.appendingPathComponent("drive_c/windows/Fonts")
-        try FileManager.default.createDirectory(at: fonts, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: fonts.appendingPathComponent("Arial.TTF").path, contents: Data())
+        // Pre-satisfy coreFonts + steamClient (steam.exe); leave the rest unsatisfied. coreFonts needs a
+        // marker per font — one font file used to be enough, which let a partial install read as complete.
+        let markers = paths.steamBottle.appendingPathComponent(".silo-installed")
+        try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
+        for font in Silo.coreFonts {
+            FileManager.default.createFile(
+                atPath: markers.appendingPathComponent("corefont-\(font)").path, contents: Data())
+        }
         try FileManager.default.createDirectory(at: paths.steamBottleClientDir, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: paths.steamBottleExe.path, contents: Data())
         // Stub the remaining components so they can proceed.

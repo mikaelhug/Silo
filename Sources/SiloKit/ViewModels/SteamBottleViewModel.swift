@@ -94,9 +94,12 @@ public final class SteamBottleViewModel {
             // Report "ready" only if the client actually WARMED (steamui.dll + webhelper). A failed or
             // interrupted warm-up leaves just the bootstrapper and must not flip the onboarding gate.
             steamInstalled = bottle.isClientFullyDownloaded
-            status = steamInstalled
-                ? "Steam is ready. Launch it and sign in once."
-                : "Steam client didn't finish downloading. Run Set up again."
+            // Most component installs are deliberately best-effort (a mirror 404, a declined licence, an
+            // odd installer exit) so one bad artifact can't block the whole setup. But reporting plain
+            // success over a bottle that is missing the MSVC runtime or its fonts is how a setup problem
+            // later resurfaces as "games are broken" — so name what didn't install.
+            let missing = await Task.detached { [bottle] in bottle.unsatisfiedComponents() }.value
+            status = Self.setupOutcome(steamInstalled: steamInstalled, missing: missing)
             onSteamInstalled?()   // refresh the library's cached readiness (now reflects the warmed client)
         } catch {
             warmingUp = false
@@ -106,6 +109,16 @@ public final class SteamBottleViewModel {
 
     /// User-facing status for a setup that didn't complete. A cancelled license installer reads as a pause
     /// (the user chose to stop) with a clear "run Set up again" cue; anything else is a plain failure.
+    /// The end-of-setup line: ready, ready-but-incomplete, or the Steam client never finished. Pure so the
+    /// wording is table-testable. Lists at most two component names to stay readable.
+    static func setupOutcome(steamInstalled: Bool, missing: [BottleComponent]) -> String {
+        guard steamInstalled else { return "Steam client didn't finish downloading. Run Set up again." }
+        guard !missing.isEmpty else { return "Steam is ready. Launch it and sign in once." }
+        let names = missing.prefix(2).map(\.title).joined(separator: " and ")
+        let rest = missing.count > 2 ? " (and \(missing.count - 2) more)" : ""
+        return "Steam is ready, but \(names)\(rest) didn't install — run Set up again to finish."
+    }
+
     static func setupFailureMessage(_ error: Error) -> String {
         if case SteamBottle.BottleError.componentCancelled(let component) = error {
             return "You cancelled the \(component.title) installer. Run Set up again."
