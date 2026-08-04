@@ -50,6 +50,47 @@ struct GraphicsFallbackTests {
         #expect(GraphicsFallback.classify("fixme:keyboard:NtUserActivateKeyboardLayout not supported") == .unknown)
     }
 
+    // MARK: - DXVK (log text captured on-device 2026-08-04, DXVK 1.10.3 + 2.6.2 on MoltenVK)
+
+    @Test("a DXVK launch that created its D3D device is POSITIVELY confirmed as engaged (real captured log)")
+    func dxvkEngagedConfirmed() {
+        // Verbatim from the successful on-device probe (DXVK 1.10.3 → patched MoltenVK → Metal, M4 Pro).
+        let log = """
+        info:  DXVK: v1.10.3
+        info:  Apple M4 Pro:
+        info:    Driver: 0.2.2018
+        info:    Vulkan: 1.2.290
+        info:  D3D11CoreCreateDevice: Probing D3D_FEATURE_LEVEL_11_0
+        info:  D3D11CoreCreateDevice: Using feature level D3D_FEATURE_LEVEL_11_0
+        info:  Device properties:
+        """
+        #expect(GraphicsFallback.classify(log, backend: .dxvk) == .engaged)
+    }
+
+    @Test("a DXVK launch that could not create a device is flagged (both 1.x and 2.x wordings)")
+    func dxvkDeviceCreationFailureDetected() {
+        // DXVK 1.x: probes every level, then gives up (what a STOCK MoltenVK produces).
+        let v1 = """
+        info:  D3D11CoreCreateDevice: Probing D3D_FEATURE_LEVEL_9_1
+        err:   D3D11CoreCreateDevice: Requested feature level not supported
+        """
+        #expect(GraphicsFallback.classify(v1, backend: .dxvk) == .fallback)
+        // DXVK 2.x wording.
+        let v2 = """
+        info:  D3D11InternalCreateDevice: Maximum supported feature level: 0
+        err:   D3D11InternalCreateDevice: Minimum required feature level D3D_FEATURE_LEVEL_9_1 not supported
+        """
+        #expect(GraphicsFallback.classify(v2, backend: .dxvk) == .fallback)
+    }
+
+    @Test("a DXVK engagement line is not misread for the OTHER backends (signatures stay backend-scoped)")
+    func dxvkEngagementIsBackendScoped() {
+        let log = "info:  D3D11CoreCreateDevice: Using feature level D3D_FEATURE_LEVEL_11_0"
+        #expect(GraphicsFallback.classify(log, backend: .dxvk) == .engaged)
+        #expect(GraphicsFallback.classify(log, backend: .gptk) == .unknown)   // GPTK success is silent
+        #expect(GraphicsFallback.classify(log, backend: .dxmt) == .unknown)
+    }
+
     @Test("a DXMT launch that fell back to wined3d is flagged via the backend-agnostic signals")
     func dxmtFallbackDetected() {
         let log = "05c4:err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications."

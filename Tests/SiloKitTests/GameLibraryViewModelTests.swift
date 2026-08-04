@@ -359,7 +359,8 @@ struct GameLibraryViewModelTests {
         #expect(spawn.executable.path.hasSuffix("/wine/bin/wine64"))           // base wine, NOT a variant clone
         #expect(!spawn.executable.path.contains("-dxvk"))
         #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10core,d3d11,dxgi=n")
-        #expect(spawn.environment["CX_LIBVULKAN"]?.hasSuffix("/lib/silo-bundled/libMoltenVK.dylib") == true)
+        // DXVK's own MoltenVK dir leads the DYLD path (the driver is picked by dyld name lookup).
+        #expect(spawn.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.contains("/dxvk/lib:") == true)
         // DXVK's dlls were seeded into the shared Steam prefix's system32 (native `=n` loads them from there).
         let d3d9 = paths.steamBottle.appendingPathComponent("drive_c/windows/system32/d3d9.dll")
         #expect(FileManager.default.fileExists(atPath: d3d9.path))

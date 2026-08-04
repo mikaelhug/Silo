@@ -51,13 +51,31 @@
     steers to the best installed alternative (install-aware). `bitnessRefusal` guards 32-bit DXVK.
     `GraphicsFallback`'s wined3d signal reconfirmed valid for DXVK. +8 tests incl. a full DX9-Steam-game →
     native-DXVK integration test (base runtime, `=n`, `CX_LIBVULKAN`, seeded dlls). 438 green, zero warnings.
-  - **Still pending — only on-device items now:** Phase 0 render proof (needs a DX9 game installed —
-    HUMAN-INPUT; confirms the DXVK-v2.6.2↔MoltenVK-1.4.1 pairing actually renders + captures the exact DXVK
-    engagement log string for `GraphicsFallback.engagementSignatures(.dxvk)`, currently `[]`). **Deferred
-    correctness item (needs the same on-device observation):** native DXVK seeds its dlls into the SHARED Steam
-    prefix's system32 — confirm they stay dormant for the co-resident Steam client (GPTK/DXMT games already
-    force `=b`); if the client picks them up, add `d3d9,d3d10core,d3d11,dxgi=builtin` to the shared-bottle
-    default overrides (`BottleDefaults`).
+  - **✅ Phase 0 DONE — DXVK RENDERS ON SILO'S OWN WINE (2026-08-04, on-device, Apple M4 Pro).** Proved
+    headlessly with a cross-compiled `D3D11CreateDevice` probe run in a throwaway prefix seeded exactly like
+    `installDXVKPrefixLoaders` + `=n`: **`PROBE_RESULT hr=0x00000000 featureLevel=0xb000`** — a real D3D11
+    device at **feature level 11_0** through DXVK → `winevulkan` → MoltenVK → Metal. No DX9 game needed. Two
+    findings, both fixed in this commit:
+    - **ROOT CAUSE — the bundled MoltenVK, not DXVK/winevulkan.** A **STOCK** MoltenVK (the Homebrew
+      `molten-vk` the wine build bundles, driver `0.2.2209`) **cannot create a D3D device at ANY feature
+      level** — not even 9_1, on either DXVK 1.10.3 or 2.6.2. A **PATCHED** MoltenVK (driver `0.2.2018`,
+      `Vulkan: 1.2.290`) works instantly. Isolated by a 5-way matrix (our DXVK on CrossOver's wine ✅, on
+      Silo's wine with the patched dylib ✅, with the stock dylib ❌ — so Silo's winevulkan was exonerated).
+      → `versions.env` pins `MOLTENVK_REPO`/`MOLTENVK_VERSION`; `build-dxvk.sh` + `build-dxvk.yml` now build
+      MoltenVK from Khronos source and ship it in the artifact as `lib/libMoltenVK.dylib`. DXVK pin moved to
+      the **validated v1.10.3** (2.6.2 was only ever tested on the broken stock driver — re-test before bumping).
+    - **🐛 BUG: `CX_LIBVULKAN` was a NO-OP.** `DYLD_PRINT_LIBRARIES` proved wine ignored the absolute path and
+      loaded `lib/silo-bundled/libMoltenVK.dylib` regardless — the Vulkan driver is resolved by **dyld NAME
+      lookup**. → `makePlan` now prepends the DXVK runtime's own `lib` dir to `DYLD_FALLBACK_LIBRARY_PATH`
+      (new `URL.dxvkMoltenVKDir`) instead of exporting `CX_LIBVULKAN`; tests updated to assert the ordering.
+    - **Real engagement signatures captured** → `GraphicsFallback.engagementSignatures(.dxvk)` =
+      `"Using feature level D3D_FEATURE_LEVEL"` (version-robust), and `loaderFailureSignatures(.dxvk)` covers
+      both the 1.x (`Requested feature level not supported`) and 2.x (`Minimum required feature level`,
+      `Maximum supported feature level: 0`) failure wordings. +3 tests off the verbatim captured logs.
+  - **Still pending (needs a real game, not the probe):** a DX9 title rendering end-to-end through Silo's UI,
+    and confirming the prefix-seeded native dlls stay dormant for the co-resident Steam client (GPTK/DXMT
+    games already force `=b`); if the client picks them up, add `d3d9,d3d10core,d3d11,dxgi=builtin` to
+    `BottleDefaults`. Also: CI has never run `build-dxvk.yml` (the MoltenVK step is untested on a runner).
 - **🎮 Game-controller support: re-enable SDL in the Wine build (2026-07-26, `main`; 416 tests green — CODE
   DONE, needs a new `wine-cx-*` CI release + on-device controller verification).** Controllers didn't work
   because Wine was built `--without-sdl` and `libSDL2` was stripped on install (M75→M80) — a real fix for a

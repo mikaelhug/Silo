@@ -133,11 +133,29 @@ jobs:
           build_abi build-win64.txt build.w64 install64
           build_abi build-win32.txt build.w32 install32
 
+      - name: Build MoltenVK (the Vulkan driver DXVK runs on — LOAD-BEARING)
+        run: |
+          set -eo pipefail
+          # Proven on-device 2026-08-04: a STOCK MoltenVK cannot create a D3D device for DXVK at ANY feature
+          # level; a patched one works (FL 11_0). So the DXVK runtime ships its own. Needs full Xcode (Metal
+          # shaders) — the macos-26 runner has it.
+          # shellcheck disable=SC1091
+          set -a; . ./versions.env; set +a
+          git clone --depth 1 --branch "$MOLTENVK_VERSION" "https://github.com/${MOLTENVK_REPO}.git" "$RUNNER_TEMP/MoltenVK"
+          cd "$RUNNER_TEMP/MoltenVK"
+          ./fetchDependencies --macos
+          make macos
+          dylib="$(find Package/Release/MoltenVK -name 'libMoltenVK.dylib' -type f | head -1)"
+          test -n "$dylib" || { echo "::error::MoltenVK build produced no libMoltenVK.dylib"; exit 1; }
+          mkdir -p "$DXVK_SRC/out/lib"
+          cp "$dylib" "$DXVK_SRC/out/lib/libMoltenVK.dylib"
+          file "$DXVK_SRC/out/lib/libMoltenVK.dylib"
+
       - name: Assemble the Silo layout + verify
         run: |
           set -eo pipefail
           cd "$DXVK_SRC"
-          rm -rf out; mkdir -p out/x86_64-windows out/i386-windows
+          mkdir -p out/x86_64-windows out/i386-windows
           locate_dll() { find "$1" -name "$2" -type f 2>/dev/null | head -1; }
           for dll in d3d9.dll d3d10core.dll d3d11.dll dxgi.dll; do
             cp "$(locate_dll install64 "$dll")" "out/x86_64-windows/$dll"
@@ -147,13 +165,14 @@ jobs:
           for dir in out/x86_64-windows out/i386-windows; do
             for f in d3d9.dll d3d10core.dll d3d11.dll dxgi.dll; do test -e "$dir/$f" || missing="$missing $dir/$f"; done
           done
+          test -e out/lib/libMoltenVK.dylib || missing="$missing out/lib/libMoltenVK.dylib"
           if [ -n "$missing" ]; then echo "::error::missing artifacts:$missing"; exit 1; fi
           file out/x86_64-windows/d3d11.dll | grep -qi PE32 || { echo "::error::d3d11.dll is not a PE image"; exit 1; }
 
       - name: Package dxvk.tar.xz
         run: |
           set -eo pipefail
-          ( cd "$DXVK_SRC/out" && tar -cJf "$GITHUB_WORKSPACE/dxvk.tar.xz" x86_64-windows i386-windows )
+          ( cd "$DXVK_SRC/out" && tar -cJf "$GITHUB_WORKSPACE/dxvk.tar.xz" x86_64-windows i386-windows lib )
           ( cd "$GITHUB_WORKSPACE" && shasum -a 256 dxvk.tar.xz > dxvk.tar.xz.sha256 )
           ls -la "$GITHUB_WORKSPACE/dxvk.tar.xz" "$GITHUB_WORKSPACE/dxvk.tar.xz.sha256"
 

@@ -87,13 +87,16 @@ public struct LaunchOrchestrator: Sendable {
                 environment["DYLD_FALLBACK_LIBRARY_PATH"] = "\(external.path):\(wine.siloDyldFallback)"
                 environment["DYLD_FALLBACK_FRAMEWORK_PATH"] = external.path
             }
-            // DXVK reaches Metal via wine's winevulkan → MoltenVK. Pin the winemac Vulkan backend (win32u
-            // reads CX_LIBVULKAN) to the runtime's bundled libMoltenVK.dylib by absolute path, so Vulkan
-            // device creation is deterministic rather than relying on a dlopen-by-name search. The clone
-            // inherits this dylib from the base runtime, so it's always present next to `wine`.
-            if graphics == .dxvk {
-                environment["CX_LIBVULKAN"] =
-                    wine.siloBundledDylibDir.appendingPathComponent("libMoltenVK.dylib").path
+            // DXVK reaches Metal via wine's winevulkan → MoltenVK. **The Vulkan driver is selected by dyld
+            // NAME resolution** (`libMoltenVK.dylib` on the DYLD fallback path) — verified on-device
+            // 2026-08-04 with `DYLD_PRINT_LIBRARIES`: an absolute `CX_LIBVULKAN` was IGNORED and wine loaded
+            // whichever `libMoltenVK.dylib` the fallback path resolved first. So DXVK's driver is chosen by
+            // putting the right dylib dir FIRST here. The DXVK runtime ships its own (patched) MoltenVK —
+            // stock MoltenVK cannot create a D3D device at any feature level (Phase 0) — so its dir leads,
+            // ahead of the wine runtime's bundled stock one.
+            if graphics == .dxvk, let dxvkLib = backend.libDir(for: .dxvk) {
+                environment["DYLD_FALLBACK_LIBRARY_PATH"] =
+                    "\(dxvkLib.dxvkMoltenVKDir.path):\(wine.siloDyldFallback)"
             }
             environment["WINEDLLOVERRIDES"] = mergeOverride(
                 environment["WINEDLLOVERRIDES"], graphics.dllOverrides)

@@ -25,11 +25,12 @@ public enum GraphicsFallback: Sendable {
         switch backend {
         case .gptk: []
         case .dxmt: ["DXMT: created Metal device"]
-        // DXVK logs its device/adapter creation (e.g. "DXVK: Game: …", "D3D11CoreCreateDevice"), which — like
-        // DXMT — lets a DXVK launch be positively confirmed. The exact string is captured in the Phase 0
-        // on-device spike; until then DXVK stays absence-confirmed like GPTK (no false positives, just no
-        // early engagement signal). TODO(phase0): fill the confirmed DXVK engagement string.
-        case .dxvk: []
+        // DXVK logs the feature level it settled on the moment it creates the D3D device — captured on-device
+        // 2026-08-04: `D3D11CoreCreateDevice: Using feature level D3D_FEATURE_LEVEL_11_0` (DXVK 1.10.3). The
+        // substring stops before the level itself so any level (11_1/11_0/10_1/…) counts, and before the
+        // `D3D11CoreCreateDevice`/`D3D11InternalCreateDevice` prefix, which differs across DXVK versions.
+        // Distinct from the failure line ("Requested feature level not supported"), so no false positives.
+        case .dxvk: ["Using feature level D3D_FEATURE_LEVEL"]
         }
     }
 
@@ -56,10 +57,14 @@ public enum GraphicsFallback: Sendable {
         switch backend {
         case .gptk: ["Failed to dlopen D3DMetal"]   // GPTK's Metal backend never loaded
         case .dxmt: []
-        // DXVK that fails to reach a Vulkan device logs a distinct error before wine falls back to wined3d
-        // (whose generic "Using the Vulkan renderer" signal below still catches the fallback either way). A
-        // DXVK-specific early signature is captured on-device. TODO(phase0): fill it if one proves reliable.
-        case .dxvk: []
+        // DXVK that loads but can't create a device on the Vulkan driver says so explicitly — captured
+        // on-device 2026-08-04 (this is what a STOCK MoltenVK produces at every feature level). Both the
+        // 1.x and 2.x wordings are matched. Earlier + far more specific than the generic wined3d signals.
+        case .dxvk: [
+            "Requested feature level not supported",     // DXVK 1.x: probed every level, none worked
+            "Minimum required feature level",            // DXVK 2.x: "…D3D_FEATURE_LEVEL_9_1 not supported"
+            "Maximum supported feature level: 0",        // DXVK 2.x: the driver exposed nothing usable
+        ]
         }
     }
 

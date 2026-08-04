@@ -11,16 +11,21 @@
 # Unlike the DXMT / Wine builds, DXVK targets Windows PE and needs NO macOS Metal toolchain or Wine install —
 # so this runs on a COMMAND-LINE-TOOLS-ONLY box (no full Xcode required).
 #
-# Output: dist/dxvk.tar.xz holding {x86_64-windows, i386-windows} — DXVK's D3D9/10/11 + its own dxgi for
-# 64-bit and 32-bit games (wine auto-selects per game by PE machine type; the i386 tree is what runs 32-bit
-# DirectX 9 titles, which neither GPTK nor DXMT can). In Silo → Settings → DXVK → Import, point at the
-# extracted x86_64-windows folder (installDXVKPrefixLoaders picks up the i386-windows sibling too). Do NOT
-# commit the tarball — attach it to a Release.
+# Output: dist/dxvk.tar.xz holding {x86_64-windows, i386-windows} + **lib/libMoltenVK.dylib** — DXVK's
+# D3D9/10/11 + its own dxgi for 64-bit and 32-bit games (wine auto-selects per game by PE machine type; the
+# i386 tree runs 32-bit DirectX 9 titles, which neither GPTK nor DXMT can), plus the Vulkan driver DXVK runs
+# on. In Silo → Settings → DXVK → Import, point at the extracted x86_64-windows folder
+# (installDXVKPrefixLoaders picks up the i386-windows sibling; the launch puts `<dxvk>/lib` first on
+# DYLD_FALLBACK_LIBRARY_PATH so THIS MoltenVK is the driver). Do NOT commit the tarball — attach to a Release.
 #
-# ⚠️ The DXVK_VERSION pinned in versions.env must be validated against the runtime's bundled MoltenVK (its
-#    Vulkan level) in the Phase 0 on-device spike — a newer DXVK needs more Vulkan features MoltenVK may lack.
+# ⚠️ **The bundled MoltenVK is LOAD-BEARING** (proven on-device 2026-08-04): a STOCK MoltenVK cannot create a
+#    D3D device for DXVK at ANY feature level; a PATCHED one works (FL 11_0). See versions.env. Also validate
+#    the DXVK_VERSION↔MoltenVK pairing when bumping either — a newer DXVK needs more Vulkan features.
 #
 # PREREQUISITES: meson + ninja + glslang (glslangValidator) on PATH → `brew install meson ninja glslang`.
+#   Building MoltenVK from source additionally needs full Xcode (it compiles Metal shaders); when Xcode is
+#   absent this script SKIPS the MoltenVK build and warns — the DXVK dlls alone are then NOT usable, so
+#   produce the dylib on a machine/CI runner with Xcode (build-dxvk.yml does).
 #
 # Usage: Scripts/build-dxvk.sh [dxvk_version] [release_tag]
 #   e.g. Scripts/build-dxvk.sh                 # version + tag from versions.env / defaults
@@ -99,9 +104,32 @@ file "out/x86_64-windows/d3d11.dll" | grep -qi "PE32" \
   || { echo "ERROR: d3d11.dll is not a PE image — the cross-build didn't target Windows."; exit 1; }
 echo "    all present: {x86_64,i386}-windows d3d9/d3d10core/d3d11/dxgi.dll"
 
+echo "==> Build MoltenVK $MOLTENVK_VERSION (the Vulkan driver DXVK runs on — LOAD-BEARING, see header)"
+# A STOCK MoltenVK cannot create a D3D device for DXVK at any feature level (on-device 2026-08-04); the
+# runtime must therefore carry its own. MoltenVK compiles Metal shaders, so it needs FULL Xcode.
+mkdir -p out/lib
+if xcrun -sdk macosx metal -e /dev/null -o /dev/null >/dev/null 2>&1 || \
+   (xcodebuild -version >/dev/null 2>&1 && [ "$(xcode-select -p)" != "/Library/Developer/CommandLineTools" ]); then
+  rm -rf "$WORK/MoltenVK"
+  git clone --depth 1 --branch "$MOLTENVK_VERSION" "https://github.com/${MOLTENVK_REPO}.git" "$WORK/MoltenVK"
+  ( cd "$WORK/MoltenVK" && ./fetchDependencies --macos && make macos )
+  MVK_DYLIB="$(find "$WORK/MoltenVK/Package/Release/MoltenVK" -name 'libMoltenVK.dylib' -type f 2>/dev/null | head -1)"
+  if [ -n "$MVK_DYLIB" ]; then
+    cp "$MVK_DYLIB" out/lib/libMoltenVK.dylib
+    echo "    MoltenVK: $(file -b out/lib/libMoltenVK.dylib)"
+  else
+    echo "::warning:: MoltenVK build produced no libMoltenVK.dylib — the DXVK dlls alone are NOT usable."
+  fi
+else
+  echo "::warning:: full Xcode not selected — SKIPPING the MoltenVK build."
+  echo "            The DXVK dlls alone are NOT usable (stock MoltenVK can't drive DXVK). Build on a runner"
+  echo "            with Xcode (see .github/workflows/build-dxvk.yml), or run:"
+  echo "              sudo xcode-select -s /Applications/Xcode.app"
+fi
+
 echo "==> Package"
 mkdir -p "$ROOT/dist"
-( cd out && tar -cJf "$ROOT/dist/dxvk.tar.xz" x86_64-windows i386-windows )
+( cd out && tar -cJf "$ROOT/dist/dxvk.tar.xz" x86_64-windows i386-windows lib )
 ( cd "$ROOT/dist" && shasum -a 256 dxvk.tar.xz > dxvk.tar.xz.sha256 )
 echo "Built: $ROOT/dist/dxvk.tar.xz (+ .sha256)"
 echo "Import in Silo (Settings → DXVK → Import…): <extracted>/x86_64-windows"

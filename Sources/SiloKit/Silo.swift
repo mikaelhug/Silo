@@ -168,4 +168,14 @@ extension URL {
     public var wineRuntimeExternalDir: URL {
         WineRuntimeLayout(wineBinary: self).externalDir
     }
+
+    /// For a DXVK lib dir (`<dxvk>/lib/wine/x86_64-windows`, i.e. `BackendConfig.dxvkLibDirPath`), the dir
+    /// holding the DXVK runtime's **own `libMoltenVK.dylib`** — `<dxvk>/lib`. A DXVK launch puts this FIRST on
+    /// `DYLD_FALLBACK_LIBRARY_PATH` so wine's Vulkan driver resolves to THIS MoltenVK rather than the wine
+    /// runtime's bundled stock one (the driver is picked by dyld name lookup — see `makePlan`). Load-bearing:
+    /// stock MoltenVK cannot create a D3D device for DXVK at any feature level (verified on-device).
+    public var dxvkMoltenVKDir: URL {
+        deletingLastPathComponent()      // …/lib/wine
+            .deletingLastPathComponent() // …/lib
+    }
 }

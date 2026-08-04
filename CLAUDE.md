@@ -88,9 +88,14 @@ is D3D10/11-only, so a DX9 title had NO backend (it black-screened on wined3d). 
 as CrossOver ships DXVK as its Vulkan tier below D3DMetal. **Built STOCK from upstream (zlib, no patches) and
 run NATIVE** — its d3d9/d3d10core/d3d11/dxgi dlls are seeded into the game prefix's `system32`/`syswow64` and
 overridden `=n`, so DXVK runs on the **base runtime** with nothing overlaid into `lib/wine` and no clone
-(`GraphicsLinker.installDXVKPrefixLoaders`). It rides wine's own `winevulkan` → the base runtime's
-**already-bundled `libMoltenVK.dylib`** (pinned by `CX_LIBVULKAN`; the winemac Vulkan backend in `win32u.so`
-reads it — same CrossOver-source wine as CrossOver's). We deliberately do NOT adopt CrossOver's *builtin* DXVK
+(`GraphicsLinker.installDXVKPrefixLoaders`). It rides wine's own `winevulkan` → **the MoltenVK the DXVK
+runtime ships itself** (`<dxvk>/lib/libMoltenVK.dylib`). **Two load-bearing facts, both proven on-device
+2026-08-04** (a `D3D11CreateDevice` probe reached **feature level 11_0** on an M4 Pro): (1) a **STOCK**
+MoltenVK — including the Homebrew one the wine build bundles — **cannot create a D3D device for DXVK at ANY
+feature level**; only a **patched** MoltenVK works, so `build-dxvk.sh`/`build-dxvk.yml` build it from Khronos
+source into the DXVK artifact. (2) The Vulkan driver is selected by **dyld NAME lookup**, NOT by
+`CX_LIBVULKAN` (an absolute path there is silently ignored) — so `makePlan` puts `<dxvk>/lib` FIRST on
+`DYLD_FALLBACK_LIBRARY_PATH` (`URL.dxvkMoltenVKDir`) to pick it. We deliberately do NOT adopt CrossOver's *builtin* DXVK
 (a CX patch) — upstream ships native, which is patch-free and needs no runtime clone. `Scripts/build-dxvk.sh`
 / `build-dxvk.yml` cross-compile it (meson + llvm-mingw, both ABIs, **no Metal toolchain** — pure Windows-PE,
 so it even runs on a Command-Line-Tools-only box). Constraint #8 binds **Wine** only (neither DXMT nor DXVK is

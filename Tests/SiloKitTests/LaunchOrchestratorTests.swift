@@ -141,7 +141,7 @@ struct MakePlanTests {
         #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.contains("/silo-bundled") == true)
     }
 
-    @Test("DXVK plan: d3d9/10/11 builtin overrides + CX_LIBVULKAN pinned to the runtime's MoltenVK, no lib/external")
+    @Test("DXVK plan: d3d9/10/11 native overrides + its OWN MoltenVK leading the DYLD path, no lib/external")
     func dxvkPlan() throws {
         let cfg = GameConfig(appID: 220)
         var b = backend()   // wine binary = /w/bin/wine64 → runtime root /w
@@ -151,20 +151,25 @@ struct MakePlanTests {
 
         // Native DXVK forces ITS d3d9/10core/11 + its own dxgi to native (=n) — the sole DirectX 9 path.
         #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10core,d3d11,dxgi=n")
-        // winevulkan is pinned to the runtime's bundled MoltenVK by absolute path (win32u reads CX_LIBVULKAN).
-        #expect(plan.environment["CX_LIBVULKAN"] == "/w/lib/silo-bundled/libMoltenVK.dylib")
-        // DXVK ships no framework in lib/external (it reuses the bundled MoltenVK), so no /w/lib/external prepend.
+        // The Vulkan driver is picked by dyld NAME lookup (an absolute CX_LIBVULKAN is ignored — verified
+        // on-device), so DXVK's OWN MoltenVK dir must LEAD the fallback path, ahead of wine's bundled stock
+        // one (which can't create a D3D device at any feature level).
+        let dyld = try #require(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"])
+        #expect(dyld.hasPrefix("/x/lib:"))                      // <dxvk>/lib — where its libMoltenVK.dylib lives
+        #expect(dyld.contains("/silo-bundled"))                 // wine's own bundle still follows
+        #expect(dyld.range(of: "/x/lib")!.lowerBound < dyld.range(of: "/silo-bundled")!.lowerBound)
+        // DXVK ships no framework in lib/external, so no /w/lib/external prepend.
         #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == nil)
         #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/w/lib/external:") == false)
     }
 
-    @Test("An unconfigured DXVK leaks no CX_LIBVULKAN and no d3d overrides (falls back to plain wined3d)")
+    @Test("An unconfigured DXVK leaks no d3d overrides and no DXVK MoltenVK path (falls back to plain wined3d)")
     func dxvkUnconfigured() throws {
         let cfg = GameConfig(appID: 220)
         let plan = try LaunchOrchestrator.makePlan(
             config: cfg, backend: backend(), graphics: .dxvk, gameExe: gameExe, prefix: prefix, logURL: log)
-        #expect(plan.environment["CX_LIBVULKAN"] == nil)
         #expect(plan.environment["WINEDLLOVERRIDES"] == nil)
+        #expect(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.hasPrefix("/x/lib") != true)
     }
 
     @Test("Determinism: selecting DXMT never leaks GPTK's overrides, even when GPTK is the configured backend")
