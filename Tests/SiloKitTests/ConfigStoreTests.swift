@@ -314,6 +314,39 @@ struct ConfigStoreTests {
         #expect(dxmt["D3DM_SUPPORT_DXR"] == nil)
     }
 
+    @Test("Metal backend choice drives D3DM_MTL4 — GPTK only, and Automatic emits nothing")
+    func metalBackendChoice() {
+        // `.auto` must emit NO key at all: D3DMetal's own default depends on the GPTK version AND the OS
+        // (Metal 3 on macOS 26, Metal 4 on 27+ with GPTK 4.0b2), so Silo declines to pin either.
+        for graphics in GraphicsBackend.allCases {
+            #expect(EnvFlags().environment(graphics: graphics)["D3DM_MTL4"] == nil)
+        }
+        #expect(EnvFlags(metalBackend: .metal4).environment(graphics: .gptk)["D3DM_MTL4"] == "1")
+        #expect(EnvFlags(metalBackend: .metal3).environment(graphics: .gptk)["D3DM_MTL4"] == "0")
+        // Metal 4 is a D3DMetal concept — the other backends never see the var, even when pinned.
+        #expect(EnvFlags(metalBackend: .metal3).environment(graphics: .dxmt)["D3DM_MTL4"] == nil)
+        #expect(EnvFlags(metalBackend: .metal4).environment(graphics: .dxvk)["D3DM_MTL4"] == nil)
+        // `extra` still merges last, so the escape hatch can override the picker.
+        let overridden = EnvFlags(metalBackend: .metal3, extra: ["D3DM_MTL4": "1"])
+        #expect(overridden.environment(graphics: .gptk)["D3DM_MTL4"] == "1")
+    }
+
+    @Test("EnvFlags tolerates a pre-metalBackend document, and degrades an unknown value to .auto")
+    func envFlagsMetalBackendTolerantDecode() throws {
+        // An old config.json predating the picker — must decode (not throw) and default to Automatic.
+        let old = try JSONDecoder().decode(
+            EnvFlags.self, from: Data(#"{"syncMode":"msync","dxr":true,"extra":{}}"#.utf8))
+        #expect(old.metalBackend == .auto)
+        #expect(old.dxr)   // the rest of the document survives
+        // A value written by a NEWER Silo (or hand-edited junk) degrades rather than wiping the config.
+        let future = try JSONDecoder().decode(
+            EnvFlags.self, from: Data(#"{"metalBackend":"metal5","extra":{}}"#.utf8))
+        #expect(future.metalBackend == .auto)
+        // And a real value round-trips.
+        let original = EnvFlags(metalBackend: .metal3)
+        #expect(try JSONDecoder().decode(EnvFlags.self, from: JSONEncoder().encode(original)) == original)
+    }
+
     @Test("BackendConfig tolerates a pre-retinaMode document (defaults false, never wipes config)")
     func backendConfigTolerantDecode() throws {
         // An old config.json predating retinaMode — must decode (not throw), keeping its fields.

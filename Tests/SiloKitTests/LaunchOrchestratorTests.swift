@@ -235,6 +235,22 @@ struct MakePlanTests {
         #expect(plan.environment["D3DM_ENABLE_METALFX"] == "1")
         #expect(plan.environment["D3DM_SUPPORT_DXR"] == "1")
         #expect(plan.environment["ROSETTA_ADVERTISE_AVX"] == "1")
+        #expect(plan.environment["D3DM_MTL4"] == nil)   // metalBackend defaults to .auto → Apple decides
+    }
+
+    @Test("A pinned Metal backend reaches the launch environment as D3DM_MTL4")
+    func metalBackendReachesPlan() throws {
+        var cfg = GameConfig(appID: 220)
+        cfg.envFlags = EnvFlags(metalBackend: .metal3)
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+        #expect(plan.environment["D3DM_MTL4"] == "0")
+
+        // The `extra` escape hatch still wins over the picker, all the way through makePlan.
+        cfg.envFlags = EnvFlags(metalBackend: .metal3, extra: ["D3DM_MTL4": "1"])
+        let overridden = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+        #expect(overridden.environment["D3DM_MTL4"] == "1")
     }
 
     @Test("Throws wineNotConfigured when no wine binary is available")

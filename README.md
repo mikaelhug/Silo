@@ -81,7 +81,9 @@ The Library shows a guided setup until the pieces are in place:
 
 Then hit **Play**. Steam games default to **Automatic** graphics (GPTK/DXMT chosen per game, overridable in
 per-game settings, which also cover the executable, performance flags — msync, Metal HUD, MetalFX,
-raytracing — and launch options). Settings (⌘,) manages Wine/GPTK/DXMT runtime versions, bottle tools
+raytracing, and D3DMetal's Metal 3 / Metal 4 renderer — and launch options). Settings (⌘,) manages
+Wine/GPTK/DXMT runtime versions (import as many GPTKs as you like and switch the default in one click),
+bottle tools
 (Retina mode, winecfg/regedit), bottle location, and updates.
 
 > **Gatekeeper:** the app is ad-hoc signed, so a downloaded build is quarantined until you

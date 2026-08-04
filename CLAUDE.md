@@ -155,6 +155,32 @@ GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + override
 - When a backend isn't configured, GPTK degrades to wine's own wined3d (the baseline); a secondary backend
   refuses rather than mis-route. `GraphicsFallback` is backend-aware (surfaces a silent wined3d fallback).
 
+### GPTK versions + D3DMetal's Metal 3 / Metal 4 renderer (beta 2 support, 2026-08-04)
+GPTK is the ONE runtime with no pinned version (it's a manual Apple `.dmg` import, so it is deliberately
+absent from `versions.env`). **Nothing in `Sources/` hard-codes a GPTK version** and nothing should:
+`GPTKImporter.runtimeName(forDMG:)` derives `GPTK-<version>` from the DMG filename, `installed()` validates
+by *layout* (`lib/wine/x86_64-windows` + `lib/external/D3DMetal.framework`, and NO wine binary — the only
+thing distinguishing a GPTK tree from an already-overlaid wine runtime), and `overlayGPTK` selects modules by
+prefix (`d3d`/`dxgi`/`nv`), never by name list. So a new GPTK drops in with zero code — verified end-to-end
+against the real `4.0_beta_2` dmg. Two consequences worth knowing:
+- **`overlayGPTK` refreshes on a version change** because it byte-compares a witness (`d3d11.dll`) before
+  skipping, and copies the witness *last* so a mid-copy failure re-does the whole set next launch. Re-running
+  the same GPTK is a true no-op; a different one re-overlays all 12 modules + `lib/external`.
+- **Switching the default GPTK re-probes every learned backend.** `learnedUnderRuntime` is compared against
+  `BackendConfig.gptkRuntimeName`, so a new install invalidates every reactive GPTK→DXMT/DXVK downgrade and
+  those titles retry GPTK once. Intended — a new D3DMetal may fix them — but it is not silent-free: expect
+  one GPTK attempt on titles that had settled onto a fallback.
+
+**`EnvFlags.metalBackend` (`MetalBackendChoice = .auto | .metal4 | .metal3` → `D3DM_MTL4`)** picks which
+renderer D3DMetal's **DirectX 12** path translates through. GPTK 4.0b1 shipped Metal 4 as opt-in (`=1`);
+4.0b2 makes it the **default on macOS 27+**, with `=0` the way back to Metal 3 — so Apple's default depends on
+BOTH the GPTK version and the OS. `.auto` (the default) therefore emits **nothing** and lets D3DMetal decide:
+`makePlan` stays pure, needs no OS-version probe, and a config written today can't silently pin a stale
+renderer once macOS 27 ships. Emitted for `.gptk` only (DXMT/DXVK have no Metal 4 concept), `extra` still
+overrides it. Modelled as a selector-with-Automatic rather than a Bool because Metal 3 vs Metal 4 is a
+*backend*, not a capability toggle like `metalFX`/`dxr` — which is also how CrossOver splits its own graphics
+settings (`setGraphicsBackendAuto`/…/`setGraphicsBackendDXVK` vs the `isDLSSAvailable`/`isDLSSEnabled` switch).
+
 ## Steam Presence Strategy (per-game, the DRM answer)
 Steamworks IPC is **prefix-scoped**: a game can only reach a Steam client running in its OWN Wine prefix
 (separate wineservers = no cross-prefix bridge; Valve's Proton↔native-Steam bridge is Linux-only). So a
@@ -256,10 +282,11 @@ Write the exact question into `STATUS.md` → `## BLOCKED`, commit the last gree
 - A material product/legal ambiguity where guessing risks rework.
 - Anything needing SIP disable / Full Disk Access / a TCC prompt the agent can't satisfy headlessly.
 
-## Environment (verified 2026-06-26; runtimes added 2026-07-13)
-Swift 6.3.2 (`arm64-apple-macosx26.0`); macOS 26.5.1, Apple Silicon; `xcodebuild` absent;
+## Environment (verified 2026-06-26; runtimes added 2026-07-13; GPTK 4.0b2 added 2026-08-04)
+Swift 6.3.2 (`arm64-apple-macosx26.0`); macOS 26.6, Apple Silicon; `xcodebuild` absent;
 `git`/`codesign` present. **The dev box now HAS a provisioned Silo bottle + all three runtimes** at
-`~/Library/Application Support/Silo` (`Runtimes/`: `GPTK-4.0_beta_1`, `dxmt-v0.72-cx26.2.0`, `wine-cx-26.2.0`;
+`~/Library/Application Support/Silo` (`Runtimes/`: `GPTK-4.0_beta_1` **and `GPTK-4.0_beta_2`** — both kept,
+so the GPTK Manager's default radio is a one-click A/B — plus `dxmt-v0.72-cx26.2.0`, `wine-cx-26.2.0`;
 a set-up `SteamBottle`), so on-device launch/log capture is possible here. This does NOT relax constraint #4:
 the build **and** `swift test` must still pass on a machine with ZERO runtimes (everything runtime-dependent
 stays behind a resolver → `.notConfigured`). Whisky/CrossOver/DXVK absent; no game installed in the bottle yet

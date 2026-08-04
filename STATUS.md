@@ -3,6 +3,61 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🍎 GPTK 4.0 beta 2 support + a D3DMetal Metal 3 / Metal 4 selector (2026-08-04, `main`; 460 tests green,
+  zero warnings).** Apple shipped `Game_Porting_Toolkit_4.0_beta_2.dmg`. Of everything that changed between
+  the two betas, **exactly one thing reaches Silo**: on macOS 27+ D3DMetal now translates **DirectX 12 through
+  Metal 4 by default** (beta 1 shipped it opt-in via `D3DM_MTL4=1`), with `D3DM_MTL4=0` the way back to the
+  Metal 3 backend.
+  - **The import/overlay pipeline needed ZERO code — and that was verified on-device, not assumed.** Ran
+    `silo --import-gptk` against the real beta-2 dmg: nested "Evaluation environment" dmg mounted, all 12
+    modules + `lib/external` extracted to `Runtimes/GPTK-4.0_beta_2` (name derived from the filename),
+    quarantine stripped, **Apple's `com.apple.D3DMetal` signature preserved**, `version.plist` = `4.0b2`,
+    `LSMinimumSystemVersion` still `14.0` (so it runs on this 26.6 box). Then drove the real
+    `GraphicsLinker.overlayGPTK` against an APFS clone of the real wine runtime: pristine (4/6 wine builtins,
+    no framework link) → beta 1 (6/6 dlls, 6/6 unix symlinks → `libd3dshared.dylib`, `D3DMetal 4.0b1`) →
+    re-overlay beta 1 (**true no-op** — the witness works) → beta 2 (**all 6 modules byte-match beta 2,
+    framework replaced, `D3DMetal 4.0b2`**). The `d3d11.dll` witness byte-compare is what lands the upgrade.
+  - **`EnvFlags.metalBackend`** (`MetalBackendChoice = .auto|.metal4|.metal3` → `D3DM_MTL4=1`/`0`/nothing),
+    surfaced as a `Picker` in the shared `PerformanceFlagsSection` (both settings sheets get it; no view-model
+    change — `save` copies `envFlags` wholesale). **`.auto` deliberately emits nothing** — Apple's default
+    depends on the GPTK version AND the OS, so `makePlan` stays pure with no OS-version probe (there is still
+    none in the codebase) and no config written today can silently pin Metal 3 once macOS 27 ships. GPTK-only;
+    `extra` still overrides. Tolerant decode degrades an unknown value to `.auto` rather than throwing.
+  - **Why a selector and not a Bool — the CrossOver oracle.** Read out of the local CrossOver 26.2: it *does*
+    bundle Apple's D3DMetal (`lib64/apple_gptk/external/D3DMetal.framework`) but at
+    **`CFBundleShortVersionString = 3.0`** — a full major version behind, with no `D3DM_MTL4` and no Metal 4
+    concept anywhere in the app. Silo is *ahead* of it here, so there was nothing to copy for the flag itself.
+    Its *shape* still settled the modelling: CrossOver gives **backends** an Automatic-plus-members selector
+    (`setGraphicsBackendAuto`/`…D3DMetal`/`…DXMT`/`…DXVK`/`…Wine`) and **features** a plain switch with an
+    availability predicate (`isDLSSAvailable`/`isDLSSEnabled`, *"Requires Apple Silicon and macOS Tahoe for
+    D3DMetal, macOS Sonoma for DXMT"*). Metal 3 vs Metal 4 is a backend, so it gets the selector — which also
+    matches the `SyncMode` picker already in that same form section.
+  - Hardened `GPTKImporter`: the runtime name (derived from a user-picked filename, then used to build
+    `installDir`, which is handed to `removeItem`) now passes the same `RuntimeManager.safeRuntimeComponent`
+    boundary the rest of the runtime code uses — in both `importGPTK` and `remove(name:)`. A *filename* can't
+    actually express traversal (URL normalizes `../evil.dmg` → `evil`), but the explicit `name:` could.
+  - **Explicitly out of scope — the bulk of the beta-1→beta-2 diff is the GPTK *SDK*, which Silo never
+    compiles against**: metal-cpp 370.63.1→381.0.0 breaking changes (`MTL::SamplerReductionMode` base type,
+    the `setFrontFacingWinding` typo fix, `reactiveTextureFormat` removal), the new tensor classes, MetalFX
+    subrect/distortion API, `CA::MetalLayer` EDR, `NSSharedPtr` `std::hash`, Metal Shader Converter
+    `IR_VERSION_PATCH` 0→1. Silo is a launcher that copies `redist/lib` and sets env vars; zero Silo code
+    touches those headers. The converter dylibs inside `D3DMetal.framework/Resources` ride along verbatim in
+    the existing overlay.
+  - **Deferred (needs macOS 27 + an observed failure):** a reactive "Metal 4 failed → retry Metal 3" hint
+    modelled on `learnedBackend`. There is no log signature to match on — GPTK success is already *silent* in
+    `GraphicsFallback` — and macOS 27 isn't on this box. Building it now would be guessing.
+  - **Follow-up surfaced by the CrossOver read (NOT done; independent of beta 2):** `overlayGPTK` copies
+    `nvapi64` + `nvngx-on-metalfx` (they match its `nv` prefix filter), but `GraphicsBackend.gptk.dllOverrides`
+    never lists them — so the **DLSS shims are overlaid and never enabled**. CrossOver exposes precisely this
+    as a per-bottle "DLSS for D3DMetal and DXMT" switch, and beta 2's move to public MetalFX API makes it more
+    plausible, not less. Deliberately not bundled into a runtime upgrade: it needs a DLSS-capable title to
+    verify, and shipping it blind would confound the very regression triage the Metal-backend selector exists
+    to enable.
+  - **Left to the user:** `config.json` still has `gptkRuntimeName = GPTK-4.0_beta_1`. **Both** versions are
+    installed, so Settings → GPTK → default radio is a one-click switch *and* a one-click rollback. Not
+    flipped automatically — beta 2 has no on-device *render* proof here (the library has 0 games installed),
+    and switching invalidates every `learnedUnderRuntime` hint, so titles that had settled onto a DXMT/DXVK
+    fallback each retry GPTK once.
 - **🎯 Backend detection unified + DX9 detection fixed (2026-08-04, `main`; 451 tests green, zero warnings).**
   Follow-up to an adversarial audit of the Automatic selector: the DX9 route was mostly unreachable in
   practice, and the three backends decided from separate, weaker signals. Now **one `D3DProfile` drives all**.

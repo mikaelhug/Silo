@@ -57,6 +57,30 @@ struct GPTKImporterTests {
         #expect(GPTKImporter.runtimeName(
             forDMG: URL(fileURLWithPath: "/x/Game_Porting_Toolkit_4.0_beta_1.dmg")) == "GPTK-4.0_beta_1")
         #expect(GPTKImporter.runtimeName(forDMG: URL(fileURLWithPath: "/x/custom.dmg")) == "custom")
+        // The real beta-2 filename — the whole reason no code hard-codes a GPTK version.
+        #expect(GPTKImporter.runtimeName(
+            forDMG: URL(fileURLWithPath: "/x/Game_Porting_Toolkit_4.0_beta_2.dmg")) == "GPTK-4.0_beta_2")
+    }
+
+    @Test("Refuses a runtime name that isn't a safe path component (the derived name builds a deleted dir)")
+    func rejectsUnsafeRuntimeName() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let importer = GPTKImporter(runner: FakeProcessRunner(), paths: paths)
+        // The real exposure is the explicit `name:` — it reaches installDir, which is handed to removeItem
+        // when an existing install is replaced. (A *filename* can't express traversal: URL normalizes
+        // `../evil.dmg` down to "evil". A dot-prefixed one still gets refused rather than making a hidden
+        // runtime dir.)
+        #expect(GPTKImporter.runtimeName(forDMG: URL(fileURLWithPath: "/x/..dmg")) == "..dmg")
+        await #expect(throws: GPTKImporter.ImportError.unsafeRuntimeName("..dmg")) {
+            try await importer.importGPTK(fromDMG: URL(fileURLWithPath: "/x/..dmg"))
+        }
+        await #expect(throws: GPTKImporter.ImportError.unsafeRuntimeName("../../evil")) {
+            try await importer.importGPTK(fromDMG: URL(fileURLWithPath: "/x/ok.dmg"), name: "../../evil")
+        }
+        #expect(throws: GPTKImporter.ImportError.unsafeRuntimeName("../../evil")) {
+            try importer.remove(name: "../../evil")
+        }
     }
 
     @Test("Lists installed GPTK versions and removes them")

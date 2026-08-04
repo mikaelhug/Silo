@@ -24,6 +24,19 @@ public struct GPTKImporter: Sendable {
         case attachFailed(String)
         case nestedDMGNotFound
         case redistNotFound
+        /// The runtime name couldn't be reduced to a safe single path component — see `safeName`.
+        case unsafeRuntimeName(String)
+    }
+
+    /// A runtime name is a flat label, never a path — and here it is *derived from a filename the user
+    /// picked*, so it gets the same boundary check `RuntimeManager` applies to release tags before either
+    /// builds a path (the install dir is later handed to `removeItem`). A DMG named `...dmg`, for instance,
+    /// reduces to `".."`.
+    static func safeName(_ raw: String) throws -> String {
+        guard let safe = RuntimeManager.safeRuntimeComponent(raw) else {
+            throw ImportError.unsafeRuntimeName(raw)
+        }
+        return safe
     }
 
     /// Derive a versioned runtime name from the DMG filename
@@ -57,7 +70,7 @@ public struct GPTKImporter: Sendable {
     }
 
     public func remove(name: String) throws {
-        let dir = paths.runtimesDir.appendingPathComponent(name, isDirectory: true)
+        let dir = paths.runtimesDir.appendingPathComponent(try Self.safeName(name), isDirectory: true)
         if FileManager.default.fileExists(atPath: dir.path) {
             try FileManager.default.removeItem(at: dir)
         }
@@ -70,7 +83,7 @@ public struct GPTKImporter: Sendable {
         progress: (@Sendable (Stage) -> Void)? = nil,
         onWarning: (@Sendable (String) -> Void)? = nil
     ) async throws -> GPTKInstall {
-        let runtimeName = name ?? Self.runtimeName(forDMG: dmg)
+        let runtimeName = try Self.safeName(name ?? Self.runtimeName(forDMG: dmg))
         let fileManager = FileManager.default
         var mounted: [URL] = []
         do {
