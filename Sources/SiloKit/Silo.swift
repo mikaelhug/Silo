@@ -124,6 +124,11 @@ public enum Silo {
         ]
     }
 
+    /// Keep the co-resident Steam client on wine's OWN d3d modules. DXVK seeds native d3d dlls into the
+    /// shared Steam prefix permanently; this makes the client's resolution explicit instead of leaving it to
+    /// wine's default load order. Mirrors the module set `GraphicsBackend.dxvk` seeds.
+    public static let steamClientDllOverrides = "d3d9,d3d10core,d3d11,dxgi=b"
+
     /// Exit codes that mean **the user closed/cancelled an installer**, as opposed to it failing.
     /// `ERROR_INSTALL_USER_EXIT` (1602) and `ERROR_CANCELLED` (1223) are the MSI/Windows-documented ones;
     /// NSIS (SteamSetup) returns 2 for a cancelled wizard. Shared so the redist and Steam installers can't

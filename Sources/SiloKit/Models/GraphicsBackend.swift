@@ -18,8 +18,9 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
     /// as **native** DLLs: its PE d3d modules (incl. DXVK's own `dxgi`) are seeded into the game prefix's
     /// `system32`/`syswow64` and overridden `=n`, so DXVK runs on the **base runtime** with nothing overlaid
     /// into `lib/wine` and no clone. It rides wine's own `winevulkan`, reaching the base runtime's bundled
-    /// `libMoltenVK.dylib` via `CX_LIBVULKAN`. (CrossOver ships DXVK as a builtin + reuses wine's dxgi — CX
-    /// patches Silo deliberately avoids.)
+    /// `libMoltenVK.dylib` — selected by dyld NAME lookup (its dir leads `DYLD_FALLBACK_LIBRARY_PATH`; an
+    /// absolute `CX_LIBVULKAN` is ignored, verified on-device). (CrossOver ships DXVK as a builtin and reuses
+    /// wine's dxgi — CX patches Silo deliberately avoids.)
     case dxvk
 
     public var id: String { rawValue }
@@ -55,7 +56,13 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
     /// the runtime's overlaid versions beat any native wined3d redist copies the in-bottle Steam client
     /// drops into `system32`. Each backend's runtime carries exactly these modules as builtin, so the
     /// override deterministically resolves to the intended layer.
-    /// - GPTK: the full D3DMetal set incl. d3d12 (GPTK covers DX12). `d3d9`/`d3dcompiler_*` left native.
+    /// **Every set explicitly names `d3d9` too.** DXVK seeds NATIVE d3d dlls into the SHARED Steam prefix and
+    /// never removes them, so after one DXVK launch those files are present for every co-resident game. Any
+    /// name a backend leaves unspecified would be resolved by wine's default load order rather than by Silo —
+    /// and DXVK's native `d3d9` loading under a GPTK/DXMT launch would run against the wine runtime's STOCK
+    /// MoltenVK (DXVK's own is only put on the DYLD path for a `.dxvk` launch), which cannot create a device.
+    /// Forcing `=b` here means those games get wine's own builtin d3d9 → wined3d, which is the correct answer.
+    /// - GPTK: the full D3DMetal set incl. d3d12 (GPTK covers DX12). `d3dcompiler_*` left native.
     /// - DXMT: `d3d10core`/`d3d11`/`dxgi` + `winemetal` (its Metal bridge). D3D10/11 only — no d3d12/d3d9.
     /// - DXVK: `d3d9`/`d3d10core`/`d3d11`/`dxgi` forced **native** (`=n`) — stock upstream DXVK is a native DLL
     ///   set seeded into the prefix, not a wine builtin, so `=n` is what loads it. **Includes `dxgi`** — upstream
@@ -63,8 +70,8 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
     ///   reuses wine's builtin dxgi). **No `winemetal`** — DXVK reaches Metal through `winevulkan` → MoltenVK.
     public var dllOverrides: String {
         switch self {
-        case .gptk: "d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b"
-        case .dxmt: "d3d10core,d3d11,dxgi,winemetal=b"
+        case .gptk: "d3d9,d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b"
+        case .dxmt: "d3d9,d3d10,d3d10_1,d3d10core,d3d11,dxgi,winemetal=b"
         case .dxvk: "d3d9,d3d10core,d3d11,dxgi=n"
         }
     }
@@ -72,8 +79,8 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
     /// Whether the backend ships a framework/dylib in the runtime's `lib/external` that dyld must locate at
     /// launch (so `makePlan` prepends it to `DYLD_FALLBACK_*`). GPTK's `D3DMetal.framework` + `libd3dshared`
     /// live there; DXMT's `winemetal.so` links the system `Metal.framework`, so it needs nothing extra; DXVK
-    /// reaches Metal via the base runtime's already-bundled `libMoltenVK.dylib` (pinned by `CX_LIBVULKAN`,
-    /// see `makePlan`), which is already on the launch DYLD path — so it needs nothing extra either.
+    /// gets its MoltenVK via the DYLD path `makePlan` sets from its own runtime dir — so it needs nothing
+    /// from `lib/external` either.
     public var overlaysExternalFramework: Bool {
         switch self {
         case .gptk: true

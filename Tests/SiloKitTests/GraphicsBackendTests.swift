@@ -7,14 +7,17 @@ struct GraphicsBackendTests {
 
     @Test("GPTK overrides the full D3DMetal set incl. d3d12 and ships an external framework")
     func gptkShape() {
-        #expect(GraphicsBackend.gptk.dllOverrides == "d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
+        #expect(GraphicsBackend.gptk.dllOverrides == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
         #expect(GraphicsBackend.gptk.overlaysExternalFramework)   // D3DMetal.framework lives in lib/external
     }
 
-    @Test("DXMT overrides d3d10/11 + its winemetal bridge, no d3d12, no external framework")
+    @Test("DXMT overrides d3d9/10/11 + its winemetal bridge, no d3d12, no external framework")
     func dxmtShape() {
-        #expect(GraphicsBackend.dxmt.dllOverrides == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(GraphicsBackend.dxmt.dllOverrides == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,dxgi,winemetal=b")
         #expect(!GraphicsBackend.dxmt.dllOverrides.contains("d3d12"))   // DXMT is D3D10/11 only
+        // d3d9 is named so DXVK's permanently-seeded native d3d9 can't be picked up by a DXMT launch —
+        // it forces wine's builtin (wined3d), which is the correct answer for a DX9 game here.
+        #expect(GraphicsBackend.dxmt.dllOverrides.contains("d3d9"))
         #expect(GraphicsBackend.dxmt.dllOverrides.contains("winemetal"))
         #expect(!GraphicsBackend.dxmt.overlaysExternalFramework)        // winemetal.so links system Metal
     }

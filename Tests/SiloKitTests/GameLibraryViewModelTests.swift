@@ -337,7 +337,7 @@ struct GameLibraryViewModelTests {
                 && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
         })
         #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))   // the DXMT variant runtime
-        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,dxgi,winemetal=b")
         // The DXMT prefix-loader seeded winemetal.dll into the shared Steam prefix (needed for DXMT to load).
         let wm = paths.steamBottle.appendingPathComponent("drive_c/windows/system32/winemetal.dll")
         #expect(FileManager.default.fileExists(atPath: wm.path))
@@ -429,7 +429,7 @@ struct GameLibraryViewModelTests {
                 && ($0.arguments.first?.hasSuffix("game.exe") ?? false)
         })
         #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))   // the DXMT variant runtime
-        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,dxgi,winemetal=b")
     }
 
     @Test("A learned hint whose runtime was UNINSTALLED is dropped — Automatic degrades instead of dead-ending")
@@ -645,7 +645,7 @@ struct GameLibraryViewModelTests {
         let spawn = try #require(fake.invocations.last { $0.detached })
         // Launched on the cloned DXMT variant runtime (the loader directly).
         #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))
-        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,dxgi,winemetal=b")
         #expect(spawn.environment["WINEPREFIX"] == paths.manualBottle(game.id).path)   // its own isolated bottle
     }
 
@@ -664,7 +664,7 @@ struct GameLibraryViewModelTests {
 
         let spawn = try #require(fake.invocations.last { $0.detached })
         #expect(spawn.executable.path.contains("/wine-dxmt/bin/wine64"))      // Automatic sent 32-bit → DXMT
-        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,dxgi,winemetal=b")
         #expect(vm.statusMessage == "Launched Old32.")                        // launched, NOT refused
     }
 

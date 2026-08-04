@@ -61,9 +61,11 @@ struct SteamBottleTests {
         #expect(call.environment["WINEMSYNC"] == "1")                     // co-residency with games
         #expect(call.environment["STEAM_CEF_COMMAND_LINE"]?.contains("--use-gl=swiftshader") == true)
         #expect(call.environment["STEAM_DISABLE_GPU_PROCESS"] == "1")
-        // No WINEDLLOVERRIDES on the Steam launch: the Steam client needs no graphics-backend override
-        // (its CEF UI paints via SwiftShader software GL, not GPTK/DXMT).
-        #expect(call.environment["WINEDLLOVERRIDES"] == nil)
+        // The client needs no graphics BACKEND (its CEF UI paints via SwiftShader software GL), but it does
+        // get an explicit builtin d3d set: DXVK seeds native d3d dlls into this shared prefix permanently and
+        // Chromium probes dxgi/d3d11 for GPU info, so this pins the client to wine's own modules rather than
+        // leaving the choice to wine's default load order.
+        #expect(call.environment["WINEDLLOVERRIDES"] == Silo.steamClientDllOverrides)
     }
 
 

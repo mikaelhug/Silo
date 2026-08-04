@@ -713,10 +713,14 @@ public struct SteamBottle: Sendable {
     /// `--single-process`, which breaks Chromium's network service). The load-bearing flag injection is the
     /// steamwebhelper wrapper (`installWebHelperWrapper`); this env is the partner that carries SwiftShader.
     /// `WINEMSYNC=1` matches the per-game launch env so Steam + co-hosted games share one wineserver (the
-    /// co-residency Steamworks relies on). No `WINEDLLOVERRIDES` here: the Steam client needs no
-    /// graphics-backend override (its CEF UI paints via SwiftShader software GL, not GPTK/DXMT).
+    /// co-residency Steamworks relies on). The client's own UI paints via SwiftShader software GL and needs
+    /// no graphics backend — but it DOES get an explicit builtin d3d override: DXVK permanently seeds native
+    /// d3d dlls into this shared prefix, and Chromium probes `dxgi`/`d3d11` for GPU info, so without this the
+    /// client could pick up DXVK's natives (against the stock MoltenVK, since DXVK's own is only on the DYLD
+    /// path for a `.dxvk` game launch). Forcing builtin keeps the client on wine's own modules regardless.
     private func steamEnvironment(wine: URL) -> [String: String] {
         var env = Silo.msyncWineEnvironment(prefix: prefixDir, wine: wine)
+        env["WINEDLLOVERRIDES"] = Silo.steamClientDllOverrides
         // Force steamwebhelper's Chromium onto bundled SwiftShader software GL — the route that actually
         // paints under Wine (the GPU/Metal path black-screens; an experimental GPU path was tried and
         // removed as it never rendered).

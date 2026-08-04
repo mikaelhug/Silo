@@ -192,7 +192,10 @@ public struct GraphicsLinker: Sendable {
     /// reuses wine's builtin dxgi). **No `winemetal`** — DXVK reaches Metal through wine's `winevulkan` →
     /// MoltenVK. The prefixes exclude `d3d12` (DXVK has none — DX12 stays GPTK) and `d3d8` even if a build ships it.
     static func isDXVKModule(_ name: String) -> Bool {
-        isOverlayModule(name, prefixes: ["d3d9", "d3d10", "d3d11", "dxgi"])
+        // EXACT names, not prefixes: this set is seeded into the SHARED Steam prefix permanently, so it must
+        // match `GraphicsBackend.dxvk.dllOverrides` exactly. A prefix match would also pull in d3d10/d3d10_1
+        // if a future DXVK build shipped them — seeding a module no override covers.
+        ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"].contains(name.lowercased())
     }
 
     /// Seed DXVK's Direct3D modules into the game **prefix** so wine loads them as **native** dlls — the

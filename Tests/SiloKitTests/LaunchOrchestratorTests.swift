@@ -121,7 +121,7 @@ struct MakePlanTests {
         // Modules live in wine's own lib/wine now (overlaid), so there is NO WINEDLLPATH; the translated
         // d3d modules are just forced to builtin so GPTK's overlaid versions win.
         #expect(plan.environment["WINEDLLPATH"] == nil)
-        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
     }
 
     @Test("DXMT plan: winemetal/d3d builtin overrides, and NO lib/external DYLD path (winemetal links system Metal)")
@@ -133,7 +133,7 @@ struct MakePlanTests {
             config: cfg, backend: b, graphics: .dxmt, gameExe: gameExe, prefix: prefix, logURL: log)
 
         // DXMT forces ITS module set (incl. its winemetal Metal bridge) to builtin — D3D10/11 only, no d3d12.
-        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,dxgi,winemetal=b")
         // Unlike GPTK, DXMT ships no framework in lib/external — winemetal.so links the system Metal.framework
         // — so makePlan must NOT prepend /w/lib/external; the base bundled-deps DYLD path is left intact.
         #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == nil)
@@ -222,7 +222,7 @@ struct MakePlanTests {
         let plan = try LaunchOrchestrator.makePlan(
             config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
         // GPTK's d3d overrides are APPENDED (semicolon-joined), not overwriting the user's.
-        #expect(plan.environment["WINEDLLOVERRIDES"] == "winemenubuilder.exe=d;d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "winemenubuilder.exe=d;d3d9,d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi=b")
     }
 
     @Test("Perf env-flags (MetalHUD / MetalFX / DXR / AVX) propagate into the launch plan's environment")
@@ -459,7 +459,7 @@ struct LaunchPipelineTests {
         #expect(try String(contentsOf: overlaid, encoding: .utf8) == "DXMT-PE")
 
         let spawn = try #require(fake.invocations.last { $0.detached })
-        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d10core,d3d11,dxgi,winemetal=b")
+        #expect(spawn.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,dxgi,winemetal=b")
         #expect(spawn.environment["WINEPREFIX"] == prefix.path)
     }
 
