@@ -3,6 +3,45 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🔬 Systematic backend verification — an on-device report, and the three real bugs it caught
+  (2026-08-04, `main`; 481 tests green, zero warnings).** "Do all three backends work, and does Automatic
+  behave?" had no answer that wasn't an assumption. There is now an **opt-in on-device report** —
+  `SILO_BOTTLE_REPORT=1 Scripts/test.sh --filter BackendReport` — that reads the REAL bottle and prints
+  (a) what Automatic chooses for every installed game **and why**, and (b) what each backend **actually
+  did**, from the launch logs Silo already writes. It calls the production `D3DProfile` /
+  `BackendChooser` / `GraphicsFallback.classify`, so it cannot drift from what a launch does; it is
+  `.enabled(if:)`-gated, so a machine with no bottle skips it (constraint #4 intact).
+  - **Its first run found three defects, all in shipped code:**
+    1. **`D3DProfile` absorbed redistributables shipped beside the exe.** Microsoft's C++ AMP runtime
+       (`vcamp140.dll`) imports `d3d11` for GPU compute, so Bloons TD Battles 2 — a pure OpenGL title —
+       profiled as D3D10/11. The real damage is on **DirectX 9**: a DX9 game bundling the MSVC redist
+       would fail `isD3D9Only` and be routed away from **DXVK, the only backend that can run it**. Fixed
+       with an `excludedModulePrefixes` list (`vcamp`/`msvcp`/`vcruntime`/`ucrtbase`/`api-ms-win-`/…),
+       matched by prefix; engine DLLs (`UnityPlayer`, `shaderapidx9`, …) are explicitly still scanned.
+    2. **DXMT's engagement signature was fiction.** `"DXMT: created Metal device"` occurs **zero times**
+       in a real, working DXMT log (device created, feature level 11_1). DXMT is a **DXVK fork** and
+       inherits its logger, so it prints `info: Using feature level D3D_FEATURE_LEVEL_11_1`. DXMT
+       engagement had therefore **never once been detected**.
+    3. **GPTK had no engagement signature at all** — success was only ever inferred from the absence of
+       failure. But D3DMetal presents a **spoofed adapter**, `AMD Compatibility Mode`, which any engine
+       that logs its adapter prints (`Renderer: AMD Compatibility Mode (ID=0x66af)`, Vendor ATI). wined3d
+       on this stack reports the real GPU, so it is unambiguous. Positive-only → a game that never logs
+       its adapter stays `.unknown`, never a false failure.
+  - **Root cause of 2 and 3 — and the reason they survived: the tests built the very strings they
+    asserted.** Three tests constructed a log containing `"DXMT: created Metal device"` and then checked
+    that it was recognised. Circular, and it proved nothing — the same mistake that shipped the 0.4.5
+    launch regression. Every replacement is pinned to **verbatim excerpts of logs Silo itself wrote** on
+    this machine (`Fixtures/log_gptk_engaged_real.txt`, `log_dxmt_engaged_real.txt`,
+    `log_wined3d_fallback_real.txt`). DXVK's signatures were checked against **dxvk's own source** and
+    were already correct.
+  - **On-device result — 3 of 4 launch logs now decisive:** GPTK → **engaged** (Bloons TD 6), DXMT →
+    **engaged** (manual game, FL 11_1), and a genuine **GPTK → wined3d non-engagement correctly flagged**
+    on the second manual game. DXVK reads `.unknown` on Bloons TD Battles 2 — **correct**: that game is
+    OpenGL and never asked DXVK for a device.
+  - **Remaining gap (honest):** DXVK's D3D path has no *game*-log proof yet. It is proven by the
+    `D3D11CreateDevice` probe (feature level 11_0, M4 Pro) but no DirectX 9 game is installed, so the
+    DXVK engagement signatures are source-verified, not observed in a real title.
+
 - **🍎 GPTK 4.0 beta 2 support + a D3DMetal Metal 3 / Metal 4 selector (2026-08-04, `main`; 460 tests green,
   zero warnings).** Apple shipped `Game_Porting_Toolkit_4.0_beta_2.dmg`. Of everything that changed between
   the two betas, **exactly one thing reaches Silo**: on macOS 27+ D3DMetal now translates **DirectX 12 through
