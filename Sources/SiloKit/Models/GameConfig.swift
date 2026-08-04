@@ -21,6 +21,12 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
     public var executableRelativePath: String?
     /// Extra arguments appended after the game executable.
     public var customArgs: [String]
+    /// LEARNED, not user-facing: the game asked for a display mode this Mac cannot switch to (Alien Swarm
+    /// saves 640x480; a Retina display offers no such mode), so `EnterFullscreenMode` failed and the game
+    /// quit. Re-launching it inside wine's virtual desktop makes ANY requested mode succeed, because wine
+    /// emulates the mode change inside its own window instead of asking macOS for it. Set from the launch
+    /// log — never guessed up front, since fullscreen works fine at a resolution the display does offer.
+    public var needsVirtualDesktop: Bool = false
     public var lastPlayed: Date?
 
     public init(
@@ -32,6 +38,7 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
         learnedUnderRuntime: String? = nil,
         executableRelativePath: String? = nil,
         customArgs: [String] = [],
+        needsVirtualDesktop: Bool = false,
         lastPlayed: Date? = nil
     ) {
         self.appID = appID
@@ -42,12 +49,13 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
         self.learnedUnderRuntime = learnedUnderRuntime
         self.executableRelativePath = executableRelativePath
         self.customArgs = customArgs
+        self.needsVirtualDesktop = needsVirtualDesktop
         self.lastPlayed = lastPlayed
     }
 
     private enum CodingKeys: String, CodingKey {
         case appID, envFlags, presence, graphics, learnedBackend, learnedUnderRuntime
-        case executableRelativePath, customArgs, lastPlayed
+        case executableRelativePath, customArgs, lastPlayed, needsVirtualDesktop
     }
 
     /// Tolerant decode: every field defaults if absent (the legacy dual-bottle `backend` key is simply
@@ -70,6 +78,7 @@ public struct GameConfig: Codable, Sendable, Hashable, Identifiable {
             .flatMap(GraphicsBackend.init(rawValue:))
         learnedUnderRuntime = try c.decodeIfPresent(String.self, forKey: .learnedUnderRuntime)
         executableRelativePath = try c.decodeIfPresent(String.self, forKey: .executableRelativePath)
+        needsVirtualDesktop = try c.decodeIfPresent(Bool.self, forKey: .needsVirtualDesktop) ?? false
         customArgs = try c.decodeIfPresent([String].self, forKey: .customArgs) ?? []
         lastPlayed = try c.decodeIfPresent(Date.self, forKey: .lastPlayed)
     }

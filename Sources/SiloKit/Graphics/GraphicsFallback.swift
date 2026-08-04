@@ -101,6 +101,16 @@ public enum GraphicsFallback: Sendable {
         }
     }
 
+    /// The game asked for a display mode this Mac cannot switch to, so DXVK's `EnterFullscreenMode` failed
+    /// and the game quit. Emitted verbatim by DXVK's d3d9 (`d3d9_swapchain.cpp`) and observed on-device:
+    /// Alien Swarm had 640x480 saved, which a Retina display simply does not offer. NOT a backend problem —
+    /// fullscreen at a mode the display DOES offer works (measured: `1512x982@120`, zero errors) — so this
+    /// must never be treated as a graphics fallback; the answer is wine's virtual desktop, not another
+    /// backend.
+    public static func requestedUnavailableDisplayMode(_ log: String) -> Bool {
+        log.contains("Failed to change display mode") || log.contains("Failed to set initial fullscreen state")
+    }
+
     /// Classify a launch-log tail for the backend the game was launched under. Pure; case-insensitive.
     /// Positive confirmation wins: if the backend logged that it created its device, a later benign wined3d
     /// line is treated as noise, not a fallback.

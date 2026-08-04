@@ -53,7 +53,8 @@ public struct LaunchOrchestrator: Sendable {
         workingDirectory: URL? = nil,
         prefix: URL,
         logURL: URL,
-        steamArguments: [String] = []
+        steamArguments: [String] = [],
+        virtualDesktop: Bool = false
     ) throws -> LaunchPlan {
         guard let wine = wine ?? backend.wineBinaryPath else {
             throw LaunchError.wineNotConfigured
@@ -119,8 +120,9 @@ public struct LaunchOrchestrator: Sendable {
             // Steam's own launch options first, then the user's — so a hand-added `-windowed` extends the
             // `-game dab` the game cannot start without, rather than replacing it. Anything the user already
             // typed WINS and is not re-added (see `mergeArguments`).
-            arguments: Self.invocation(for: gameExe) + Self.mergeArguments(steam: steamArguments,
-                                                                          user: config.customArgs),
+            arguments: Self.invocation(for: gameExe,
+                                       virtualDesktop: config.needsVirtualDesktop || virtualDesktop)
+                + Self.mergeArguments(steam: steamArguments, user: config.customArgs),
             environment: environment,
             // A game may resolve its data relative to a "start in" dir that isn't the exe's own folder
             // (e.g. an installer shortcut's WORKING_DIR). Honor it when set; otherwise default to the exe dir.
@@ -133,9 +135,19 @@ public struct LaunchOrchestrator: Sendable {
     /// Windows Installer package (`.msi`) is data, not a PE — it must be handed to the bottle's builtin
     /// `msiexec /i`. Everything else runs directly. (Steam/manual game targets are always `.exe`; only the
     /// "run installer" path feeds an `.msi` here.)
-    static func invocation(for target: URL) -> [String] {
-        guard target.pathExtension.lowercased() == "msi" else { return [target.path] }
-        return ["msiexec", "/i", dosPath(for: target)]
+    static func invocation(for target: URL, virtualDesktop: Bool = false) -> [String] {
+        // `explorer /desktop=` runs the target inside a wine-managed desktop window. Wine then satisfies a
+        // display-mode change ITSELF instead of asking macOS for a mode it may not have — which is the whole
+        // fix for a game that saved a resolution this display cannot produce (see
+        // `GameConfig.needsVirtualDesktop`). Same mechanism Silo already uses for the Steam client.
+        let base: [String]
+        if target.pathExtension.lowercased() == "msi" {
+            base = ["msiexec", "/i", dosPath(for: target)]
+        } else {
+            base = [target.path]
+        }
+        guard virtualDesktop else { return base }
+        return ["explorer", "/desktop=Silo,\(SteamBottle.desktopGeometry)"] + base
     }
 
     /// Map a unix path to its `Z:` DOS equivalent (wine's default unix-root drive), e.g.
@@ -165,11 +177,16 @@ public struct LaunchOrchestrator: Sendable {
         try check32BitSupported(gameExe, graphics: graphics)
         try linkGraphics(backendConfig: backend, graphics: graphics, wine: launchWine, prefix: prefix)
         try presenceInstaller.apply(strategy: config.presence, appID: app.appID, gameExe: gameExe)
+        // Self-healing: the PREVIOUS run's log is the memory. If the game quit because it asked for a
+        // display mode this Mac cannot switch to, run it inside wine's virtual desktop this time — no
+        // setting to find, no guess before the fact, and it costs a single read of a file already on hand.
+        let priorLog = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
         let plan = try Self.makePlan(
             config: config, backend: backend, graphics: graphics, wine: launchWine,
             gameExe: gameExe, prefix: prefix, logURL: logURL,
             steamArguments: SteamAppInfo.windowsLaunch(steamRoot: app.libraryPath,
-                                                       appID: app.appID)?.arguments ?? [])
+                                                       appID: app.appID)?.arguments ?? [],
+            virtualDesktop: GraphicsFallback.requestedUnavailableDisplayMode(priorLog))
         return try await spawn(plan)
     }
 
