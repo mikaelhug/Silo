@@ -19,6 +19,15 @@ dist/
 ## Adoption stats (generated into the Pages artifact by Scripts/gen-stats.sh)
 /docs/stats.json
 
+## Probe/diagnostic droppings. These are byproducts of running wine, DXVK or a test binary from the repo
+## root; a `git add -A` then sweeps them in. A 4 MB Microsoft d3dcompiler_47.dll once landed here under the
+## name `-F:fil3585…`, because `wine expand` treated its unsupported `-F:` flag as an output FILENAME.
+*.dxvk-cache
+*_d3d11.log
+*_d3d9.log
+*_dxgi.log
+-F:*
+
 ## macOS
 .DS_Store
 
