@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import CryptoKit
 
@@ -620,7 +621,17 @@ public struct SteamBottle: Sendable {
     /// layered/child window) does NOT paint — it stays black even though rendering succeeds. So Steam is
     /// launched inside `explorer /desktop=` to get a presentable window. (Vineport runs rootless because
     /// Gcenx's winemac.drv handles it; ours doesn't.) Games still launch rootless under GPTK.
-    public static let desktopGeometry = "1440x900"
+    ///
+    /// Sized to the main display: Wine virtual desktops are session-sticky, so a game whose windows land
+    /// on the Steam desktop (rather than rootless) is capped at this geometry — a fixed 1440x900 capped
+    /// every such game below native resolution.
+    public static var desktopGeometry: String {
+        let display = CGMainDisplayID()
+        let width = CGDisplayPixelsWide(display)
+        let height = CGDisplayPixelsHigh(display)
+        guard width > 0, height > 0 else { return "1440x900" }
+        return "\(width)x\(height)"
+    }
 
     /// Launch the bottle's Steam client detached, inside a Wine virtual desktop (so CEF presents on our
     /// `winemac.drv` — see `desktopGeometry`), with the verified software-GL CEF flags + env.
