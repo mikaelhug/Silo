@@ -17,7 +17,7 @@ struct GameTileCard<Artwork: View, Subtitle: View, MenuItems: View>: View {
     @ViewBuilder let subtitle: () -> Subtitle
     @ViewBuilder let menuItems: () -> MenuItems
 
-    @State private var hovering = false
+    @ViewState private var hovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

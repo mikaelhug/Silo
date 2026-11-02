@@ -7,7 +7,7 @@ struct GeneralSettingsView: View {
 
     /// Local "an update check is running" flag — drives the row's spinner/animation for the duration of
     /// the GitHub call.
-    @State private var isChecking = false
+    @ViewState private var isChecking = false
 
     var body: some View {
         Form {

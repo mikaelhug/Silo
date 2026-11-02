@@ -9,7 +9,7 @@ struct ManualGameTileView: View {
     @Environment(\.openWindow) private var openWindow
     let game: ManualGame
     let onSettings: () -> Void
-    @State private var confirmingRemove = false
+    @ViewState private var confirmingRemove = false
 
     var body: some View {
         let lib = env.gameLibrary
@@ -63,7 +63,7 @@ struct ManualGameTileView: View {
 /// placeholder. The PE is parsed off the main thread, once, and the result cached by exe path.
 struct ManualGameArtwork: View {
     let exe: URL
-    @State private var icon: NSImage?
+    @ViewState private var icon: NSImage?
 
     var body: some View {
         ZStack {

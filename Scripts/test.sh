@@ -21,6 +21,14 @@ fi
 if [ -d "$LIB" ]; then
   FLAGS+=(-Xlinker -rpath -Xlinker "$LIB")
 fi
+# Swift Testing's macros (`@Test`, `@Suite`, `#expect`) expand through libTestingMacros, which the Command
+# Line Tools keep in a `testing/` subdirectory of the host plugin dir. Since CLT 27.2 the default build
+# system no longer reliably passes that dir to every compile job ("plugin for module 'TestingMacros' not
+# found"), so name it explicitly. Absent under Xcode, which resolves it natively.
+PLUGINS="$DEV/usr/lib/swift/host/plugins/testing"
+if [ -d "$PLUGINS" ]; then
+  FLAGS+=(-Xswiftc -plugin-path -Xswiftc "$PLUGINS")
+fi
 
 # swift test's own exit code is unreliable here: under the Command Line Tools framework-search-path
 # invocation, Swift Testing failures are printed but the process can still exit 0 (verified on Swift

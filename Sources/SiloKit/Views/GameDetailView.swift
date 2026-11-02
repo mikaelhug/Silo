@@ -9,10 +9,10 @@ struct GameDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let game: SteamApp
     let onSettings: () -> Void
-    @State private var details: SteamStoreDetails?
-    @State private var loading = true
-    @State private var showRequirements = false
-    @State private var confirmingUninstall = false
+    @ViewState private var details: SteamStoreDetails?
+    @ViewState private var loading = true
+    @ViewState private var showRequirements = false
+    @ViewState private var confirmingUninstall = false
 
     var body: some View {
         let lib = env.gameLibrary

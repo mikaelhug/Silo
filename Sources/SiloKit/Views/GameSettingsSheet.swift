@@ -4,8 +4,8 @@ struct GameSettingsSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     let game: SteamApp
-    @State private var vm: GameSettingsViewModel?
-    @State private var executables: [String] = []
+    @ViewState private var vm: GameSettingsViewModel?
+    @ViewState private var executables: [String] = []
 
     var body: some View {
         NavigationStack {

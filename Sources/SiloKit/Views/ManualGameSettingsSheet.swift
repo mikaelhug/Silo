@@ -7,7 +7,7 @@ struct ManualGameSettingsSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     /// A local editable copy — only written back on Save.
-    @State var game: ManualGame
+    @ViewState var game: ManualGame
 
     var body: some View {
         NavigationStack {

@@ -18,8 +18,8 @@ struct LogViewerView: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
     let url: URL
-    @State private var tailer = LogTailer()
-    @State private var autoscroll = true
+    @ViewState private var tailer = LogTailer()
+    @ViewState private var autoscroll = true
 
     var body: some View {
         NavigationStack {

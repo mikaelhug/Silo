@@ -9,7 +9,7 @@ struct SteamGameTileView: View {
     let game: SteamApp
     let onSettings: () -> Void
     let onDetails: () -> Void
-    @State private var confirmingUninstall = false
+    @ViewState private var confirmingUninstall = false
 
     var body: some View {
         let lib = env.gameLibrary

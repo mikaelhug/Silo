@@ -6,16 +6,16 @@ import SwiftUI
 struct LibraryGridView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openSettings) private var openSettings
-    @State private var settingsTarget: SteamApp?
-    @State private var manualSettingsTarget: ManualGame?
-    @State private var detailTarget: SteamApp?
-    @State private var showAddGame = false
+    @ViewState private var settingsTarget: SteamApp?
+    @ViewState private var manualSettingsTarget: ManualGame?
+    @ViewState private var detailTarget: SteamApp?
+    @ViewState private var showAddGame = false
     /// The user has dismissed the first-run onboarding. Kept SEPARATE from `setupComplete` so finishing the
     /// required steps doesn't yank the user straight into the library — they click "Done" when ready.
     /// Persisted so it doesn't reappear.
     @AppStorage("onboardingDone") private var onboardingDone = false
     /// "Not Now" on the Rosetta prompt — per app session, so it asks again next launch.
-    @State private var rosettaPromptDismissed = false
+    @ViewState private var rosettaPromptDismissed = false
 
     var body: some View {
         @Bindable var lib = env.gameLibrary
@@ -143,21 +143,21 @@ struct AddGameSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// The draft game's id — also its bottle path — fixed for this presentation so the installer and the
     /// final Add land in the same fresh bottle.
-    @State private var draftID = UUID()
-    @State private var name = ""
-    @State private var chosenExe: URL?
-    @State private var ranInstaller = false
-    @State private var bottleCreated = false   // a bottle was provisioned this session (cancel → discard)
-    @State private var working = false
+    @ViewState private var draftID = UUID()
+    @ViewState private var name = ""
+    @ViewState private var chosenExe: URL?
+    @ViewState private var ranInstaller = false
+    @ViewState private var bottleCreated = false   // a bottle was provisioned this session (cancel → discard)
+    @ViewState private var working = false
     /// The graphics-backend choice for this game — Automatic by default (Silo picks GPTK, or DXMT for 32-bit
     /// and problem titles); overridable to an explicit backend.
-    @State private var graphics: GraphicsChoice = .auto
+    @ViewState private var graphics: GraphicsChoice = .auto
     /// Shortcuts found in the bottle once the installer's wizard closes (target + args + working dir the
     /// installer itself recorded), and which of them the user chose to add. All share this one bottle.
-    @State private var discovered: [DiscoveredShortcut] = []
-    @State private var selectedShortcutIDs: Set<String> = []
+    @ViewState private var discovered: [DiscoveredShortcut] = []
+    @ViewState private var selectedShortcutIDs: Set<String> = []
     /// True while the (blocking) installer runs — its exit is our deterministic "scan now" signal.
-    @State private var installerRunning = false
+    @ViewState private var installerRunning = false
 
     var body: some View {
         NavigationStack {

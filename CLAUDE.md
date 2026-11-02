@@ -284,6 +284,8 @@ once present, so no registry override is needed (the earlier `d3dcompiler_47=nat
   `Foundation.Process` directly outside `SystemProcessRunner`.
 
 ## Conventions
+- **Write `@ViewState`, never `@State`** in SwiftUI views (`Views/ViewState.swift`). From the 27.2 SDK `@State` is
+  a macro whose `SwiftUIMacros` plugin ships only with Xcode, so it does not compile under the Command Line Tools.
 - Resources are read via `Bundle.module`. Absolute paths everywhere (expand `~`).
 - The launch builder `makePlan` is a **pure function** — no side effects, exhaustively table-tested.
 - New code ships with tests. Tests use **Swift Testing** (`import Testing`, `@Test`/`#expect`),
@@ -340,9 +342,9 @@ Write the exact question into `STATUS.md` → `## BLOCKED`, commit the last gree
 - Anything needing SIP disable / Full Disk Access / a TCC prompt the agent can't satisfy headlessly.
 
 ## Environment (verified 2026-06-26; runtimes added 2026-07-13; GPTK 4.0b2 added 2026-08-04; macOS 27 2026-09-26)
-**Now macOS 27.0 (26A428) + Xcode 27.0, Swift 6.4.** Toolchain pins (`XCODE_VERSION`, `MACOS_SDK_VERSION`) live
+**Now macOS 27 + Xcode / CLT 27.2, Swift 6.4.** Toolchain pins (`XCODE_VERSION`, `MACOS_SDK_VERSION`) live
 in `versions.env`; every build script sources `Scripts/sdk-env.sh` (exports `SDKROOT`), CI runs on the
-`xcode-27` runner. Still build with SwiftPM only (constraint #1). **Rosetta 2 is required** (the runtimes are
+`xcode-27` runner. Both pinned to **27.2** since 2026-11-02 (local CLT 27.2; CI's `Xcode_27.2.app`). Still build with SwiftPM only (constraint #1). **Rosetta 2 is required** (the runtimes are
 x86_64) and setup installs it (`Rosetta`, issue #7).
 *Original:* Swift 6.3.2 (`arm64-apple-macosx26.0`); macOS 26.6, Apple Silicon; `xcodebuild` absent;
 `git`/`codesign` present. **The dev box now HAS a provisioned Silo bottle + all three runtimes** at
