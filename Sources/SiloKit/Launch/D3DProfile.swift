@@ -17,6 +17,11 @@ public struct D3DProfile: Sendable, Equatable {
     public var usesD3D9 = false
     /// The game references D3D10/10.1/11 — translatable by all three backends.
     public var usesD3D1x = false
+    /// Of `usesD3D1x`: the game references a Direct3D **10** module (`d3d10`/`d3d10_1`/`d3d10core`).
+    public var usesD3D10 = false
+    /// Of `usesD3D1x`: the game references `d3d11`. Tracked apart from D3D10 because GPTK can do 11 but has
+    /// no D3D10 at all (`GraphicsBackend.supportsD3D10`).
+    public var usesD3D11 = false
     /// The game references D3D12 — **GPTK only**; neither DXMT nor DXVK implements it.
     public var usesD3D12 = false
     /// The game references `opengl32` — Wine's OpenGL, which goes straight to macOS's GL. **No Silo backend
@@ -27,12 +32,17 @@ public struct D3DProfile: Sendable, Equatable {
     /// working Vulkan driver — and only the DXVK runtime ships one that works (see `isVulkanNative`).
     public var usesVulkan = false
 
+    /// `usesD3D10`/`usesD3D11` refine `usesD3D1x` (setting either implies it); a profile built with only
+    /// `usesD3D1x` is "D3D10/11, tier unknown" and is treated as D3D11-capable (the GPTK-first path).
     public init(usesD3D8: Bool = false, usesD3D9: Bool = false, usesD3D1x: Bool = false,
+                usesD3D10: Bool = false, usesD3D11: Bool = false,
                 usesD3D12: Bool = false, usesVulkan: Bool = false, usesOpenGL: Bool = false) {
         self.usesOpenGL = usesOpenGL
+        self.usesD3D10 = usesD3D10
+        self.usesD3D11 = usesD3D11
         self.usesD3D8 = usesD3D8
         self.usesD3D9 = usesD3D9
-        self.usesD3D1x = usesD3D1x
+        self.usesD3D1x = usesD3D1x || usesD3D10 || usesD3D11
         self.usesD3D12 = usesD3D12
         self.usesVulkan = usesVulkan
     }
@@ -58,6 +68,11 @@ public struct D3DProfile: Sendable, Equatable {
     /// lands here too — correctly, since that IS the arrangement that reaches DXVK.)
     public var isD3D9Only: Bool { usesD3D9 && !usesD3D1x && !usesD3D12 }
 
+    /// A Direct3D **10** title with no D3D11/12 path — one GPTK can never render (D3DMetal's D3D10 entry
+    /// points are `E_FAIL` stubs), while DXMT and DXVK both implement D3D10. Requires positive proof of a
+    /// D3D10 import, so an unknown or tier-less profile never lands here.
+    public var isD3D10Only: Bool { usesD3D10 && !usesD3D11 && !usesD3D12 }
+
     /// A pure DirectX 8 title. **No backend can help** — wined3d is the correct and only path — so the
     /// reactive ladder must not fire for it, and wine's "Using the Vulkan renderer" line (which wined3d emits
     /// for d3d8 too) is EXPECTED here, not a failure.
@@ -76,7 +91,8 @@ public struct D3DProfile: Sendable, Equatable {
     /// Graphics module names, grouped by the tier that can translate them.
     private static let d3d8Names: Set<String> = ["d3d8.dll"]
     private static let d3d9Names: Set<String> = ["d3d9.dll"]
-    private static let d3d1xNames: Set<String> = ["d3d11.dll", "d3d10.dll", "d3d10core.dll", "d3d10_1.dll"]
+    private static let d3d10Names: Set<String> = ["d3d10.dll", "d3d10core.dll", "d3d10_1.dll"]
+    private static let d3d11Names: Set<String> = ["d3d11.dll"]
     private static let d3d12Names: Set<String> = ["d3d12.dll", "d3d12core.dll"]
     private static let vulkanNames: Set<String> = ["vulkan-1.dll"]
     private static let openGLNames: Set<String> = ["opengl32.dll"]
@@ -127,7 +143,8 @@ public struct D3DProfile: Sendable, Equatable {
             let imports = WindowsExecutable.importedDLLs(of: url)
             if !imports.isDisjoint(with: d3d8Names) { profile.usesD3D8 = true }
             if !imports.isDisjoint(with: d3d9Names) { profile.usesD3D9 = true }
-            if !imports.isDisjoint(with: d3d1xNames) { profile.usesD3D1x = true }
+            if !imports.isDisjoint(with: d3d10Names) { profile.usesD3D10 = true; profile.usesD3D1x = true }
+            if !imports.isDisjoint(with: d3d11Names) { profile.usesD3D11 = true; profile.usesD3D1x = true }
             if !imports.isDisjoint(with: d3d12Names) { profile.usesD3D12 = true }
             if !imports.isDisjoint(with: vulkanNames) { profile.usesVulkan = true }
             if !imports.isDisjoint(with: openGLNames) { profile.usesOpenGL = true }

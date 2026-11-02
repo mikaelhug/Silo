@@ -64,8 +64,13 @@ public struct EnvFlags: Codable, Sendable, Hashable {
     /// emits nothing — see `MetalBackendChoice`.
     public var metalBackend: MetalBackendChoice
     /// Free-form extra environment variables — a config.json-only escape hatch (no UI). Merged last in
-    /// `environment()`, so it overrides the flags above — EXCEPT the sync keys (`WINEMSYNC`/`WINEESYNC`),
-    /// which `LaunchOrchestrator.makePlan` force-overrides afterward for shared-bottle co-residency.
+    /// `environment()`, so it overrides the flags above. In `LaunchOrchestrator.makePlan`, two keys are then
+    /// combined rather than taken verbatim:
+    /// - `WINEDLLOVERRIDES` is merged **per module** with the graphics backend's override set: every module
+    ///   named here REPLACES the backend's entry for that module (so `dxgi=n` here really loads a native
+    ///   dxgi), and the backend's entries for modules not named here are kept (`DllOverrideList.merged`).
+    /// - The sync keys (`WINEMSYNC`/`WINEESYNC`) are force-overridden in the shared Steam bottle, where a
+    ///   mismatched sync mode would split the wineserver the co-resident Steam client depends on.
     public var extra: [String: String]
 
     public init(
@@ -87,7 +92,8 @@ public struct EnvFlags: Codable, Sendable, Hashable {
     }
 
     /// Environment variables contributed by these flags, for the game's graphics backend (the MetalFX /
-    /// DXR vars differ between GPTK's D3DMetal and DXMT). `extra` is merged last so it can override anything.
+    /// DXR vars differ between GPTK's D3DMetal and DXMT). `extra` is merged last so it overrides the flags
+    /// above (see `extra` for how `makePlan` then combines `WINEDLLOVERRIDES` and the sync keys).
     public func environment(graphics: GraphicsBackend = .gptk) -> [String: String] {
         var env: [String: String] = [:]
         switch syncMode {

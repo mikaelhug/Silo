@@ -84,6 +84,21 @@ public enum GraphicsBackend: String, Codable, Sendable, CaseIterable, Identifiab
         }
     }
 
+    /// Whether the backend can create a **Direct3D 10 / 10.1** device. GPTK cannot: D3DMetal's
+    /// `d3d10.dll` `D3D10CreateDevice` and `dxgi.dll` `DXGID3D10CreateDevice` are `return E_FAIL` stubs
+    /// (disassembled from GPTK 4.0b2), and wine's `d3d10_1`/`d3d10core` reach their device through the loaded
+    /// `dxgi` — so under GPTK every D3D10 path, Direct2D's hardware path included, fails with `0x80004005`.
+    /// The `d3d10*` names stay in GPTK's `=b` set anyway: that is the shared-prefix coherence rule (keep
+    /// DXVK's seeded natives out), not a claim D3DMetal translates them. DXMT and DXVK both implement D3D10.
+    /// Drives `BackendChooser` (a D3D10-only game never goes to GPTK) and `ProcessRouting` (a D3D10 helper
+    /// process inside a GPTK launch is routed to DXVK).
+    public var supportsD3D10: Bool {
+        switch self {
+        case .gptk: false
+        case .dxmt, .dxvk: true
+        }
+    }
+
     /// Whether the backend ships a framework/dylib in the runtime's `lib/external` that dyld must locate at
     /// launch (so `makePlan` prepends it to `DYLD_FALLBACK_*`). GPTK's `D3DMetal.framework` + `libd3dshared`
     /// live there; DXMT's `winemetal.so` links the system `Metal.framework`, so it needs nothing extra; DXVK

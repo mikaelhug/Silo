@@ -251,7 +251,7 @@ struct MakePlanTests {
         #expect(plan.environment["WINEDEBUG"] == "+seh,+tid")
     }
 
-    @Test("GPTK appends its d3d overrides to a user's pre-existing WINEDLLOVERRIDES (semicolon-merged, not clobbered)")
+    @Test("A user's WINEDLLOVERRIDES for an unrelated module is kept alongside the backend's set")
     func mergesPreExistingWineDllOverrides() throws {
         var cfg = GameConfig(appID: 220)
         // Power user forces their own DLL override via the extra escape hatch, WITH GPTK configured.
@@ -260,8 +260,91 @@ struct MakePlanTests {
         b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
         let plan = try LaunchOrchestrator.makePlan(
             config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
-        // GPTK's d3d overrides are APPENDED (semicolon-joined), not overwriting the user's.
-        #expect(plan.environment["WINEDLLOVERRIDES"] == "winemenubuilder.exe=d;d3d9,d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi,nvapi64,nvngx=b")
+        // Neither clobbers the other: the backend set, then the user's entry (it names no backend module).
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "d3d9,d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,dxgi,nvapi64,nvngx=b;winemenubuilder.exe=d")
+    }
+
+    @Test("Issue #9: a user override for a BACKEND module wins — it replaces the backend's entry for that module")
+    func userOverrideBeatsBackendPerModule() throws {
+        var cfg = GameConfig(appID: 220)
+        cfg.envFlags = EnvFlags(extra: ["WINEDLLOVERRIDES": "dxgi,d3d11=n;d3d12="])
+        var b = backend()
+        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
+        let value = try #require(plan.environment["WINEDLLOVERRIDES"])
+        // The backend's builtin claim on dxgi/d3d11/d3d12 is GONE — wine sees exactly one entry per module,
+        // the user's (before, "<user>;<backend>" let the later backend entry silently win).
+        #expect(value == "d3d9,d3d10,d3d10_1,d3d10core,d3d12core,nvapi64,nvngx=b;dxgi,d3d11=n;d3d12=")
+        let entries = DllOverrideList(parsing: value).entries
+        for module in ["dxgi", "d3d11", "d3d12"] {
+            #expect(entries.filter { $0.key == module }.count == 1)
+        }
+    }
+
+    @Test("A user override written as `*dxgi` or `DXGI.dll` still replaces the backend's dxgi")
+    func userOverrideMatchesWineSpellings() throws {
+        var b = backend()
+        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
+        for spelling in ["*dxgi=n", "DXGI.dll=n"] {
+            var cfg = GameConfig(appID: 220)
+            cfg.envFlags = EnvFlags(extra: ["WINEDLLOVERRIDES": spelling])
+            let plan = try LaunchOrchestrator.makePlan(
+                config: cfg, backend: b, gameExe: gameExe, prefix: prefix, logURL: log)
+            let entries = DllOverrideList(parsing: plan.environment["WINEDLLOVERRIDES"]).entries
+            #expect(entries.filter { $0.key == "dxgi" }.map(\.mode) == ["n"])
+        }
+    }
+
+    @Test("Without a configured backend the user's WINEDLLOVERRIDES passes through verbatim")
+    func userOverridePassesThroughWithoutBackend() throws {
+        var cfg = GameConfig(appID: 220)
+        cfg.envFlags = EnvFlags(extra: ["WINEDLLOVERRIDES": "dxgi=n;dxgi=b"])
+        let plan = try LaunchOrchestrator.makePlan(
+            config: cfg, backend: backend(), gameExe: gameExe, prefix: prefix, logURL: log)
+        #expect(plan.environment["WINEDLLOVERRIDES"] == "dxgi=n;dxgi=b")
+    }
+
+    @Test("Routing D3D10 helpers under GPTK: routed modules go to `*module` form, DXVK's MoltenVK joins DYLD")
+    func gptkRoutingPlan() throws {
+        var b = backend()
+        b.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
+        b.dxvkLibDirPath = URL(fileURLWithPath: "/x/lib/wine/x86_64-windows")
+        let plan = try LaunchOrchestrator.makePlan(
+            config: GameConfig(appID: 220), backend: b, gameExe: gameExe, prefix: prefix, logURL: log,
+            routeD3D10Helpers: true)
+        // d3d9 isn't routed, so it keeps the plain form (and its precedence over any registry entry).
+        #expect(plan.environment["WINEDLLOVERRIDES"]
+                == "d3d9,d3d10,*d3d10_1,*d3d10core,*d3d11,*d3d12,*d3d12core,*dxgi,*nvapi64,*nvngx=b")
+        // D3DMetal's lib/external still leads (the game needs it); DXVK's MoltenVK dir follows, ahead of the
+        // runtime's bundled libs — the routed helper's winevulkan resolves libMoltenVK by name.
+        let dyld = try #require(plan.environment["DYLD_FALLBACK_LIBRARY_PATH"])
+        #expect(dyld.hasPrefix("/w/lib/external:/x/lib:"))
+        #expect(dyld.contains("/silo-bundled"))
+        #expect(plan.environment["DYLD_FALLBACK_FRAMEWORK_PATH"] == "/w/lib/external")
+    }
+
+    @Test("Routing is a no-op without DXVK installed, and for backends that do D3D10 themselves")
+    func routingNoOpCases() throws {
+        var gptkOnly = backend()
+        gptkOnly.gptkLibDirPath = URL(fileURLWithPath: "/g/lib/wine/x86_64-windows")
+        let noDXVK = try LaunchOrchestrator.makePlan(
+            config: GameConfig(appID: 220), backend: gptkOnly, gameExe: gameExe, prefix: prefix, logURL: log,
+            routeD3D10Helpers: true)
+        #expect(noDXVK.environment["WINEDLLOVERRIDES"] == GraphicsBackend.gptk.dllOverrides)
+        #expect(noDXVK.environment["DYLD_FALLBACK_LIBRARY_PATH"]?.contains("/x/lib") == false)
+
+        var all = backend()
+        all.dxmtLibDirPath = URL(fileURLWithPath: "/d/lib/wine/x86_64-windows")
+        all.dxvkLibDirPath = URL(fileURLWithPath: "/x/lib/wine/x86_64-windows")
+        for graphics in [GraphicsBackend.dxmt, .dxvk] {
+            let plan = try LaunchOrchestrator.makePlan(
+                config: GameConfig(appID: 220), backend: all, graphics: graphics, gameExe: gameExe,
+                prefix: prefix, logURL: log, routeD3D10Helpers: true)
+            // PLAIN form: it beats any AppDefaults entry, so a routed helper can't change a DXMT/DXVK launch.
+            #expect(plan.environment["WINEDLLOVERRIDES"] == graphics.dllOverrides)
+            #expect(plan.environment["WINEDLLOVERRIDES"]?.contains("*") == false)
+        }
     }
 
     @Test("Perf env-flags (MetalHUD / MetalFX / DXR / AVX) propagate into the launch plan's environment")

@@ -3,6 +3,48 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🐛 [Issue #9](https://github.com/mikaelhug/Silo/issues/9) — GTA V Enhanced: Rockstar Games Launcher "failed to initialize" under GPTK (2026-11-02; 565 tests green, zero warnings).**
+  - **Root cause: D3DMetal has no Direct3D 10 at all.** Disassembled GPTK 4.0b2: `dxgi.DXGID3D10CreateDevice`,
+    `dxgi.DXGID3D10RegisterLayers` and `d3d10.D3D10CreateDevice` are each `puts(<signature>); return E_FAIL;`;
+    `d3d11` exports only `D3D11CreateDevice[AndSwapChain]`/`D3D11On12CreateDevice`. Wine's `d3d10_1` →
+    `d3d10core` → loaded `dxgi` therefore fails, and wine's `d2d1` (hardware HWND render target) sits on
+    `D3D10CreateDevice1`. Reproduced on this machine with a mingw-built probe exe in a scratch prefix on the real
+    GPTK-overlaid runtime: `D3D10CreateDevice1` → 0x80004005 with D3DMetal's stub line printed, D2D HWND RT
+    → 0x80004005, while `D3D11CreateDevice` → S_OK FL 11_0. Keeping `d3d10*` `=b` in GPTK's set is still right
+    (shared-prefix coherence); the defect is that nothing D3D10-capable can run inside a GPTK launch.
+  - **Fix 1 — per-process routing (`ProcessRouting`).** A launch's processes share one env + one runtime, so
+    the launcher can't get a different backend than the game. Wine's per-exe `AppDefaults\<exe>\DllOverrides`
+    loses to `WINEDLLOVERRIDES` only *per name form*: plain name is resolved (env → AppDefaults → global) before
+    `*name`. Verified on-device: env `d3d10core=b` beats an AppDefaults entry, env `*d3d10core=b` loses to it for
+    that exe and still applies to others. So a GPTK launch, when DXVK is installed and the Rockstar launcher is
+    installed in the prefix, writes `AppDefaults\Launcher.exe\DllOverrides` (DXVK `d3d10core`/`d3d11`/`dxgi`
+    native, wine `d3d10_1`, `d3d12`/`d3d12core`/`nvapi64`/`nvngx` disabled), seeds DXVK into the prefix, emits
+    the routed modules as `*module=b` and adds DXVK's MoltenVK to DYLD. **On-device result (same env, exact
+    Silo registry script):** `Launcher.exe` → D3D10.1 device S_OK, hardware D2D `EndDraw` S_OK, `d3d12` not
+    loaded; `Game.exe` → D3DMetal `d3d11` FL 11_0, `d3d12` loaded. DXMT/DXVK launches keep the plain form, so
+    the entry is inert for them. `regedit` only when `user.reg` lacks it; a failed write launches unrouted.
+  - **Fix 2 — `EnvFlags.extra["WINEDLLOVERRIDES"]` now wins per module** (`DllOverrideList`): makePlan used to
+    emit `<user>;<backend>` and wine takes the later entry, so the backend always beat the user, contrary to the
+    `extra` doc (now corrected). User-named modules are dropped from the backend set.
+  - **Fix 3 — D3D10-only games no longer go to GPTK** (`D3DProfile.usesD3D10/usesD3D11`, `isD3D10Only` →
+    DXMT in `BackendChooser.choose`; a learned DXVK hint is honored).
+  - **Rejected:** moving GPTK's overrides from env into the registry (bakes backend state into the shared
+    prefix — every co-resident launch would race on it); a wined3d+`renderer=gl` launcher stack (wined3d's
+    `d3d11`/`dxgi` don't exist in the GPTK runtime — the in-place overlay replaced them — and `=n` refuses a
+    builtin-marked PE); patching wine with a CrossOver-style DllRedirects (constraint #8 favors fixing Silo's
+    launch code first, and the AppDefaults route needs no wine patch). CrossOver's own handling could not be
+    checked here (no CrossOver install, source tarball not fetched); a third-party fork (WineForge) documents the
+    same per-process idea for the Rockstar launcher.
+  - ⚠️ **Unverified on-device:** GTA V / the real Rockstar launcher (not installed here) — its D3D12 info probe
+    with `d3d12` disabled, its CEF/Social Club helpers (not routed; no evidence they need D3D10), and the full
+    PlayGTAV → Launcher → game chain. The basename key means another game's `Launcher.exe` in the same bottle is
+    routed to DXVK too once Rockstar's launcher is installed. First run (launcher not yet installed) still fails
+    once; the next launch is routed.
+  - **Follow-up found, not fixed:** the GPTK overlay copies GPTK's 2-export stub `d3d10.dll` over wine's full
+    `d3d10` IN PLACE in the base runtime — which DXVK launches also run on — so a D3D10.0 title under DXVK gets
+    the stub (`D3D10CreateDevice` → E_FAIL) and anything importing the D3D10 effects/reflection API fails to
+    load. Excluding `d3d10.dll` from `isGPTKModule` fixes fresh runtimes; existing ones need wine's original
+    restored (re-download), so it needs its own change.
 - **🐛 [PR #8](https://github.com/mikaelhug/Silo/pull/8) (bryceeppler) — the Steam client's 1440x900 virtual desktop capped
   every co-resident game at 1440x900 (merged 2026-09-30; 539 tests green, zero warnings).** While the client's `explorer /desktop=Silo,<size>` is up, wine reports that desktop as
   the display to every process in the shared bottle — so a ROOTLESS game (the default path) logged

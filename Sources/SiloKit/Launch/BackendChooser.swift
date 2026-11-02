@@ -55,6 +55,13 @@ enum BackendChooser {
             if let learned, learned != .gptk { return learned }
             return .dxmt
         }
+        // A D3D10-only game can't run on GPTK at all — D3DMetal has no Direct3D 10 (its D3D10 entry points
+        // are E_FAIL stubs; see `GraphicsBackend.supportsD3D10`). GPTK-first would be a guaranteed failure,
+        // so go straight to DXMT (the Metal backend that does D3D10), honoring a learned DXVK hint.
+        if profile.isD3D10Only {
+            if let learned, learned.supportsD3D10 { return learned }
+            return .dxmt
+        }
         return learned ?? .gptk                                        // 64-bit Automatic: learned hint, else GPTK
     }
 

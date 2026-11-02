@@ -134,7 +134,9 @@ GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + override
   bitness-independent); **Vulkan-native → DXVK** (`isVulkanNative`: the game drives Vulkan itself and needs no
   D3D translation, but only the DXVK runtime ships a MoltenVK that works — routing it there is what puts that
   driver first on the launch DYLD path); else 32-bit → DXMT/learned (GPTK is 64-bit-only, but DXMT *and* DXVK
-  both ship i386, so a 32-bit hint IS honored); else GPTK (or the learned hint). **DirectX 8 is deliberately
+  both ship i386, so a 32-bit hint IS honored); else **D3D10-only → DXMT** (`isD3D10Only`: D3DMetal has no
+  Direct3D 10 at all — see below — so GPTK-first would be a guaranteed failure; a learned DXVK hint is honored);
+  else GPTK (or the learned hint). **DirectX 8 is deliberately
   left on wined3d** (`isD3D8Only`): nothing translates d3d8 — DXVK ships none, and wine's builtin `d3d8` sits
   directly on wined3d rather than forwarding to `d3d9` — so wined3d IS correct, both ladder gates refuse, and
   `handleGraphicsFallback` stays SILENT for it (wined3d's renderer line is expected there, not a failure).
@@ -158,6 +160,40 @@ GPTK and DXMT co-reside in one prefix, each pinned to its own runtime + override
   missing it in the shared bottle silently breaks Steamworks IPC.
 - When a backend isn't configured, GPTK degrades to wine's own wined3d (the baseline); a secondary backend
   refuses rather than mis-route. `GraphicsFallback` is backend-aware (surfaces a silent wined3d fallback).
+- **A user's `WINEDLLOVERRIDES` (`EnvFlags.extra`) wins PER MODULE** (`DllOverrideList.merged`, issue #9): a
+  module the user names is DROPPED from the backend set, so it's the only entry wine sees; the backend keeps
+  every module the user doesn't name. (Wine takes the LATER of two entries for one module, so the old
+  `"<user>;<backend>"` concatenation let the backend silently win — the opposite of what `extra` documents.)
+
+### GPTK has NO Direct3D 10 → per-process routing of D3D10 helpers (issue #9, 2026-11-02)
+**D3DMetal implements no D3D10.** GPTK's `d3d10.dll` `D3D10CreateDevice` and `dxgi.dll`
+`DXGID3D10CreateDevice` are both `puts(<signature>); return E_FAIL;` stubs (disassembled, GPTK 4.0b2), and its
+`d3d11` exports no `D3D11CoreCreateDevice`. Wine's `d3d10_1`/`d3d10core` create their device through the loaded
+`dxgi`, so under ANY GPTK launch every D3D10 path fails with `0x80004005` — including **Direct2D's hardware
+path** (wine's `d2d1` sits on `D3D10CreateDevice1`), which is how the Rockstar Games Launcher draws its UI. One
+process has one `dxgi`, so this can't be fixed in-process; `GraphicsBackend.supportsD3D10` (false for GPTK)
+carries the fact. GPTK's set still forces `d3d10*` `=b` — for shared-prefix coherence, not because D3DMetal
+translates them.
+- **Games:** D3D10-only titles go to DXMT up front (above). **Helper processes** a game's launch spawns (the
+  launcher) can't be split from the game by backend — every process inherits ONE env and ONE wine runtime
+  (`PlayGTAV.exe` → `Launcher.exe` → the game). So they are routed **per executable** (`ProcessRouting`).
+- **The mechanism (verified on-device with a probe exe):** wine's only per-exe knob is
+  `HKCU\Software\Wine\AppDefaults\<exe>\DllOverrides`, and `WINEDLLOVERRIDES` beats it — but name form by
+  name form: wine resolves the plain name (env → AppDefaults → global) BEFORE `*name`. So a GPTK launch with a
+  routed helper installed emits the routed modules as `*dxgi=b` etc.; the helper's AppDefaults `dxgi=native`
+  then wins for that exe only, while `*dxgi=b` still binds every other process to D3DMetal. A routed helper runs
+  on **native DXVK** seeded into the prefix (`d3d10core`/`d3d11`/`dxgi` native, wine's `d3d10_1`), with DXVK's
+  MoltenVK added to the launch DYLD path; `d3d12`/`d3d12core`/`nvapi64`/`nvngx` are DISABLED for it (D3DMetal's
+  d3d12 against a non-D3DMetal dxgi crashed the launcher). Probe result under one env: `Launcher.exe` → D3D10.1
+  device + hardware D2D render target OK; `Game.exe` → D3DMetal `d3d11` FL 11_0 + `d3d12` loaded.
+- **Scope/invariants:** only GPTK, only when DXVK is installed and a known helper is INSTALLED in the prefix
+  (file check), so every other launch is byte-for-byte unchanged. DXMT/DXVK launches keep the PLAIN override
+  form, which beats AppDefaults — the per-exe entry is prefix state that is inert for them, NOT backend state
+  baked into the shared prefix. `regedit` runs only when `user.reg` lacks the entry; a failed write launches
+  unrouted. Silo's global `DllOverrides` must never name a backend module (a global plain entry would beat
+  `*module`) — a test enforces it. AppDefaults keys on the exe BASENAME, so another game's `Launcher.exe` in
+  the same bottle is routed too (to DXVK, which also runs D3D11) once Rockstar's is installed. The Rockstar
+  stub installs its launcher on first run, so routing starts from the launch after that.
 
 ### GPTK versions + D3DMetal's Metal 3 / Metal 4 renderer (beta 2 support, 2026-08-04)
 GPTK is the ONE runtime with no pinned version (it's a manual Apple `.dmg` import, so it is deliberately

@@ -52,6 +52,11 @@ public struct LaunchOrchestrator: Sendable {
     /// - Parameter desktopGeometry: `"<width>x<height>"` in real screen pixels (see `DesktopGeometry`) for
     ///   the virtual desktop, when one is used. Nil falls back to `fallbackGameDesktopGeometry` — this stays
     ///   a plain `String?` rather than reaching for `NSScreen` here so `makePlan` remains pure and testable.
+    /// - Parameter routeD3D10Helpers: the caller found a known D3D10 helper (`ProcessRouting`) installed in
+    ///   `prefix` and wrote its `AppDefaults` entry. Honored only for a backend without D3D10 (GPTK) and only
+    ///   when DXVK is configured — the routed helper runs on DXVK's seeded natives. It then (a) emits the
+    ///   routed modules in wine's `*module` form so the per-exe entry can win for that one helper, and (b)
+    ///   puts DXVK's MoltenVK on the DYLD path. Off by default: a launch with no such helper is unchanged.
     public static func makePlan(
         config: GameConfig,
         backend: BackendConfig,
@@ -64,7 +69,8 @@ public struct LaunchOrchestrator: Sendable {
         steamArguments: [String] = [],
         virtualDesktop: Bool = false,
         desktopGeometry: String? = nil,
-        coResidentWithSteamClient: Bool = true
+        coResidentWithSteamClient: Bool = true,
+        routeD3D10Helpers: Bool = false
     ) throws -> LaunchPlan {
         guard let wine = wine ?? backend.wineBinaryPath else {
             throw LaunchError.wineNotConfigured
@@ -127,8 +133,24 @@ public struct LaunchOrchestrator: Sendable {
                 environment["DXVK_LOG_PATH"] = logURL.deletingLastPathComponent().path
                 environment["DXVK_STATE_CACHE_PATH"] = prefix.appendingPathComponent(Silo.dxvkCacheDirName).path
             }
-            environment["WINEDLLOVERRIDES"] = mergeOverride(
-                environment["WINEDLLOVERRIDES"], graphics.dllOverrides)
+            // Per-process routing (issue #9) — see `ProcessRouting`. Only a backend that can't do D3D10, and
+            // only with DXVK installed: a routed helper runs on DXVK's natives, which need DXVK's MoltenVK
+            // (dyld picks it by NAME, so its dir goes on the fallback path — after D3DMetal's lib/external,
+            // which carries no libMoltenVK, and ahead of wine's own bundled libs).
+            var backendOverrides = DllOverrideList(parsing: graphics.dllOverrides)
+            if routeD3D10Helpers, !graphics.supportsD3D10, let dxvkLib = backend.libDir(for: .dxvk) {
+                backendOverrides = backendOverrides.wildcarding(ProcessRouting.routedModules)
+                let leading = graphics.overlaysExternalFramework ? ["\(wine.wineRuntimeExternalDir.path)"] : []
+                environment["DYLD_FALLBACK_LIBRARY_PATH"] =
+                    (leading + [dxvkLib.dxvkMoltenVKDir.path, wine.siloDyldFallback]).joined(separator: ":")
+            }
+            // The user's own `WINEDLLOVERRIDES` (from `EnvFlags.extra`) wins PER MODULE: any module it names is
+            // dropped from the backend set, so it is the only entry wine sees for that module. Plain
+            // concatenation let the backend's later entry silently win (issue #9). Modules the user doesn't
+            // name keep the backend's coherence overrides.
+            environment["WINEDLLOVERRIDES"] = DllOverrideList.merged(
+                base: backendOverrides,
+                overriding: DllOverrideList(parsing: environment["WINEDLLOVERRIDES"])).rendered
         }
 
         return LaunchPlan(
@@ -222,15 +244,21 @@ public struct LaunchOrchestrator: Sendable {
         // virtual desktop forever after a single failure, even once its saved resolution is fixed.
         let priorLog = LaunchPlan.lastLaunchSection(
             of: (try? String(contentsOf: logURL, encoding: .utf8)) ?? "")
-        let plan = try Self.makePlan(
-            config: config, backend: backend, graphics: graphics, wine: launchWine,
-            gameExe: gameExe, prefix: prefix, logURL: logURL,
-            steamArguments: SteamAppInfo.windowsLaunch(steamRoot: app.libraryPath,
-                                                       appID: app.appID)?.arguments ?? [],
-            virtualDesktop: GraphicsFallback.requestedUnavailableDisplayMode(priorLog),
-            desktopGeometry: desktopGeometry,
-            coResidentWithSteamClient: true)   // the shared Steam bottle — msync is mandatory here
-        return try await spawn(plan)
+        func plan(routing: Bool) throws -> LaunchPlan {
+            try Self.makePlan(
+                config: config, backend: backend, graphics: graphics, wine: launchWine,
+                gameExe: gameExe, prefix: prefix, logURL: logURL,
+                steamArguments: SteamAppInfo.windowsLaunch(steamRoot: app.libraryPath,
+                                                           appID: app.appID)?.arguments ?? [],
+                virtualDesktop: GraphicsFallback.requestedUnavailableDisplayMode(priorLog),
+                desktopGeometry: desktopGeometry,
+                coResidentWithSteamClient: true,   // the shared Steam bottle — msync is mandatory here
+                routeD3D10Helpers: routing)
+        }
+        let routed = await routeD3D10Helpers(
+            backend: backend, graphics: graphics, wine: launchWine, prefix: prefix,
+            toolEnvironment: try plan(routing: false).environment)
+        return try await spawn(try plan(routing: routed))
     }
 
     // MARK: - Manual (non-Steam) games
@@ -250,13 +278,20 @@ public struct LaunchOrchestrator: Sendable {
         }
         try check32BitSupported(game.executablePath, graphics: graphics)
         try linkGraphics(backendConfig: backend, graphics: graphics, wine: launchWine, prefix: prefix)
-        let plan = try Self.makePlan(
-            config: game.gameConfig, backend: backend, graphics: graphics, wine: launchWine,
-            gameExe: game.executablePath, workingDirectory: game.workingDirectory, prefix: prefix,
-            logURL: logURL, desktopGeometry: desktopGeometry,
-            // Its OWN isolated prefix — no Steam client, no shared wineserver, so the Sync picker stands.
-            coResidentWithSteamClient: false)
-        return try await spawn(plan)
+        func plan(routing: Bool) throws -> LaunchPlan {
+            try Self.makePlan(
+                config: game.gameConfig, backend: backend, graphics: graphics, wine: launchWine,
+                gameExe: game.executablePath, workingDirectory: game.workingDirectory, prefix: prefix,
+                logURL: logURL, desktopGeometry: desktopGeometry,
+                // Its OWN isolated prefix — no Steam client, no shared wineserver, so the Sync picker stands.
+                coResidentWithSteamClient: false,
+                routeD3D10Helpers: routing)
+        }
+        // A standalone Rockstar Games Launcher install is a manual game too — same routing.
+        let routed = await routeD3D10Helpers(
+            backend: backend, graphics: graphics, wine: launchWine, prefix: prefix,
+            toolEnvironment: try plan(routing: false).environment)
+        return try await spawn(try plan(routing: routed))
     }
 
     /// Run an installer (`.exe` or `.msi`) in the bottle prefix and **WAIT for it to finish**. Unlike a game
@@ -292,6 +327,44 @@ public struct LaunchOrchestrator: Sendable {
             try? handle.write(contentsOf: result.standardError)
         }
         return result
+    }
+
+    /// Route the known D3D10 helper processes (`ProcessRouting`) installed in `prefix` off D3DMetal, for a
+    /// launch whose backend has no D3D10 (GPTK). Seeds DXVK's natives into the prefix (what the helper runs
+    /// on) and writes each helper's `AppDefaults\<exe>\DllOverrides` entry via `regedit` — skipped when
+    /// `user.reg` already carries it, so a steady-state launch costs one file read. Returns whether routing
+    /// is in effect, i.e. whether `makePlan` should emit the routed modules in `*module` form.
+    ///
+    /// The registry entry is per-EXECUTABLE prefix state, not per-backend state: it is the same whichever
+    /// backend a co-resident game uses, and DXMT/DXVK launches keep the plain override form that beats it —
+    /// so it never changes what a non-GPTK launch loads. Fails soft: if the registry write fails the launch
+    /// proceeds unrouted (the helper keeps today's behavior) rather than being blocked.
+    /// - Parameter toolEnvironment: the launch's own environment (prefix, sync mode, DYLD), so `regedit`
+    ///   attaches to the same wineserver the game is about to use instead of forking a second one.
+    private func routeD3D10Helpers(
+        backend: BackendConfig, graphics: GraphicsBackend, wine: URL, prefix: URL,
+        toolEnvironment: [String: String]
+    ) async -> Bool {
+        guard !graphics.supportsD3D10, backend.libDir(for: graphics) != nil,
+              let dxvkLib = backend.libDir(for: .dxvk) else { return false }
+        let helpers = ProcessRouting.installedHelpers(in: prefix)
+        guard !helpers.isEmpty else { return false }
+        // Fail soft like the registry write below: routing is an improvement for one helper, never a reason
+        // to block the game itself.
+        guard (try? linker.installDXVKPrefixLoaders(prefix: prefix, dxvkLibDir: dxvkLib)) != nil else { return false }
+
+        let userReg = (try? String(contentsOf: prefix.appendingPathComponent("user.reg"), encoding: .utf8)) ?? ""
+        if ProcessRouting.isApplied(for: helpers, userReg: userReg) { return true }
+        let regFile = prefix.appendingPathComponent("drive_c/silo-process-routing.reg")
+        guard (try? ProcessRouting.registryScript(for: helpers)
+                .write(to: regFile, atomically: true, encoding: .utf8)) != nil else { return false }
+        defer { try? FileManager.default.removeItem(at: regFile) }
+        var environment = toolEnvironment
+        environment["WINEDLLOVERRIDES"] = nil   // regedit needs no graphics overrides
+        let result = try? await runner.run(
+            executable: wine, arguments: ["regedit", "/S", "C:\\silo-process-routing.reg"],
+            environment: environment, currentDirectory: prefix)
+        return result?.succeeded == true
     }
 
     private func spawn(_ plan: LaunchPlan) async throws -> Int32 {
@@ -416,8 +489,4 @@ public struct LaunchOrchestrator: Sendable {
         }
     }
 
-    private static func mergeOverride(_ existing: String?, _ addition: String) -> String {
-        guard let existing, !existing.isEmpty else { return addition }
-        return existing + ";" + addition
-    }
 }
