@@ -212,23 +212,32 @@ public final class SteamClientSession {
     /// the wrapper included (verified on-device 2026-11-16: the genuine webhelper came back and matched the
     /// new `libcef.dll`). Then the caller's `installWebHelperWrapper` promotes that binary to `_orig`. A
     /// no-op on a healthy bottle — the check is a hash compare, and its file reads run off-main.
-    private func repairStaleWebHelpers(wine: URL) async {
+    ///
+    /// The repair is itself an update TRANSACTION (verified: "Extracting package…" → "Committing NTFS
+    /// transaction" → "Update complete"), and the restored file appears mid-extraction — stopping Steam then
+    /// rolls it back, exactly as `warmUpUpdate` documents. So it waits for BOTH the restored webhelper AND
+    /// Steam's commit marker, and gives up early if Steam exits before committing.
+    /// - Returns: false when the webhelper could not be restored (the caller must not launch the client).
+    private func repairStaleWebHelpers(wine: URL) async -> Bool {
         let bottle = self.bottle
         let stale = await Task.detached { bottle.staleWebHelperDirs() }.value
-        guard !stale.isEmpty else { return }
-        _ = try? await bottle.launchForUpdate(wine: wine)
-        var elapsed = 0.0
+        guard !stale.isEmpty else { return true }
+        bottle.resetLog()   // so `isUpdateCommitted` reflects THIS repair, not a stale marker
+        guard let pid = try? await bottle.launchForUpdate(wine: wine) else { return false }
+        var elapsed = 0.0, repaired = false
         while elapsed < repairTimeout {
             try? await Task.sleep(for: .seconds(warmUpPollInterval)); elapsed += warmUpPollInterval
-            if bottle.webHelpersRestored(in: stale) {
-                // Let Steam finish writing the rest of the repair before it's stopped.
-                try? await Task.sleep(for: .seconds(warmUpCefSettleSeconds))
+            if bottle.isUpdateCommitted() {
+                repaired = bottle.webHelpersRestored(in: stale)
+                if repaired { try? await Task.sleep(for: .seconds(warmUpCefSettleSeconds)) }   // client relaunch
                 break
             }
+            if !orchestrator.isRunning(pid: pid) { break }   // Steam died before committing: nothing to wait for
         }
         // The repaired client holds the CEF files open; stop it so the wrap can move them (as in warm-up).
         await bottle.forceQuit(wine: wine)
         try? await Task.sleep(for: .seconds(warmUpForceQuitSettle))
+        return repaired
     }
 
     private func startSteam() async {
@@ -279,7 +288,12 @@ public final class SteamClientSession {
     private func launchSteamProcess() async -> Int32? {
         do {
             if let wine = wineBinary {
-                await repairStaleWebHelpers(wine: wine)
+                guard await repairStaleWebHelpers(wine: wine) else {
+                    // A wrapped client whose webhelper doesn't match its CEF never shows a window — say so
+                    // instead of launching it and waiting out the readiness failsafe.
+                    launchError = "Steam's web helper is out of date and couldn't be repaired"
+                    return nil
+                }
                 try bottle.installWebHelperWrapper(wine: wine)
             }
             // Sized to the real screen: the client's desktop becomes the display every co-resident game sees.

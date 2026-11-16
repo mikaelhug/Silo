@@ -271,15 +271,34 @@ struct SteamBottleTests {
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("steamwebhelper_wrap.tmp").path))
     }
 
+    @Test("an unreadable steamwebhelper.exe is left alone, never moved over the preserved _orig")
+    func webHelperWrapperUnreadable() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (bottle, _, paths) = make(tmp)
+        let wine = tmp.url.appendingPathComponent("wine/bin/wine64")
+        let shipped = tmp.url.appendingPathComponent("wine/share/silo/steamwebhelper-wrapper.exe")
+        try FileManager.default.createDirectory(at: shipped.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fakeWrapper("WRAPPER").write(to: shipped)
+        let dir = paths.steamBottleCEFDir.appendingPathComponent("cef.win64")
+        // A path that exists but can't be read as a file (a directory stands in for an I/O failure).
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("steamwebhelper.exe"), withIntermediateDirectories: true)
+        try Data("REAL".utf8).write(to: dir.appendingPathComponent("steamwebhelper_orig.exe"))
+
+        try bottle.installWebHelperWrapper(wine: wine)
+
+        #expect(try contents(dir.appendingPathComponent("steamwebhelper_orig.exe")) == Data("REAL".utf8))
+        #expect(WebHelperProbe.isWrapper(at: dir.appendingPathComponent("steamwebhelper.exe")) == nil)
+    }
+
     @Test("WebHelperProbe tells a wrapper from Steam's genuine webhelper by its bytes")
     func webHelperProbeWrapper() throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let wrapper = try tmp.write("w.exe", "")
         try fakeWrapper("anything").write(to: wrapper)
         let genuine = try tmp.write("g.exe", "MZ steamwebhelper_orig.exe in ASCII is not the marker")
-        #expect(WebHelperProbe.isWrapper(at: wrapper))
-        #expect(!WebHelperProbe.isWrapper(at: genuine))
-        #expect(!WebHelperProbe.isWrapper(at: tmp.url.appendingPathComponent("missing.exe")))
+        #expect(WebHelperProbe.isWrapper(at: wrapper) == true)
+        #expect(WebHelperProbe.isWrapper(at: genuine) == false)
+        #expect(WebHelperProbe.isWrapper(at: tmp.url.appendingPathComponent("missing.exe")) == nil)   // unknown
     }
 
     @Test("WebHelperProbe extracts exactly-40-hex CEF API hashes and flags a webhelper/libcef mismatch")

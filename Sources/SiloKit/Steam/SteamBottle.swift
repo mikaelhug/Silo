@@ -573,7 +573,7 @@ public struct SteamBottle: Sendable {
             // What `helper` IS decides what to keep — read from its bytes, never inferred from whether
             // `_orig` exists: a Steam update writes a NEW genuine webhelper next to the OLD preserved `_orig`,
             // and treating that as a stale wrapper deleted the only binary matching the updated CEF (#10).
-            let helperIsWrapper = WebHelperProbe.isWrapper(at: helper)
+            guard let helperIsWrapper = WebHelperProbe.isWrapper(at: helper) else { continue }   // unreadable
             // Stage the wrapper copy FIRST, then swap it in with renames only — so a copy failure (the one
             // step doing real byte I/O) disturbs nothing, and we can never strand the CEF dir with the real
             // webhelper preserved as `…_orig.exe` but no `steamwebhelper.exe` in place (→ black login, no
@@ -606,23 +606,26 @@ public struct SteamBottle: Sendable {
         guard let dirs = try? fileManager.contentsOfDirectory(
             at: cefDir, includingPropertiesForKeys: nil) else { return [] }
         return dirs
-            .map { $0.appendingPathComponent("steamwebhelper.exe") }
+            .map { $0.appendingPathComponent(Self.webHelperName) }
             .filter { fileManager.fileExists(atPath: $0.path) }
     }
 
+    /// The webhelper Steam runs — Silo's wrapper once wrapped.
+    static let webHelperName = "steamwebhelper.exe"
     /// The name the wrapper execs: Steam's genuine webhelper, preserved beside the wrapper.
     static let realWebHelperName = "steamwebhelper_orig.exe"
 
     /// CEF dirs whose preserved genuine webhelper (`_orig`, run by the wrapper) was built for a different
     /// CEF than the `libcef.dll` beside it — so the client can never start its UI there. This is the state
     /// the pre-fix wrapper left behind after a Steam update (#10): the matching webhelper is GONE (Silo
-    /// deleted it), so re-wrapping can't fix it; only Steam's own file repair can (`repairClient`). Only
-    /// dirs the wrapper actually fronts count — an unwrapped dir runs its own genuine binary.
+    /// deleted it), so re-wrapping can't fix it; only Steam's own file repair can
+    /// (`SteamClientSession.repairStaleWebHelpers`). Only dirs the wrapper actually fronts count — an
+    /// unwrapped dir runs its own genuine binary.
     func staleWebHelperDirs() -> [URL] {
         webHelpers().compactMap { helper in
             let dir = helper.deletingLastPathComponent()
             let real = dir.appendingPathComponent(Self.realWebHelperName)
-            guard fileManager.fileExists(atPath: real.path), WebHelperProbe.isWrapper(at: helper) else { return nil }
+            guard fileManager.fileExists(atPath: real.path), WebHelperProbe.isWrapper(at: helper) == true else { return nil }
             return WebHelperProbe.isStale(helper: real, libcef: dir.appendingPathComponent("libcef.dll")) ? dir : nil
         }
     }
@@ -630,10 +633,7 @@ public struct SteamBottle: Sendable {
     /// Whether every dir in `dirs` holds Steam's genuine webhelper again (not a wrapper) — the signal that a
     /// verifying launch (`launchForUpdate`) has restored the files a stale wrap was missing.
     func webHelpersRestored(in dirs: [URL]) -> Bool {
-        dirs.allSatisfy { dir in
-            let helper = dir.appendingPathComponent("steamwebhelper.exe")
-            return fileManager.fileExists(atPath: helper.path) && !WebHelperProbe.isWrapper(at: helper)
-        }
+        dirs.allSatisfy { WebHelperProbe.isWrapper(at: $0.appendingPathComponent(Self.webHelperName)) == false }
     }
 
     // MARK: - Launch

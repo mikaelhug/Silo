@@ -240,7 +240,7 @@ struct SteamClientSessionTests {
     /// A session whose wine runtime ships the wrapper, plus a wrapped cef.win64 dir whose preserved `_orig`
     /// carries CEF hash `origHash` beside a libcef carrying `libHash`.
     private func makeWrapped(_ tmp: TempDir, origHash: String, libHash: String)
-        -> (SteamClientSession, FakeProcessRunner, URL, Data) {
+        -> (SteamClientSession, FakeProcessRunner, URL, Data, AppPaths) {
         let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
         let fake = FakeProcessRunner()
         let session = SteamClientSession(
@@ -260,24 +260,27 @@ struct SteamClientSessionTests {
             .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe")
         try? fm.createDirectory(at: shipped.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? wrapper.write(to: shipped)
+        try? fm.createDirectory(at: paths.steamBottleLog.deletingLastPathComponent(), withIntermediateDirectories: true)
         let dir = paths.steamBottleCEFDir.appendingPathComponent("cef.win64")
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         try? wrapper.write(to: dir.appendingPathComponent("steamwebhelper.exe"))
         try? Data("MZ\0\(origHash)\0".utf8).write(to: dir.appendingPathComponent("steamwebhelper_orig.exe"))
         try? Data("lib\0\(libHash)\0".utf8).write(to: dir.appendingPathComponent("libcef.dll"))
-        return (session, fake, dir, wrapper)
+        return (session, fake, dir, wrapper, paths)
     }
 
     @Test("a stale wrapped webhelper is repaired by one verifying launch, then re-wrapped, before Steam starts")
     func repairsStaleWebHelper() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let old = String(repeating: "a", count: 40), new = String(repeating: "b", count: 40)
-        let (session, fake, dir, wrapper) = makeWrapped(tmp, origHash: old, libHash: new)
+        let (session, fake, dir, wrapper, paths) = makeWrapped(tmp, origHash: old, libHash: new)
         let repaired = Data("MZ\0\(new)\0".utf8)
-        // Steam's verifying launch (no `explorer` desktop) restores the genuine webhelper for the new CEF.
+        // Steam's verifying launch (no `explorer` desktop) restores the genuine webhelper for the new CEF and
+        // commits the repair transaction ("Update complete" in the bottle log).
         fake.onRun = { inv in
             if inv.detached, inv.arguments.first?.hasSuffix("steam.exe") == true {
                 try? repaired.write(to: dir.appendingPathComponent("steamwebhelper.exe"))
+                try? "Update complete, launching Steam...\n".write(to: paths.steamBottleLog, atomically: true, encoding: .utf8)
             }
         }
 
@@ -296,7 +299,7 @@ struct SteamClientSessionTests {
     func healthyWebHelperNoRepair() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let hash = String(repeating: "a", count: 40)
-        let (session, fake, _, _) = makeWrapped(tmp, origHash: hash, libHash: hash)
+        let (session, fake, _, _, _) = makeWrapped(tmp, origHash: hash, libHash: hash)
 
         #expect(await session.ensureRunning())
 
@@ -304,5 +307,27 @@ struct SteamClientSessionTests {
         #expect(detached.count == 1)
         #expect(detached.first?.arguments.first == "explorer")
         #expect(!fake.invocations.contains { $0.arguments.contains("taskkill") })
+    }
+
+    @Test("a repair that never commits fails fast, stops Steam, and reports instead of launching a broken client")
+    func failedRepairReports() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let old = String(repeating: "a", count: 40), new = String(repeating: "b", count: 40)
+        let (session, fake, dir, wrapper, _) = makeWrapped(tmp, origHash: old, libHash: new)
+        session.repairTimeout = 30   // must NOT be what ends the wait
+        // Steam's verifying launch dies at once (offline, missing package…) without restoring or committing.
+        fake.onRun = { inv in
+            if inv.detached, inv.arguments.first?.hasSuffix("steam.exe") == true { fake.setAlive(4242, false) }
+        }
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        #expect(await session.ensureRunning() == false)
+
+        #expect(clock.now - start < .seconds(5))                                   // gave up on the dead pid
+        #expect(session.launchError?.contains("couldn't be repaired") == true)
+        #expect(fake.invocations.filter(\.detached).count == 1)                    // no normal launch after
+        #expect(fake.invocations.contains { $0.arguments.contains("taskkill") })
+        #expect(try Data(contentsOf: dir.appendingPathComponent("steamwebhelper.exe")) == wrapper)   // untouched
     }
 }

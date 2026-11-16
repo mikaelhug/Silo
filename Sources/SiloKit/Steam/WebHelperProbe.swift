@@ -15,9 +15,11 @@ enum WebHelperProbe {
     /// references it. Verified on both the wrapper and the genuine binaries.
     static let wrapperMarker = Data("steamwebhelper_orig.exe".utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] })
 
-    /// Whether the file at `url` is a Silo wrapper (any version) rather than Steam's genuine webhelper.
-    static func isWrapper(at url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url, options: .alwaysMapped) else { return false }
+    /// Whether the file at `url` is a Silo wrapper (any version) rather than Steam's genuine webhelper — nil
+    /// when it can't be read. Callers must treat nil as "unknown, touch nothing": guessing "genuine" would
+    /// move a wrapper over the preserved `_orig` and lose the real binary.
+    static func isWrapper(at url: URL) -> Bool? {
+        guard let data = try? Data(contentsOf: url, options: .alwaysMapped) else { return nil }
         return data.range(of: wrapperMarker) != nil
     }
 
