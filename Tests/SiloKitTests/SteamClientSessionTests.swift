@@ -234,4 +234,75 @@ struct SteamClientSessionTests {
         let launch = try #require(fake.invocations.last { $0.detached })
         #expect(launch.arguments.prefix(2) == ["explorer", "/desktop=Silo,2560x1440"])
     }
+
+    // MARK: - Stale-webhelper repair (#10)
+
+    /// A session whose wine runtime ships the wrapper, plus a wrapped cef.win64 dir whose preserved `_orig`
+    /// carries CEF hash `origHash` beside a libcef carrying `libHash`.
+    private func makeWrapped(_ tmp: TempDir, origHash: String, libHash: String)
+        -> (SteamClientSession, FakeProcessRunner, URL, Data) {
+        let paths = AppPaths(supportDir: tmp.url.appendingPathComponent("Silo"))
+        let fake = FakeProcessRunner()
+        let session = SteamClientSession(
+            bottle: SteamBottle(runner: fake, session: FakeURLProtocol.makeSession(), paths: paths),
+            orchestrator: LaunchOrchestrator(runner: fake, linker: GraphicsLinker()),
+            screenGeometry: { "1920x1080" })
+        let wine = tmp.url.appendingPathComponent("wine/bin/wine64")
+        session.updateWine(wine)
+        session.readinessTimeout = 0
+        session.warmUpPollInterval = 0.01
+        session.warmUpCefSettleSeconds = 0
+        session.warmUpForceQuitSettle = 0
+        session.repairTimeout = 1
+        let wrapper = Data("WRAPPER".utf8) + WebHelperProbe.wrapperMarker
+        let fm = FileManager.default
+        let shipped = wine.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe")
+        try? fm.createDirectory(at: shipped.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? wrapper.write(to: shipped)
+        let dir = paths.steamBottleCEFDir.appendingPathComponent("cef.win64")
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? wrapper.write(to: dir.appendingPathComponent("steamwebhelper.exe"))
+        try? Data("MZ\0\(origHash)\0".utf8).write(to: dir.appendingPathComponent("steamwebhelper_orig.exe"))
+        try? Data("lib\0\(libHash)\0".utf8).write(to: dir.appendingPathComponent("libcef.dll"))
+        return (session, fake, dir, wrapper)
+    }
+
+    @Test("a stale wrapped webhelper is repaired by one verifying launch, then re-wrapped, before Steam starts")
+    func repairsStaleWebHelper() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let old = String(repeating: "a", count: 40), new = String(repeating: "b", count: 40)
+        let (session, fake, dir, wrapper) = makeWrapped(tmp, origHash: old, libHash: new)
+        let repaired = Data("MZ\0\(new)\0".utf8)
+        // Steam's verifying launch (no `explorer` desktop) restores the genuine webhelper for the new CEF.
+        fake.onRun = { inv in
+            if inv.detached, inv.arguments.first?.hasSuffix("steam.exe") == true {
+                try? repaired.write(to: dir.appendingPathComponent("steamwebhelper.exe"))
+            }
+        }
+
+        #expect(await session.ensureRunning())
+
+        let detached = fake.invocations.filter(\.detached)
+        #expect(detached.count == 2)
+        #expect(detached.first?.arguments.contains("-noverifyfiles") == false)   // verifying: Steam repairs
+        #expect(detached.last?.arguments.first == "explorer")                    // then the normal launch
+        #expect(fake.invocations.contains { $0.arguments.contains("taskkill") })  // repaired client stopped
+        #expect(try Data(contentsOf: dir.appendingPathComponent("steamwebhelper.exe")) == wrapper)
+        #expect(try Data(contentsOf: dir.appendingPathComponent("steamwebhelper_orig.exe")) == repaired)
+    }
+
+    @Test("a healthy wrapped webhelper launches straight away, with no repair launch")
+    func healthyWebHelperNoRepair() async throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let hash = String(repeating: "a", count: 40)
+        let (session, fake, _, _) = makeWrapped(tmp, origHash: hash, libHash: hash)
+
+        #expect(await session.ensureRunning())
+
+        let detached = fake.invocations.filter(\.detached)
+        #expect(detached.count == 1)
+        #expect(detached.first?.arguments.first == "explorer")
+        #expect(!fake.invocations.contains { $0.arguments.contains("taskkill") })
+    }
 }

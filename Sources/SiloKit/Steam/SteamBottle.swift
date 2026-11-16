@@ -569,7 +569,11 @@ public struct SteamBottle: Sendable {
         for helper in webHelpers() {
             if fileManager.contentsEqual(atPath: helper.path, andPath: wrapper.path) { continue }   // already wrapped
             let dir = helper.deletingLastPathComponent()
-            let real = dir.appendingPathComponent("steamwebhelper_orig.exe")
+            let real = dir.appendingPathComponent(Self.realWebHelperName)
+            // What `helper` IS decides what to keep — read from its bytes, never inferred from whether
+            // `_orig` exists: a Steam update writes a NEW genuine webhelper next to the OLD preserved `_orig`,
+            // and treating that as a stale wrapper deleted the only binary matching the updated CEF (#10).
+            let helperIsWrapper = WebHelperProbe.isWrapper(at: helper)
             // Stage the wrapper copy FIRST, then swap it in with renames only — so a copy failure (the one
             // step doing real byte I/O) disturbs nothing, and we can never strand the CEF dir with the real
             // webhelper preserved as `…_orig.exe` but no `steamwebhelper.exe` in place (→ black login, no
@@ -578,12 +582,13 @@ public struct SteamBottle: Sendable {
             if fileManager.fileExists(atPath: staged.path) { try fileManager.removeItem(at: staged) }
             try fileManager.copyItem(at: wrapper, to: staged)
             do {
-                if fileManager.fileExists(atPath: real.path) {
-                    // Real webhelper already preserved; `helper` is a STALE wrapper — replace just it, so we
-                    // never move a wrapper over the genuine `…_orig.exe`.
+                if helperIsWrapper {
+                    // An older wrapper version: replace just it. Never move a wrapper over `_orig`.
                     try fileManager.removeItem(at: helper)
                 } else {
-                    // `helper` is the real webhelper (fresh install or a Steam update): preserve it once.
+                    // Steam's genuine webhelper (fresh install or a client update) — it's the one matching
+                    // the CEF on disk now, so it supersedes any preserved `_orig`.
+                    if fileManager.fileExists(atPath: real.path) { try fileManager.removeItem(at: real) }
                     try fileManager.moveItem(at: helper, to: real)
                 }
                 try fileManager.moveItem(at: staged, to: helper)   // atomic publish (same-dir rename)
@@ -603,6 +608,32 @@ public struct SteamBottle: Sendable {
         return dirs
             .map { $0.appendingPathComponent("steamwebhelper.exe") }
             .filter { fileManager.fileExists(atPath: $0.path) }
+    }
+
+    /// The name the wrapper execs: Steam's genuine webhelper, preserved beside the wrapper.
+    static let realWebHelperName = "steamwebhelper_orig.exe"
+
+    /// CEF dirs whose preserved genuine webhelper (`_orig`, run by the wrapper) was built for a different
+    /// CEF than the `libcef.dll` beside it — so the client can never start its UI there. This is the state
+    /// the pre-fix wrapper left behind after a Steam update (#10): the matching webhelper is GONE (Silo
+    /// deleted it), so re-wrapping can't fix it; only Steam's own file repair can (`repairClient`). Only
+    /// dirs the wrapper actually fronts count — an unwrapped dir runs its own genuine binary.
+    func staleWebHelperDirs() -> [URL] {
+        webHelpers().compactMap { helper in
+            let dir = helper.deletingLastPathComponent()
+            let real = dir.appendingPathComponent(Self.realWebHelperName)
+            guard fileManager.fileExists(atPath: real.path), WebHelperProbe.isWrapper(at: helper) else { return nil }
+            return WebHelperProbe.isStale(helper: real, libcef: dir.appendingPathComponent("libcef.dll")) ? dir : nil
+        }
+    }
+
+    /// Whether every dir in `dirs` holds Steam's genuine webhelper again (not a wrapper) — the signal that a
+    /// verifying launch (`launchForUpdate`) has restored the files a stale wrap was missing.
+    func webHelpersRestored(in dirs: [URL]) -> Bool {
+        dirs.allSatisfy { dir in
+            let helper = dir.appendingPathComponent("steamwebhelper.exe")
+            return fileManager.fileExists(atPath: helper.path) && !WebHelperProbe.isWrapper(at: helper)
+        }
     }
 
     // MARK: - Launch

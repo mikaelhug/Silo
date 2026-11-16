@@ -3,6 +3,19 @@
 > Updated every iteration. `CLAUDE.md` is the contract; this is the state.
 
 ## Now
+- **🐛 [Issue #10](https://github.com/mikaelhug/Silo/issues/10) — Steam won't open after Steam's own client update (2026-11-16; 571 tests green).**
+  - **Root cause: `installWebHelperWrapper` inferred what `steamwebhelper.exe` was from whether `_orig` existed.**
+    Steam's Nov 12 client update (1788652215 → 1794536281) wrote a NEW genuine webhelper next to the OLD
+    preserved `steamwebhelper_orig.exe`; the next Silo launch took the new binary for a stale wrapper, deleted
+    it, and kept the Sep 3 `_orig`. CEF refuses that against the updated `libcef.dll` ("Failed creating
+    offscreen shared JS context", no webhelper starts), and `-noverifyfiles` means Steam never repairs it.
+  - **Fix:** classify by BYTES (`WebHelperProbe`): every wrapper carries the UTF-16LE `steamwebhelper_orig.exe`
+    literal, the genuine binary doesn't. A genuine webhelper now supersedes any `_orig`.
+  - **Self-heal for bottles already broken:** `staleWebHelperDirs` compares the `_orig`'s embedded CEF API
+    hash (its 40-hex token) with `libcef.dll` — a matched pair shares it (verified on both CEF dirs here). On a
+    mismatch `SteamClientSession` runs ONE verifying launch (`launchForUpdate`), waits for Steam to restore the
+    genuine webhelper, force-quits, then wraps. Verified on-device: the verifying launch restored a 7,515,288-
+    byte webhelper whose hash matches the new libcef, and the login window came back.
 - **🐛 [Issue #9](https://github.com/mikaelhug/Silo/issues/9) — GTA V Enhanced: Rockstar Games Launcher "failed to initialize" under GPTK (2026-11-02; 565 tests green, zero warnings).**
   - **Root cause: D3DMetal has no Direct3D 10 at all.** Disassembled GPTK 4.0b2: `dxgi.DXGID3D10CreateDevice`,
     `dxgi.DXGID3D10RegisterLayers` and `d3d10.D3D10CreateDevice` are each `puts(<signature>); return E_FAIL;`;

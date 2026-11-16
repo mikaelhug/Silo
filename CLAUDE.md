@@ -266,6 +266,14 @@ override set, `Sources/SiloKit/Steam/BottleDefaults.swift`) via one `wine regedi
 `vcruntime140` are installed as native files but **NOT** overridden — Wine's load order picks up the real files
 once present, so no registry override is needed (the earlier `d3dcompiler_47=native` override was removed).
 
+**steamwebhelper wrapper survives Steam client updates (issue #10, 2026-11-16).** `installWebHelperWrapper`
+classifies `steamwebhelper.exe` by its BYTES (`WebHelperProbe.isWrapper`: every wrapper carries the UTF-16LE
+`steamwebhelper_orig.exe` literal), never by whether `_orig` exists — a Steam update writes a NEW genuine
+webhelper beside the OLD `_orig`, and the new one must supersede it. A bottle the old logic already broke (stale
+`_orig` whose embedded CEF API hash isn't in `libcef.dll`, `staleWebHelperDirs`) is healed before launch by one
+verifying `launchForUpdate` (Steam restores its own webhelper), then re-wrapped. Normal launches keep
+`-noverifyfiles`, so Steam never repairs anything on its own.
+
 ## Concurrency model (apply consistently)
 - **Pure & synchronous** (trivially `Sendable`): `ACFTokenizer`, `KeyValuesParser`, `KVNode`,
   decoders, `LaunchPlan` + `makePlan`, `BackendChooser.choose`, `BottleResolver`, `RuntimeRelease`

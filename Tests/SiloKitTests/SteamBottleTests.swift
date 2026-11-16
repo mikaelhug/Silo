@@ -200,43 +200,126 @@ struct SteamBottleTests {
         #expect(FileManager.default.fileExists(atPath: paths.steamBottleCEFDir.path) == false)
     }
 
+    /// A fake Silo wrapper: a tag plus the UTF-16LE `steamwebhelper_orig.exe` literal every real wrapper
+    /// carries (it's how `WebHelperProbe` tells a wrapper from Steam's genuine binary).
+    private func fakeWrapper(_ tag: String) -> Data { Data(tag.utf8) + WebHelperProbe.wrapperMarker }
+
+    private func contents(_ url: URL) throws -> Data { try Data(contentsOf: url) }
+
     @Test("installWebHelperWrapper preserves the real webhelper and drops the wrapper in its place")
     func webHelperWrapper() async throws {
         let tmp = try TempDir(); defer { tmp.cleanup() }
         let (bottle, _, paths) = make(tmp)
         // The wine runtime ships the wrapper at <wineRoot>/share/silo/.
         let wine = tmp.url.appendingPathComponent("wine/bin/wine64")
-        _ = try tmp.write("wine/share/silo/steamwebhelper-wrapper.exe", "WRAPPER")
+        let shipped = tmp.url.appendingPathComponent("wine/share/silo/steamwebhelper-wrapper.exe")
+        try FileManager.default.createDirectory(at: shipped.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fakeWrapper("WRAPPER").write(to: shipped)
         // Steam installed its real webhelper in the bottle.
         let helper = paths.steamBottleCEFDir.appendingPathComponent("cef.win7x64/steamwebhelper.exe")
         try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try "REAL".write(to: helper, atomically: true, encoding: .utf8)
+        try Data("REAL".utf8).write(to: helper)
 
         try bottle.installWebHelperWrapper(wine: wine)
         let orig = helper.deletingLastPathComponent().appendingPathComponent("steamwebhelper_orig.exe")
-        #expect(try String(contentsOf: helper, encoding: .utf8) == "WRAPPER")   // wrapper in place
-        #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")        // real one preserved
+        #expect(try contents(helper) == fakeWrapper("WRAPPER"))   // wrapper in place
+        #expect(try contents(orig) == Data("REAL".utf8))          // real one preserved
 
         // Idempotent: a second call doesn't clobber the preserved real binary.
         try bottle.installWebHelperWrapper(wine: wine)
-        #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")
+        #expect(try contents(orig) == Data("REAL".utf8))
 
         // A NEW wrapper version (changed CEF flags) replaces the stale wrapper but keeps the real `_orig`
         // — must NOT move the stale wrapper over the genuine preserved binary.
-        try "WRAPPER_V2".write(to: wine.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("share/silo/steamwebhelper-wrapper.exe"), atomically: true, encoding: .utf8)
+        try fakeWrapper("WRAPPER_V2").write(to: shipped)
         try bottle.installWebHelperWrapper(wine: wine)
-        #expect(try String(contentsOf: helper, encoding: .utf8) == "WRAPPER_V2")   // new wrapper in place
-        #expect(try String(contentsOf: orig, encoding: .utf8) == "REAL")           // real one still intact
+        #expect(try contents(helper) == fakeWrapper("WRAPPER_V2"))   // new wrapper in place
+        #expect(try contents(orig) == Data("REAL".utf8))             // real one still intact
 
         // A Steam update adds a SECOND cef dir (cef.win64) with a fresh real webhelper — it must ALSO get
         // wrapped, else Steam runs the unwrapped one and the window is black.
         let cef2 = paths.steamBottleCEFDir.appendingPathComponent("cef.win64")
         try FileManager.default.createDirectory(at: cef2, withIntermediateDirectories: true)
-        try "REAL2".write(to: cef2.appendingPathComponent("steamwebhelper.exe"), atomically: true, encoding: .utf8)
+        try Data("REAL2".utf8).write(to: cef2.appendingPathComponent("steamwebhelper.exe"))
         try bottle.installWebHelperWrapper(wine: wine)
-        #expect(try String(contentsOf: cef2.appendingPathComponent("steamwebhelper.exe"), encoding: .utf8) == "WRAPPER_V2")
-        #expect(try String(contentsOf: cef2.appendingPathComponent("steamwebhelper_orig.exe"), encoding: .utf8) == "REAL2")
+        #expect(try contents(cef2.appendingPathComponent("steamwebhelper.exe")) == fakeWrapper("WRAPPER_V2"))
+        #expect(try contents(cef2.appendingPathComponent("steamwebhelper_orig.exe")) == Data("REAL2".utf8))
+    }
+
+    @Test("a Steam update's NEW webhelper replaces the preserved _orig instead of being deleted (#10)")
+    func webHelperWrapperSteamUpdate() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (bottle, _, paths) = make(tmp)
+        let wine = tmp.url.appendingPathComponent("wine/bin/wine64")
+        let shipped = tmp.url.appendingPathComponent("wine/share/silo/steamwebhelper-wrapper.exe")
+        try FileManager.default.createDirectory(at: shipped.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fakeWrapper("WRAPPER").write(to: shipped)
+        let dir = paths.steamBottleCEFDir.appendingPathComponent("cef.win64")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let helper = dir.appendingPathComponent("steamwebhelper.exe")
+        let orig = dir.appendingPathComponent("steamwebhelper_orig.exe")
+        // Wrapped before the update: wrapper in place, the OLD client's webhelper preserved.
+        try fakeWrapper("WRAPPER").write(to: helper)
+        try Data("REAL_OLD".utf8).write(to: orig)
+        // Steam's client update rewrites steamwebhelper.exe with the NEW genuine binary, leaving _orig.
+        try Data("REAL_NEW".utf8).write(to: helper)
+
+        try bottle.installWebHelperWrapper(wine: wine)
+
+        #expect(try contents(helper) == fakeWrapper("WRAPPER"))
+        #expect(try contents(orig) == Data("REAL_NEW".utf8))   // the binary matching the updated CEF wins
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("steamwebhelper_wrap.tmp").path))
+    }
+
+    @Test("WebHelperProbe tells a wrapper from Steam's genuine webhelper by its bytes")
+    func webHelperProbeWrapper() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let wrapper = try tmp.write("w.exe", "")
+        try fakeWrapper("anything").write(to: wrapper)
+        let genuine = try tmp.write("g.exe", "MZ steamwebhelper_orig.exe in ASCII is not the marker")
+        #expect(WebHelperProbe.isWrapper(at: wrapper))
+        #expect(!WebHelperProbe.isWrapper(at: genuine))
+        #expect(!WebHelperProbe.isWrapper(at: tmp.url.appendingPathComponent("missing.exe")))
+    }
+
+    @Test("WebHelperProbe extracts exactly-40-hex CEF API hashes and flags a webhelper/libcef mismatch")
+    func webHelperProbeStale() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let old = String(repeating: "a", count: 40), new = String(repeating: "b", count: 40)
+        #expect(WebHelperProbe.apiHashes(in: Data("\0\(old)\0x\(String(repeating: "c", count: 41))\0\(new)".utf8))
+            == [Data(old.utf8), Data(new.utf8)])
+        let helper = try tmp.write("steamwebhelper_orig.exe", "MZ\0\(old)\0")
+        let matching = try tmp.write("match/libcef.dll", "lib\0\(old)\0")
+        let updated = try tmp.write("update/libcef.dll", "lib\0\(new)\0")
+        #expect(!WebHelperProbe.isStale(helper: helper, libcef: matching))
+        #expect(WebHelperProbe.isStale(helper: helper, libcef: updated))
+        // Fails closed: no recognisable hash, or a missing libcef, is never "stale".
+        let hashless = try tmp.write("plain.exe", "MZ no hash here")
+        #expect(!WebHelperProbe.isStale(helper: hashless, libcef: updated))
+        #expect(!WebHelperProbe.isStale(helper: helper, libcef: tmp.url.appendingPathComponent("nope.dll")))
+    }
+
+    @Test("staleWebHelperDirs reports only wrapped dirs whose _orig doesn't match their libcef")
+    func staleWebHelperDirs() throws {
+        let tmp = try TempDir(); defer { tmp.cleanup() }
+        let (bottle, _, paths) = make(tmp)
+        let old = String(repeating: "a", count: 40), new = String(repeating: "b", count: 40)
+        func cefDir(_ name: String, helper: Data, orig: String?, lib: String) throws -> URL {
+            let dir = paths.steamBottleCEFDir.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try helper.write(to: dir.appendingPathComponent("steamwebhelper.exe"))
+            if let orig { try Data("MZ\0\(orig)\0".utf8).write(to: dir.appendingPathComponent("steamwebhelper_orig.exe")) }
+            try Data("lib\0\(lib)\0".utf8).write(to: dir.appendingPathComponent("libcef.dll"))
+            return dir
+        }
+        let stale = try cefDir("cef.win64", helper: fakeWrapper("W"), orig: old, lib: new)        // #10's state
+        _ = try cefDir("cef.win7x64", helper: fakeWrapper("W"), orig: old, lib: old)            // healthy pair
+        _ = try cefDir("cef.unwrapped", helper: Data("MZ\0\(old)\0".utf8), orig: nil, lib: new) // not wrapped
+
+        #expect(bottle.staleWebHelperDirs().map(\.lastPathComponent) == [stale.lastPathComponent])
+        #expect(!bottle.webHelpersRestored(in: [stale]))
+        try Data("MZ\0\(new)\0".utf8).write(to: stale.appendingPathComponent("steamwebhelper.exe"))   // Steam repaired it
+        #expect(bottle.webHelpersRestored(in: [stale]))
     }
 
     @Test("installCoreFonts runs the FIRST font user-guided (no /Q) and the rest silently, into Fonts")

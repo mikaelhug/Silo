@@ -201,6 +201,36 @@ public final class SteamClientSession {
         try? await Task.sleep(for: .seconds(warmUpForceQuitSettle))   // let the wineserver reap the killed procs
     }
 
+    // MARK: - Stale-webhelper repair (#10)
+
+    var repairTimeout: Double = 180   // cap on the verifying launch's file repair (observed well under a minute)
+
+    /// Heal a bottle whose wrapped webhelper can no longer start: the preserved genuine binary (`_orig`) was
+    /// built for an older CEF than the one on disk — what the pre-fix wrapper left after a Steam client
+    /// update, having deleted the matching binary (#10). Silo can't recreate that file, but Steam can: one
+    /// VERIFYING launch (`launchForUpdate`, no `-noverifyfiles`) re-extracts every file whose size is wrong,
+    /// the wrapper included (verified on-device 2026-11-16: the genuine webhelper came back and matched the
+    /// new `libcef.dll`). Then the caller's `installWebHelperWrapper` promotes that binary to `_orig`. A
+    /// no-op on a healthy bottle — the check is a hash compare, and its file reads run off-main.
+    private func repairStaleWebHelpers(wine: URL) async {
+        let bottle = self.bottle
+        let stale = await Task.detached { bottle.staleWebHelperDirs() }.value
+        guard !stale.isEmpty else { return }
+        _ = try? await bottle.launchForUpdate(wine: wine)
+        var elapsed = 0.0
+        while elapsed < repairTimeout {
+            try? await Task.sleep(for: .seconds(warmUpPollInterval)); elapsed += warmUpPollInterval
+            if bottle.webHelpersRestored(in: stale) {
+                // Let Steam finish writing the rest of the repair before it's stopped.
+                try? await Task.sleep(for: .seconds(warmUpCefSettleSeconds))
+                break
+            }
+        }
+        // The repaired client holds the CEF files open; stop it so the wrap can move them (as in warm-up).
+        await bottle.forceQuit(wine: wine)
+        try? await Task.sleep(for: .seconds(warmUpForceQuitSettle))
+    }
+
     private func startSteam() async {
         guard await launchSteamProcess() != nil else { return }   // spawned detached; we don't track its PID
         // A returned PID only proves `wine` was exec'd, NOT that Steam came up. Clearing launchError here and
@@ -248,7 +278,10 @@ public final class SteamClientSession {
     /// or nil after recording `launchError`.
     private func launchSteamProcess() async -> Int32? {
         do {
-            if let wine = wineBinary { try bottle.installWebHelperWrapper(wine: wine) }
+            if let wine = wineBinary {
+                await repairStaleWebHelpers(wine: wine)
+                try bottle.installWebHelperWrapper(wine: wine)
+            }
             // Sized to the real screen: the client's desktop becomes the display every co-resident game sees.
             return try await bottle.launchSteam(wine: wineBinary, desktopGeometry: screenGeometry())
         } catch {
